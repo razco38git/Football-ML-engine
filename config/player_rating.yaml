@@ -1,0 +1,147 @@
+# Player rating configuration.
+#
+# Every judgement call in the rating lives here rather than in code, so the
+# model can be argued with. If you think buildup play is undervalued for
+# defenders, change the number and re-run.
+#
+# How a rating is produced:
+#   1. Each metric is converted to a per-90 rate.
+#   2. Within a position group and season, each rate becomes a percentile
+#      (0-1) against that group's peers. This is the free equivalent of a
+#      scouting percentile report, and it means a defender is only ever
+#      compared with defenders.
+#   3. Percentiles combine into sub-ratings using `weights` below.
+#   4. Sub-ratings combine into one composite using `sub_rating_weights`.
+#   5. The composite is shrunk toward the position mean for players with few
+#      minutes, then mapped onto the 0-99 scale by `scale`.
+
+# Minimum minutes before a player is rated at all. Below this the sample is too
+# thin for percentiles to mean anything, however hard shrinkage works.
+min_minutes: 450
+
+# Minimum peers in a (position, season) pool before it is rated at all.
+#
+# A percentile is only meaningful against a real distribution. Five matchweeks
+# into a season barely anyone has cleared the minutes floor, so whoever has
+# lands in the 99th percentile of a pool of twelve. That is how a player with
+# exactly 450 minutes came out rated 94.
+#
+# Groups below this size are left unrated, and the player's last complete
+# season is shown instead -- which is the honest answer to "how good are they?"
+# five games in.
+min_group_size: 40
+
+# Empirical-Bayes shrinkage strength, in 90-minute appearances.
+#
+# A player's composite is pulled toward their position's mean with weight
+# k / (n + k), where n is nineties played. At k = 8, a player with 8 full
+# matches sits halfway between their own numbers and the positional average;
+# by 30 matches they are ~79% their own.
+#
+# Without this, a striker who scored twice in 500 minutes rates above Haaland.
+shrinkage_nineties: 8
+
+# Sub-ratings per position group. Weights within each sub-rating are relative
+# and get normalised, so only their ratios matter.
+#
+# Goalkeepers are absent on purpose: Understat carries no saves, no post-shot
+# xG and nothing defensive, so there is no honest way to rate them from this
+# source. They are reported as unrated rather than given an invented number.
+positions:
+  F:
+    label: Forward
+    sub_ratings:
+      finishing:
+        np_xg_per90: 3.0
+        np_goals_per90: 2.0
+        finishing_delta_per90: 0.5   # deliberately small: mostly variance
+      creation:
+        xa_per90: 2.5
+        key_passes_per90: 1.5
+        assists_per90: 1.0
+      volume:
+        shots_per90: 1.0
+      involvement:
+        xg_chain_share: 0.75
+        xg_chain_per90: 0.75
+        xg_buildup_share: 0.25
+        xg_buildup_per90: 0.25
+    sub_rating_weights:
+      finishing: 0.45
+      creation: 0.22
+      volume: 0.13
+      involvement: 0.20
+
+  M:
+    label: Midfielder
+    sub_ratings:
+      creation:
+        xa_per90: 3.0
+        key_passes_per90: 2.0
+        assists_per90: 1.0
+      involvement:
+        xg_chain_share: 1.0
+        xg_chain_per90: 1.0
+        xg_buildup_share: 1.0        # buildup matters most in midfield
+        xg_buildup_per90: 1.0
+      finishing:
+        np_xg_per90: 2.0
+        np_goals_per90: 1.5
+        finishing_delta_per90: 0.3
+      volume:
+        shots_per90: 1.0
+    sub_rating_weights:
+      creation: 0.35
+      involvement: 0.35
+      finishing: 0.20
+      volume: 0.10
+
+  D:
+    label: Defender
+    sub_ratings:
+      # Understat has no tackles, interceptions or clearances, so defending
+      # proper cannot be measured here. What a defender's row does capture is
+      # their contribution to attacking moves, which is why full-backs will
+      # rate above centre-backs under this model. Stated plainly rather than
+      # hidden: this rates a defender's attacking involvement, not their
+      # defending.
+      involvement:
+        xg_buildup_share: 1.5
+        xg_buildup_per90: 1.5
+        xg_chain_share: 1.0
+        xg_chain_per90: 1.0
+      creation:
+        xa_per90: 2.0
+        key_passes_per90: 1.5
+        assists_per90: 1.0
+      finishing:
+        np_xg_per90: 1.0
+        np_goals_per90: 1.0
+    sub_rating_weights:
+      involvement: 0.55
+      creation: 0.35
+      finishing: 0.10
+
+# Discipline applies to every outfield group and only ever subtracts.
+discipline:
+  weight: 0.03
+  metrics:
+    yellow_cards_per90: 1.0
+    red_cards_per90: 3.0
+
+# Composite percentile -> 0-99, by interpolating between these anchors.
+#
+# Shaped to match how people already read football ratings: a crowded middle
+# around 65-72, a long thin tail at the top, and nobody at 99. The scale is
+# asserted here rather than fitted to EA's numbers, which keeps the rating
+# honestly ours and removes a dependency on a scraper that is currently broken.
+scale:
+  - [0.00, 48]
+  - [0.10, 58]
+  - [0.25, 63]
+  - [0.50, 68]
+  - [0.75, 74]
+  - [0.90, 79]
+  - [0.97, 85]
+  - [0.995, 90]
+  - [1.00, 94]
