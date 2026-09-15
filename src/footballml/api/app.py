@@ -1,0 +1,351 @@
+"""The prediction API.
+
+Read endpoints serve precomputed or cached results. Nothing here scrapes a
+source during a request, and nothing retrains -- the model is loaded once at
+startup from a versioned artifact.
+
+``POST /predict`` is the one live-inference path: it builds features for an
+arbitrary pairing on demand, which is what makes a "what if these two played?"
+control possible in the UI.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+import pandas as pd
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+
+from footballml import registry, store
+from footballml.api.schemas import (
+    Accuracy,
+    CalibrationBin,
+    Driver,
+    Health,
+    ModelInfo,
+    Prediction,
+    PredictRequest,
+)
+from footballml.data import ODDS_COLUMNS, PROCESSED_DIR, load_team_match_history
+from footballml.features.build import build_match_features, build_upcoming_features
+from footballml.ingest.matchhistory import LEAGUES, fetch_fixtures
+from footballml.labels import humanise
+from footballml.models.evaluate import (
+    base_rate_probs,
+    calibration_table,
+    evaluate,
+    odds_implied_probs,
+)
+from footballml.models.match_model import feature_columns
+
+logger = logging.getLogger(__name__)
+
+#: Upcoming fixtures change at most a few times a day, and predicting them costs
+#: a feature build over the full history. Cache rather than recompute per request.
+FIXTURE_CACHE_TTL = timedelta(minutes=30)
+
+#: Outcome probability columns, in H/D/A order.
+PROB_COLUMNS = ["prob_home_win", "prob_draw", "prob_away_win"]
+
+
+@dataclass
+class State:
+    """Everything loaded once at startup and shared across requests."""
+
+    model: Any = None
+    metadata: registry.ModelMetadata | None = None
+    tmh: pd.DataFrame = field(default_factory=pd.DataFrame)
+    features: pd.DataFrame = field(default_factory=pd.DataFrame)
+    columns: list[str] = field(default_factory=list)
+    _fixtures: pd.DataFrame | None = None
+    _fixtures_at: datetime | None = None
+
+    @property
+    def fixtures_are_stale(self) -> bool:
+        if self._fixtures is None or self._fixtures_at is None:
+            return True
+        return datetime.now(UTC) - self._fixtures_at > FIXTURE_CACHE_TTL
+
+
+state = State()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """Load the model and history once, at startup."""
+    state.model, state.metadata = registry.load()
+    logger.info("Loaded model %s", state.metadata.version)
+
+    path = PROCESSED_DIR / "team_match_history_all.csv"
+    state.tmh = load_team_match_history(path)
+    state.features = build_match_features(state.tmh)
+    state.columns = feature_columns(state.features)
+    logger.info("Loaded %d matches", len(state.features))
+    yield
+
+
+app = FastAPI(
+    title="Football ML Engine",
+    description="Match outcome and expected-goals predictions for the top 5 European leagues.",
+    version="0.1.0",
+    lifespan=lifespan,
+)
+
+# The frontend is served from a different origin in development and from a CDN
+# in production, so browser requests are cross-origin either way.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
+
+def _require_model() -> tuple[Any, registry.ModelMetadata]:
+    if state.model is None or state.metadata is None:
+        raise HTTPException(503, "Model not loaded")
+    return state.model, state.metadata
+
+
+def _to_predictions(
+    frame: pd.DataFrame, drivers: list[dict] | None = None
+) -> list[Prediction]:
+    """Convert a scored feature frame into API responses."""
+    out = []
+    for i, (_, r) in enumerate(frame.iterrows()):
+        entry = Prediction(
+            league=r["League"],
+            date=pd.Timestamp(r["Date"]).date(),
+            home_team=r["HomeTeam"],
+            away_team=r["AwayTeam"],
+            expected_goals_home=round(float(r["expected_goals_home"]), 3),
+            expected_goals_away=round(float(r["expected_goals_away"]), 3),
+            prob_home_win=round(float(r["prob_home_win"]), 4),
+            prob_draw=round(float(r["prob_draw"]), 4),
+            prob_away_win=round(float(r["prob_away_win"]), 4),
+            predicted_outcome=r["predicted_outcome"],
+            modal_score_home=int(r["modal_score_home"]),
+            modal_score_away=int(r["modal_score_away"]),
+            prob_over_2_5=round(float(r["prob_over_2_5"]), 4),
+            prob_btts=round(float(r["prob_btts"]), 4),
+        )
+        if pd.notna(r.get("FTR")):
+            entry.actual_home_goals = int(r["FTHG"])
+            entry.actual_away_goals = int(r["FTAG"])
+            entry.actual_result = r["FTR"]
+        if pd.notna(r.get("B365H")):
+            market = odds_implied_probs(pd.DataFrame([r]), ODDS_COLUMNS)[0]
+            entry.market_prob_home = round(float(market[0]), 4)
+            entry.market_prob_draw = round(float(market[1]), 4)
+            entry.market_prob_away = round(float(market[2]), 4)
+        if drivers:
+            for side, target in (("home", "drivers_home"), ("away", "drivers_away")):
+                setattr(
+                    entry,
+                    target,
+                    [
+                        Driver(feature=n, label=humanise(n), contribution=round(v, 4))
+                        for n, v in drivers[i][side]
+                    ],
+                )
+        out.append(entry)
+    return out
+
+
+@app.get("/health", response_model=Health)
+def health() -> Health:
+    _, meta = _require_model()
+    return Health(
+        status="ok",
+        model_version=meta.version,
+        trained_through=pd.Timestamp(meta.trained_through).date(),
+        n_train=meta.n_train,
+    )
+
+
+@app.get("/leagues")
+def leagues() -> dict[str, str]:
+    """Division codes to full names."""
+    return LEAGUES
+
+
+@app.get("/models", response_model=list[ModelInfo])
+def models() -> list[ModelInfo]:
+    """Every trained version, newest first, with its held-out metrics."""
+    return [
+        ModelInfo(
+            version=m.version,
+            trained_at=m.trained_at,
+            trained_through=pd.Timestamp(m.trained_through).date(),
+            n_train=m.n_train,
+            n_features=m.n_features,
+            leagues=m.leagues,
+            rho=m.rho,
+            metrics=m.metrics,
+        )
+        for m in registry.list_versions()
+    ]
+
+
+@app.get("/fixtures/upcoming", response_model=list[Prediction])
+def upcoming(
+    league: str | None = Query(None, description="Division code, e.g. E0"),
+    explain: bool = Query(False, description="Include SHAP drivers"),
+) -> list[Prediction]:
+    """Predictions for fixtures that have not been played."""
+    model, _ = _require_model()
+
+    if state.fixtures_are_stale:
+        state._fixtures = fetch_fixtures()
+        state._fixtures_at = datetime.now(UTC)
+
+    fixtures = state._fixtures
+    if fixtures is None or fixtures.empty:
+        return []
+    if league:
+        fixtures = fixtures[fixtures["League"] == league]
+        if fixtures.empty:
+            return []
+
+    scored = build_upcoming_features(state.tmh, fixtures)
+    if scored.empty:
+        return []
+
+    odds_cols = [c for c in ODDS_COLUMNS if c in fixtures.columns]
+    if odds_cols:
+        key = ["League", "Date", "HomeTeam", "AwayTeam"]
+        scored = scored.merge(
+            fixtures[[*key, *odds_cols]].assign(Date=pd.to_datetime(fixtures["Date"])),
+            on=key,
+            how="left",
+        )
+
+    preds = model.predict_frame(scored[state.columns])
+    frame = pd.concat([scored.reset_index(drop=True), preds.reset_index(drop=True)], axis=1)
+    drivers = model.explain(scored[state.columns], top_n=5) if explain else None
+    return _to_predictions(frame, drivers)
+
+
+@app.get("/matches", response_model=list[Prediction])
+def matches(
+    league: str | None = Query(None),
+    limit: int = Query(50, le=500),
+    offset: int = Query(0, ge=0),
+) -> list[Prediction]:
+    """Recent played matches, predicted and compared against what happened.
+
+    Scored with the current model, so these are retrospective rather than a
+    track record. The honest track record lives at ``/accuracy``, which reads
+    only predictions stored before kickoff.
+    """
+    model, _ = _require_model()
+
+    played = state.features[state.features["FTR"].notna()]
+    if league:
+        played = played[played["League"] == league]
+    window = played.sort_values("Date", ascending=False).iloc[offset : offset + limit]
+    if window.empty:
+        return []
+
+    preds = model.predict_frame(window[state.columns])
+    frame = pd.concat([window.reset_index(drop=True), preds.reset_index(drop=True)], axis=1)
+    return _to_predictions(frame)
+
+
+@app.post("/predict", response_model=Prediction)
+def predict(request: PredictRequest) -> Prediction:
+    """Predict any pairing, using each side's form as of today.
+
+    The only endpoint that runs the model live rather than serving stored output.
+    """
+    model, _ = _require_model()
+
+    known = set(state.tmh["Team"].unique())
+    for team in (request.home_team, request.away_team):
+        if team not in known:
+            raise HTTPException(404, f"Unknown team {team!r}")
+    if request.home_team == request.away_team:
+        raise HTTPException(400, "A team cannot play itself")
+
+    league = request.league
+    if league is None:
+        recent = state.tmh[state.tmh["Team"] == request.home_team].nlargest(1, "Date")
+        league = str(recent["League"].iloc[0])
+
+    fixture = pd.DataFrame(
+        [
+            {
+                "League": league,
+                "Season": str(state.tmh["Season"].max()),
+                # Dated a day ahead so it sorts after every played match and
+                # therefore picks up each side's complete history.
+                "Date": pd.Timestamp.today().normalize() + pd.Timedelta(days=1),
+                "HomeTeam": request.home_team,
+                "AwayTeam": request.away_team,
+            }
+        ]
+    )
+
+    scored = build_upcoming_features(state.tmh, fixture)
+    if scored.empty:
+        raise HTTPException(422, "Could not build features for that pairing")
+
+    preds = model.predict_frame(scored[state.columns])
+    frame = pd.concat([scored.reset_index(drop=True), preds.reset_index(drop=True)], axis=1)
+    drivers = model.explain(scored[state.columns], top_n=5) if request.explain else None
+    return _to_predictions(frame, drivers)[0]
+
+
+@app.get("/accuracy", response_model=Accuracy)
+def accuracy(league: str | None = Query(None)) -> Accuracy:
+    """Track record over predictions stored *before* kickoff and later settled."""
+    rows = store.settled()
+    if rows.empty:
+        raise HTTPException(
+            404,
+            "No settled predictions yet. Predictions accumulate once "
+            "`python -m pipelines.score_upcoming` runs regularly.",
+        )
+    if league:
+        rows = rows[rows["League"] == league]
+        if rows.empty:
+            raise HTTPException(404, f"No settled predictions for {league}")
+
+    probs = rows[PROB_COLUMNS].to_numpy()
+    actual = rows["actual_result"]
+    metrics = evaluate(actual, probs)
+
+    result = Accuracy(
+        n=metrics["n"],
+        accuracy=round(metrics["accuracy"], 4),
+        rps=round(metrics["rps"], 4),
+        log_loss=round(metrics["log_loss"], 4),
+        brier=round(metrics["brier"], 4),
+        rps_base_rate=round(evaluate(actual, base_rate_probs(actual, len(rows)))["rps"], 4),
+        by_league={
+            str(lg): round(
+                evaluate(g["actual_result"], g[PROB_COLUMNS].to_numpy())["rps"], 4
+            )
+            for lg, g in rows.groupby("League")
+        },
+        calibration=[
+            CalibrationBin(**row)
+            for row in calibration_table(actual, probs)
+            .drop(columns=["gap"])
+            .to_dict("records")
+        ],
+    )
+
+    if all(c in rows.columns for c in ODDS_COLUMNS):
+        with_odds = rows[rows[list(ODDS_COLUMNS)].notna().all(axis=1)]
+        if not with_odds.empty:
+            market = odds_implied_probs(with_odds, ODDS_COLUMNS)
+            result.rps_market = round(evaluate(with_odds["actual_result"], market)["rps"], 4)
+
+    return result

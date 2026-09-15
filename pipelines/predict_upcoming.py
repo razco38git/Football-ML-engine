@@ -32,9 +32,9 @@ from footballml.features.build import (  # noqa: E402
     build_upcoming_features,
 )
 from footballml.ingest.matchhistory import LEAGUES, fetch_fixtures  # noqa: E402
+from footballml.labels import humanise  # noqa: E402
 from footballml.models.evaluate import odds_implied_probs  # noqa: E402
 from footballml.models.match_model import MatchPredictor, feature_columns  # noqa: E402
-from pipelines.predict import humanise  # noqa: E402
 
 
 def main() -> None:

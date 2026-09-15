@@ -13,6 +13,10 @@ data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 
+# Trained model artifacts. Rebuilt by `python -m pipelines.train`; binaries do
+# not belong in git, and the metadata is not useful without them.
+models/
+
 # Environment
 .env
 

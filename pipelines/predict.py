@@ -23,74 +23,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from footballml.data import PROCESSED_DIR, load_team_match_history  # noqa: E402
 from footballml.features.build import build_match_features  # noqa: E402
+from footballml.labels import humanise  # noqa: E402
 from footballml.models.evaluate import evaluate  # noqa: E402
 from footballml.models.match_model import MatchPredictor, feature_columns  # noqa: E402
-
-#: Metric stems rewritten for display.
-_METRIC_NAMES = {
-    "xg_for": "xG created",
-    "xg_against": "xG conceded",
-    "xg_diff": "xG difference",
-    "xg_overperformance": "finishing vs xG",
-    "xg_per_shot": "chance quality",
-    "npxg_for": "non-penalty xG created",
-    "npxg_against": "non-penalty xG conceded",
-    "npxg_diff": "non-penalty xG difference",
-    "goals_for": "goals scored",
-    "goals_against": "goals conceded",
-    "goal_diff": "goal difference",
-    "shots_for": "shots",
-    "shots_against": "shots faced",
-    "shots_on_target_for": "shots on target",
-    "shots_on_target_against": "shots on target faced",
-    "shot_accuracy": "shooting accuracy",
-    "deep_completions": "passes near the box",
-    "ppda": "pressing intensity",
-    "points": "points",
-    "wins": "wins",
-    "draws": "draws",
-    "losses": "losses",
-    "days_since_last_match": "days of rest",
-    "league_code": "league",
-}
-
-
-def humanise(name: str) -> str:
-    """Turn a feature name into something a reader can parse at a glance.
-
-    Order matters. The trailing ``_diff`` marking a home-minus-away difference
-    must be stripped before metric names are substituted, or a feature like
-    ``goal_diff_last_5_diff`` has both its ``_diff`` parts rewritten and comes
-    out as "goal edge, last 5 at venue edge".
-    """
-    qualifiers = []
-
-    if name.endswith("_diff"):
-        name = name[: -len("_diff")]
-        qualifiers.append("edge over opponent")
-
-    side = ""
-    for prefix, label in (("home_", "home team"), ("away_", "away team")):
-        if name.startswith(prefix):
-            name = name[len(prefix) :]
-            side = label
-            break
-
-    if name.endswith("_venue"):
-        name = name[: -len("_venue")]
-        qualifiers.append("at this venue")
-
-    window = ""
-    if "_last_" in name:
-        name, _, window_size = name.partition("_last_")
-        window = f"last {window_size}"
-
-    metric = _METRIC_NAMES.get(name, name.replace("_", " "))
-    if window:
-        qualifiers.insert(0, window)
-
-    text = f"{side} {metric}".strip()
-    return f"{text} ({', '.join(qualifiers)})" if qualifiers else text
 
 
 def main() -> None:

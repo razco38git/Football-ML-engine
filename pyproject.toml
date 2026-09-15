@@ -31,6 +31,11 @@ model = [
 api = [
     "fastapi>=0.111",
     "uvicorn[standard]>=0.30",
+    "joblib>=1.3",
+]
+# Postgres is not wired up yet: predictions are stored as CSV via
+# footballml.store, whose interface is narrow enough to swap backends later.
+postgres = [
     "sqlalchemy>=2.0",
     "alembic>=1.13",
     "psycopg[binary]>=3.1",
