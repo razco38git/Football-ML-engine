@@ -41,10 +41,10 @@ logger = logging.getLogger(__name__)
 
 RATING_CONFIG = PROJECT_ROOT / "config" / "player_rating.yaml"
 
-#: Position groups the model will not rate, with the reason shown to users.
-UNRATED_GROUPS = {
-    "GK": "No goalkeeping metrics available (no saves or post-shot xG in source)"
-}
+#: Position groups with no configured rating, keyed to the reason shown to
+#: users. Empty now that FBref supplies goalkeeping stats, but kept as the
+#: mechanism for refusing to invent a number when data is missing.
+UNRATED_GROUPS: dict[str, str] = {}
 
 
 def load_config(path: Path | None = None) -> dict[str, Any]:
@@ -65,13 +65,26 @@ def percentile_within(
 
 
 def _weighted(frame: pd.DataFrame, weights: dict[str, float]) -> pd.Series:
-    """Weighted mean of percentile columns, ignoring any that are absent."""
-    usable = {c: w for c, w in weights.items() if c in frame.columns}
+    """Weighted mean of percentile columns, ignoring any that are absent.
+
+    A **negative weight means lower is better**: the percentile is flipped and
+    the magnitude used as the weight. That is how ``goals_against_per90: -2.0``
+    and ``fouls_per90: -0.5`` are expressed. Subtracting them instead would both
+    corrupt the normaliser and let a metric drag a sub-rating below zero.
+
+    Missing values default to 0.5 -- the middle of the distribution -- so a
+    player with one unavailable metric is treated as average on it rather than
+    worst.
+    """
+    usable = {c: w for c, w in weights.items() if c in frame.columns and w != 0}
     if not usable:
         return pd.Series(np.nan, index=frame.index)
 
-    total = sum(usable.values())
-    stacked = sum(frame[c].fillna(0.5) * w for c, w in usable.items())
+    total = sum(abs(w) for w in usable.values())
+    stacked = sum(
+        (frame[c].fillna(0.5) if w > 0 else 1.0 - frame[c].fillna(0.5)) * abs(w)
+        for c, w in usable.items()
+    )
     return stacked / total
 
 

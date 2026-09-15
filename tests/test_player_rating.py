@@ -115,17 +115,60 @@ def test_low_minutes_are_shrunk_toward_the_mean() -> None:
     assert rated.loc["Regular", "rating"] > rated.loc["Cameo", "rating"]
 
 
-def test_goalkeepers_are_left_unrated() -> None:
-    """Understat has no keeper metrics, so a keeper rating would be invented."""
-    squad = _squad()
-    squad.loc[:9, "position_group"] = "GK"
+def test_goalkeepers_are_rated_from_keeper_metrics() -> None:
+    """Keepers are rated on FBref shot-stopping, not invented from thin air.
 
-    rated = rate_players(squad)
-    keepers = rated[rated["position_group"] == "GK"]
+    Understat alone had nothing for them; once save percentage and goals
+    against are present, a keeper pool large enough to percentile gets rated
+    like any other group.
+    """
+    rng = np.random.default_rng(3)
+    n = 60
+    skill = rng.uniform(0.1, 1.0, n)
+    keepers = pd.DataFrame(
+        {
+            "League": "E0", "Season": "2526",
+            "Player": [f"GK{i}" for i in range(n)],
+            "Team": [f"T{i}" for i in range(n)],
+            "position_group": "GK",
+            "minutes": rng.uniform(900, 3400, n),
+            "save_pct": 55 + skill * 25,
+            "goals_against_per90": 2.2 - skill * 1.4,
+            "clean_sheet_pct": skill * 45,
+            "shots_on_target_against_per90": rng.uniform(2.5, 5.5, n),
+            "penalties_saved_per90": rng.uniform(0, 0.05, n),
+        }
+    )
+    keepers["nineties"] = keepers["minutes"] / 90
 
-    assert not keepers["rated"].any()
-    assert keepers["unrated_reason"].iloc[0] == UNRATED_GROUPS["GK"]
-    assert keepers["rating"].isna().all()
+    rated = rate_players(keepers)
+    assert rated["rated"].all()
+
+    ok = rated["rated"]
+    corr = np.corrcoef(rated.loc[ok, "save_pct"], rated.loc[ok, "rating"].astype(float))[0, 1]
+    assert corr > 0.7, f"keeper rating should track save percentage (r={corr:.2f})"
+
+
+def test_unrated_groups_mechanism_still_works() -> None:
+    """The refusal mechanism survives even though no group currently uses it."""
+    assert isinstance(UNRATED_GROUPS, dict)
+
+
+def test_negative_weights_invert_the_percentile() -> None:
+    """A negative weight means lower is better, not 'subtract from the total'.
+
+    Conceding goals and committing fouls are expressed that way, and getting it
+    wrong would corrupt the normaliser and let a sub-rating go negative.
+    """
+    from footballml.players.rating import _weighted
+
+    frame = pd.DataFrame({"good": [0.9, 0.1], "bad": [0.9, 0.1]})
+    positive = _weighted(frame, {"good": 1.0})
+    inverted = _weighted(frame, {"bad": -1.0})
+
+    assert positive.iloc[0] == pytest.approx(0.9)
+    assert inverted.iloc[0] == pytest.approx(0.1), "high value on a negative metric must score low"
+    assert (inverted >= 0).all() and (inverted <= 1).all()
 
 
 def test_short_seasons_are_left_unrated() -> None:

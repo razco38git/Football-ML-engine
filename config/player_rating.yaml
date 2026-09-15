@@ -90,21 +90,29 @@ positions:
         finishing_delta_per90: 0.3
       volume:
         shots_per90: 1.0
+      defending:
+        interceptions_per90: 2.0
+        tackles_won_per90: 2.0
+        recoveries_per90: 1.0
     sub_rating_weights:
-      creation: 0.35
-      involvement: 0.35
-      finishing: 0.20
-      volume: 0.10
+      creation: 0.28
+      involvement: 0.27
+      finishing: 0.17
+      defending: 0.20
+      volume: 0.08
 
   D:
     label: Defender
     sub_ratings:
-      # Understat has no tackles, interceptions or clearances, so defending
-      # proper cannot be measured here. What a defender's row does capture is
-      # their contribution to attacking moves, which is why full-backs will
-      # rate above centre-backs under this model. Stated plainly rather than
-      # hidden: this rates a defender's attacking involvement, not their
-      # defending.
+      # Defending is now measured directly, from FBref interceptions and
+      # tackles won, and carries the most weight. Before these existed the
+      # group was judged purely on attacking involvement, which put wingers
+      # and attacking full-backs above every genuine centre-back.
+      defending:
+        interceptions_per90: 2.5
+        tackles_won_per90: 2.5
+        recoveries_per90: 1.0
+        fouls_per90: -0.5          # negative: conceding fouls is a cost
       involvement:
         xg_buildup_share: 1.5
         xg_buildup_per90: 1.5
@@ -118,9 +126,35 @@ positions:
         np_xg_per90: 1.0
         np_goals_per90: 1.0
     sub_rating_weights:
-      involvement: 0.55
-      creation: 0.35
-      finishing: 0.10
+      defending: 0.50
+      involvement: 0.25
+      creation: 0.20
+      finishing: 0.05
+
+  GK:
+    label: Goalkeeper
+    sub_ratings:
+      # FBref keeper stats, not FIFA ratings. Save percentage is what happened;
+      # a FIFA rating is an opinion, and SoFIFA is behind Cloudflare anyway.
+      #
+      # Caveat worth knowing: without post-shot xG there is no way to adjust for
+      # shot difficulty, so a keeper behind a poor defence faces harder chances
+      # and will be understated. Workload is carried as a partial counterweight,
+      # since facing more shots and still saving them is genuinely harder.
+      shot_stopping:
+        save_pct: 3.0
+        goals_against_per90: -2.0     # negative: conceding is bad
+      reliability:
+        clean_sheet_pct: 2.0
+      workload:
+        shots_on_target_against_per90: 1.0
+      penalties:
+        penalties_saved_per90: 1.0
+    sub_rating_weights:
+      shot_stopping: 0.60
+      reliability: 0.25
+      workload: 0.10
+      penalties: 0.05
 
 # Discipline applies to every outfield group and only ever subtracts.
 discipline:

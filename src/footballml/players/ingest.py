@@ -138,7 +138,9 @@ def _career_position(df: pd.DataFrame) -> pd.Series:
 
 
 def fetch_player_seasons(
-    leagues: list[str] | None = None, seasons: list[str] | None = None
+    leagues: list[str] | None = None,
+    seasons: list[str] | None = None,
+    with_fbref: bool = True,
 ) -> pd.DataFrame:
     """Fetch per-season player totals and derive per-90 rates.
 
@@ -201,4 +203,19 @@ def fetch_player_seasons(
     # DataFrame rather than a Series, which fails much later and confusingly.
     unique = [c for c in dict.fromkeys(keep) if c in df.columns]
     out = df[unique].rename(columns={"player": "Player", "team": "Team"})
+
+    if with_fbref:
+        # FBref supplies the defensive and goalkeeping metrics Understat has
+        # none of. Matched within league-season-team, so name collisions cannot
+        # pair the wrong players.
+        from footballml.players.fbref import fetch_fbref_stats, match_players
+
+        extra = fetch_fbref_stats(codes, seasons)
+        out = match_players(
+            out,
+            extra,
+            on=["League", "Season", "Team"],
+            fallback_on=["League", "Season"],
+        )
+
     return out.sort_values(["Season", "League", "Player"]).reset_index(drop=True)

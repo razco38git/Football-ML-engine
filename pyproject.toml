@@ -56,7 +56,10 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "PD"]
-ignore = ["PD901"]  # `df` is a fine name for a dataframe
+ignore = [
+    "PD901",  # `df` is a fine name for a dataframe
+    "PD008",  # `.at` is the correct accessor for single-cell scalar access
+]
 
 [tool.mypy]
 python_version = "3.11"
