@@ -196,8 +196,18 @@ def rate_players(
     work["composite"] = weight * work["composite_raw"] + (1 - weight) * prior
 
     # --- 4: map onto 0-99 --------------------------------------------------
+    # Ranked *within position*, not across all players. Ranking globally lets
+    # whichever group has the widest spread dominate both tails: goalkeepers
+    # play whole seasons, so shrinkage barely moves them (median weight 0.78
+    # against 0.66 for forwards), their composites spread twice as wide, and
+    # they took 30% of the top fifty while being 7% of the pool. Midfielders,
+    # the most tightly clustered group, were squeezed out at 10% of 21%.
+    #
+    # Within-position ranking means the best keeper and the best forward land
+    # on the same rating, which is both what the eye expects and how EA's own
+    # scale behaves.
     work["rating"] = _to_scale(
-        work.groupby("Season", observed=True)["composite"].rank(pct=True),
+        work.groupby(by, observed=True)["composite"].rank(pct=True),
         config["scale"],
     )
     work["rated"] = True
