@@ -31,9 +31,11 @@ from footballml.api.schemas import (
     ModelInfo,
     Prediction,
     PredictRequest,
+    TeamForm,
 )
 from footballml.data import ODDS_COLUMNS, PROCESSED_DIR, load_team_match_history
 from footballml.features.build import build_match_features, build_upcoming_features
+from footballml.form import build_index, recent_form
 from footballml.ingest.matchhistory import LEAGUES, fetch_fixtures
 from footballml.labels import humanise
 from footballml.models.evaluate import (
@@ -63,14 +65,18 @@ class State:
     tmh: pd.DataFrame = field(default_factory=pd.DataFrame)
     features: pd.DataFrame = field(default_factory=pd.DataFrame)
     columns: list[str] = field(default_factory=list)
-    _fixtures: pd.DataFrame | None = None
-    _fixtures_at: datetime | None = None
+    form_index: dict = field(default_factory=dict)
+    # Scored predictions, not raw fixtures. Rebuilding features over the full
+    # history costs ~6.5s, which is far too slow to repeat per request when the
+    # answer only changes when the fixture list does.
+    _upcoming: list[Prediction] | None = None
+    _upcoming_at: datetime | None = None
 
     @property
-    def fixtures_are_stale(self) -> bool:
-        if self._fixtures is None or self._fixtures_at is None:
+    def upcoming_is_stale(self) -> bool:
+        if self._upcoming is None or self._upcoming_at is None:
             return True
-        return datetime.now(UTC) - self._fixtures_at > FIXTURE_CACHE_TTL
+        return datetime.now(UTC) - self._upcoming_at > FIXTURE_CACHE_TTL
 
 
 state = State()
@@ -86,7 +92,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     state.tmh = load_team_match_history(path)
     state.features = build_match_features(state.tmh)
     state.columns = feature_columns(state.features)
-    logger.info("Loaded %d matches", len(state.features))
+    state.form_index = build_index(state.tmh)
+    logger.info("Loaded %d matches, %d teams", len(state.features), len(state.form_index))
     yield
 
 
@@ -113,8 +120,12 @@ def _require_model() -> tuple[Any, registry.ModelMetadata]:
     return state.model, state.metadata
 
 
+def _form(team: str, before: pd.Timestamp) -> TeamForm:
+    return TeamForm(**vars(recent_form(state.form_index, team, before)))
+
+
 def _to_predictions(
-    frame: pd.DataFrame, drivers: list[dict] | None = None
+    frame: pd.DataFrame, drivers: list[dict] | None = None, with_form: bool = True
 ) -> list[Prediction]:
     """Convert a scored feature frame into API responses."""
     out = []
@@ -144,6 +155,10 @@ def _to_predictions(
             entry.market_prob_home = round(float(market[0]), 4)
             entry.market_prob_draw = round(float(market[1]), 4)
             entry.market_prob_away = round(float(market[2]), 4)
+        if with_form:
+            when = pd.Timestamp(r["Date"])
+            entry.form_home = _form(r["HomeTeam"], when)
+            entry.form_away = _form(r["AwayTeam"], when)
         if drivers:
             for side, target in (("home", "drivers_home"), ("away", "drivers_away")):
                 setattr(
@@ -198,23 +213,36 @@ def upcoming(
     league: str | None = Query(None, description="Division code, e.g. E0"),
     explain: bool = Query(False, description="Include SHAP drivers"),
 ) -> list[Prediction]:
-    """Predictions for fixtures that have not been played."""
+    """Predictions for fixtures that have not been played.
+
+    Always scored with explanations and cached whole, then filtered per request.
+    Explanations add little to the cost once features are built, and computing
+    them eagerly means toggling "show analysis" in the UI is instant.
+    """
+    if state.upcoming_is_stale:
+        state._upcoming = _score_upcoming()
+        state._upcoming_at = datetime.now(UTC)
+
+    results = state._upcoming or []
+    if league:
+        results = [p for p in results if p.league == league]
+    if not explain:
+        # Strip rather than recompute: the caller asked for a lighter payload.
+        results = [p.model_copy(update={"drivers_home": [], "drivers_away": []}) for p in results]
+    return results
+
+
+def _score_upcoming() -> list[Prediction]:
+    """Fetch and score every published fixture. Expensive; call via the cache."""
     model, _ = _require_model()
 
-    if state.fixtures_are_stale:
-        state._fixtures = fetch_fixtures()
-        state._fixtures_at = datetime.now(UTC)
-
-    fixtures = state._fixtures
-    if fixtures is None or fixtures.empty:
+    fixtures = fetch_fixtures()
+    if fixtures.empty:
         return []
-    if league:
-        fixtures = fixtures[fixtures["League"] == league]
-        if fixtures.empty:
-            return []
 
     scored = build_upcoming_features(state.tmh, fixtures)
     if scored.empty:
+        logger.warning("No published fixtures matched a known team")
         return []
 
     odds_cols = [c for c in ODDS_COLUMNS if c in fixtures.columns]
@@ -228,7 +256,7 @@ def upcoming(
 
     preds = model.predict_frame(scored[state.columns])
     frame = pd.concat([scored.reset_index(drop=True), preds.reset_index(drop=True)], axis=1)
-    drivers = model.explain(scored[state.columns], top_n=5) if explain else None
+    drivers = model.explain(scored[state.columns], top_n=5)
     return _to_predictions(frame, drivers)
 
 

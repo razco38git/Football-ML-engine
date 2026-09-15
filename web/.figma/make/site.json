@@ -1,0 +1,10 @@
+{
+  "description": "This platform offers advanced football match predictions and player ratings using machine learning, helping fans and analysts understand game outcomes and player strengths.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

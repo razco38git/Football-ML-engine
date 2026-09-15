@@ -1,0 +1,136 @@
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800;900&family=Barlow:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import 'tailwindcss';
+
+:root {
+  --background: #07090f;
+  --foreground: #e2e8f4;
+  --card: #0d1220;
+  --card-foreground: #e2e8f4;
+  --primary: #00e676;
+  --primary-foreground: #000;
+  --secondary: #1a2540;
+  --secondary-foreground: #94a3b8;
+  --muted: #111827;
+  --muted-foreground: #64748b;
+  --accent: #3b82f6;
+  --accent-foreground: #fff;
+  --border: #1e2d45;
+  --ring: #00e676;
+  --radius: 8px;
+
+  /* Rating badge colors */
+  --rating-elite: #00e676;
+  --rating-great: #76ff03;
+  --rating-good: #ffea00;
+  --rating-avg: #ff9100;
+  --rating-poor: #f44336;
+
+  font-family: 'Barlow', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--muted);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2d4060;
+}
+
+/* Rating badge */
+.rating-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 28px;
+  border-radius: 4px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  color: #000;
+  flex-shrink: 0;
+}
+
+.rating-elite { background: var(--rating-elite); }
+.rating-great { background: var(--rating-great); }
+.rating-good { background: var(--rating-good); }
+.rating-avg { background: var(--rating-avg); color: #fff; }
+.rating-poor { background: var(--rating-poor); color: #fff; }
+
+/* Overall badge (larger) */
+.overall-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 36px;
+  border-radius: 6px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 800;
+  font-size: 16px;
+  color: #000;
+  flex-shrink: 0;
+}
+
+/* Form pill */
+.form-w { background: #00e676; color: #000; }
+.form-d { background: #ffea00; color: #000; }
+.form-l { background: #f44336; color: #fff; }
+
+.form-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 11px;
+}
+
+/* Mono font for data */
+.font-data {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Barlow Condensed headings */
+.font-display {
+  font-family: 'Barlow Condensed', sans-serif;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+}

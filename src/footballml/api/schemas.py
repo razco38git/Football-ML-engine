@@ -40,6 +40,25 @@ class Driver(BaseModel):
     contribution: float
 
 
+class TeamForm(BaseModel):
+    """A team's last five matches going into a fixture, oldest first.
+
+    The same window the model aggregates over, exposed match by match so the UI
+    can show what the prediction was actually based on.
+    """
+
+    team: str
+    results: list[str] = Field(default_factory=list, description="W/D/L, oldest first")
+    xg_for: list[float] = Field(default_factory=list)
+    xg_against: list[float] = Field(default_factory=list)
+    shots: list[float] = Field(default_factory=list)
+    shots_on_target: list[float] = Field(default_factory=list)
+    goals_for: list[float] = Field(default_factory=list)
+    goals_against: list[float] = Field(default_factory=list)
+    opponents: list[str] = Field(default_factory=list)
+    venues: list[str] = Field(default_factory=list)
+
+
 class Prediction(BaseModel):
     league: str
     date: date
@@ -67,6 +86,9 @@ class Prediction(BaseModel):
 
     drivers_home: list[Driver] = Field(default_factory=list)
     drivers_away: list[Driver] = Field(default_factory=list)
+
+    form_home: TeamForm | None = None
+    form_away: TeamForm | None = None
 
 
 class PredictRequest(BaseModel):
