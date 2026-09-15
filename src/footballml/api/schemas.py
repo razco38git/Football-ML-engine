@@ -91,6 +91,54 @@ class Prediction(BaseModel):
     form_away: TeamForm | None = None
 
 
+class PlayerRating(BaseModel):
+    """One player's rating for a season.
+
+    Attributes are the ones we actually measure. There is no pace, dribbling or
+    physical score here, because nothing in the source data supports inventing
+    them -- the sub-ratings present are derived from real per-90 output.
+    """
+
+    player: str
+    team: str
+    league: str
+    season: str
+    position: str = Field(description="GK, D, M or F")
+    minutes: int
+    rating: int | None = None
+    rated: bool
+    unrated_reason: str | None = None
+
+    #: Populated per position group; a forward has no defending sub-rating.
+    sub_finishing: int | None = None
+    sub_creation: int | None = None
+    sub_involvement: int | None = None
+    sub_volume: int | None = None
+    sub_defending: int | None = None
+    sub_shot_stopping: int | None = None
+    sub_reliability: int | None = None
+    sub_workload: int | None = None
+    sub_penalties: int | None = None
+
+    #: Underlying per-90 output, so a rating can be checked against the numbers.
+    goals: int | None = None
+    assists: int | None = None
+    np_xg: float | None = None
+    xa: float | None = None
+    key_passes_per90: float | None = None
+    interceptions_per90: float | None = None
+    tackles_won_per90: float | None = None
+    save_pct: float | None = None
+    goals_against_per90: float | None = None
+
+
+class PlayerPage(BaseModel):
+    """A page of players plus the total available for the same filters."""
+
+    total: int
+    players: list[PlayerRating]
+
+
 class PredictRequest(BaseModel):
     home_team: str
     away_team: str

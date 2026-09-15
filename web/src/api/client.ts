@@ -126,6 +126,12 @@ export const api = {
     return get<Prediction[]>(`/matches?${params}`);
   },
 
+  /** The rated player database, filtered and sorted server-side. */
+  players: (query: PlayerQuery = {}) => fetchPlayers(query),
+
+  /** Every rated season for one player, newest first. */
+  playerHistory: (name: string) => fetchPlayerHistory(name),
+
   /** Any pairing, scored live using each side's form as of today. */
   predict: async (home_team: string, away_team: string, explain = true) => {
     const response = await fetch(`${BASE_URL}/predict`, {
@@ -154,3 +160,69 @@ export const LEAGUE_NAMES: Record<string, string> = {
   I1: 'Serie A',
   F1: 'Ligue 1',
 };
+
+export interface PlayerRating {
+  player: string;
+  team: string;
+  league: string;
+  season: string;
+  /** GK, D, M or F */
+  position: string;
+  minutes: number;
+  rating: number | null;
+  rated: boolean;
+  unrated_reason: string | null;
+
+  sub_finishing: number | null;
+  sub_creation: number | null;
+  sub_involvement: number | null;
+  sub_volume: number | null;
+  sub_defending: number | null;
+  sub_shot_stopping: number | null;
+  sub_reliability: number | null;
+  sub_workload: number | null;
+  sub_penalties: number | null;
+
+  goals: number | null;
+  assists: number | null;
+  np_xg: number | null;
+  xa: number | null;
+  key_passes_per90: number | null;
+  interceptions_per90: number | null;
+  tackles_won_per90: number | null;
+  save_pct: number | null;
+  goals_against_per90: number | null;
+}
+
+export interface PlayerPage {
+  total: number;
+  players: PlayerRating[];
+}
+
+export interface PlayerQuery {
+  league?: string;
+  position?: string;
+  season?: string;
+  search?: string;
+  min_rating?: number;
+  sort?: string;
+  descending?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+/** The rated player database, filtered and sorted server-side. */
+export function fetchPlayers(query: PlayerQuery = {}): Promise<PlayerPage> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== null && value !== '') {
+      params.set(key, String(value));
+    }
+  }
+  return get<PlayerPage>(`/players?${params}`);
+}
+
+/** Every rated season for one player, newest first. */
+export function fetchPlayerHistory(name: string): Promise<PlayerRating[]> {
+  return get<PlayerRating[]>(`/players/${encodeURIComponent(name)}`);
+}

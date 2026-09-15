@@ -1,26 +1,88 @@
 import { useState } from 'react';
-import { players, leagues, positions, getRatingBg, getRatingTextColor, type Player } from '../data/footballData';
-import DemoBanner from './DemoBanner';
+import { api, LEAGUE_NAMES, type PlayerRating } from '../api/client';
+import { teamColor } from '../api/display';
+import { useAsync } from '../api/hooks';
+import { getRatingBg, getRatingTextColor } from '../data/footballData';
 
-function RatingBadge({ value, size = 'sm' }: { value: number; size?: 'sm' | 'md' | 'lg' }) {
-  const bg = getRatingBg(value);
-  const color = getRatingTextColor(value);
-  const dims = size === 'lg' ? { w: 52, h: 44, fs: 20 } : size === 'md' ? { w: 44, h: 36, fs: 16 } : { w: 36, h: 28, fs: 13 };
+const POSITIONS: Record<string, string> = {
+  GK: 'Goalkeeper',
+  D: 'Defender',
+  M: 'Midfielder',
+  F: 'Forward',
+};
+
+/**
+ * Sub-ratings shown per position -- only what we actually measure for that role.
+ *
+ * Deliberately not the FIFA six (pace, shooting, passing, dribbling, defending,
+ * physical). Nothing in the source data supports a pace or dribbling number, and
+ * inventing one to fill a column would undermine every honest figure beside it.
+ */
+const ATTRIBUTES: Record<string, { key: keyof PlayerRating; label: string; short: string }[]> = {
+  GK: [
+    { key: 'sub_shot_stopping', label: 'Shot stopping', short: 'STP' },
+    { key: 'sub_reliability', label: 'Clean sheets', short: 'CS' },
+    { key: 'sub_workload', label: 'Workload faced', short: 'WRK' },
+    { key: 'sub_penalties', label: 'Penalties', short: 'PEN' },
+  ],
+  D: [
+    { key: 'sub_defending', label: 'Defending', short: 'DEF' },
+    { key: 'sub_involvement', label: 'Build-up', short: 'BLD' },
+    { key: 'sub_creation', label: 'Creation', short: 'CRE' },
+    { key: 'sub_finishing', label: 'Finishing', short: 'FIN' },
+  ],
+  M: [
+    { key: 'sub_creation', label: 'Creation', short: 'CRE' },
+    { key: 'sub_involvement', label: 'Build-up', short: 'BLD' },
+    { key: 'sub_defending', label: 'Defending', short: 'DEF' },
+    { key: 'sub_finishing', label: 'Finishing', short: 'FIN' },
+  ],
+  F: [
+    { key: 'sub_finishing', label: 'Finishing', short: 'FIN' },
+    { key: 'sub_creation', label: 'Creation', short: 'CRE' },
+    { key: 'sub_involvement', label: 'Build-up', short: 'BLD' },
+    { key: 'sub_volume', label: 'Shot volume', short: 'VOL' },
+  ],
+};
+
+const SLOTS = [0, 1, 2, 3];
+
+function RatingBadge({ value, size = 'sm' }: { value: number | null; size?: 'sm' | 'md' | 'lg' }) {
+  const dims =
+    size === 'lg' ? { w: 52, h: 44, fs: 20 } : size === 'md' ? { w: 44, h: 36, fs: 16 } : { w: 36, h: 28, fs: 13 };
+
+  if (value == null) {
+    return (
+      <span
+        className="inline-flex items-center justify-center font-display rounded"
+        style={{
+          background: 'var(--secondary)', color: 'var(--muted-foreground)',
+          width: dims.w, height: dims.h, fontSize: dims.fs, flexShrink: 0,
+        }}
+      >
+        –
+      </span>
+    );
+  }
   return (
     <span
       className="inline-flex items-center justify-center font-display font-bold rounded"
-      style={{ background: bg, color, width: dims.w, height: dims.h, fontSize: dims.fs, flexShrink: 0 }}
+      style={{
+        background: getRatingBg(value), color: getRatingTextColor(value),
+        width: dims.w, height: dims.h, fontSize: dims.fs, flexShrink: 0,
+      }}
     >
       {value}
     </span>
   );
 }
 
-function StatBar({ label, value }: { label: string; value: number }) {
+function StatBar({ label, value }: { label: string; value: number | null }) {
+  if (value == null) return null;
   const bg = getRatingBg(value);
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs w-28 shrink-0" style={{ color: 'var(--muted-foreground)' }}>{label}</span>
+      <span className="text-xs w-32 shrink-0" style={{ color: 'var(--muted-foreground)' }}>{label}</span>
       <div className="flex-1 h-1.5 rounded-full" style={{ background: 'var(--secondary)' }}>
         <div className="h-full rounded-full" style={{ width: `${value}%`, background: bg }} />
       </div>
@@ -29,7 +91,41 @@ function StatBar({ label, value }: { label: string; value: number }) {
   );
 }
 
-function PlayerDetailPanel({ player, onClose }: { player: Player; onClose: () => void }) {
+function Underlying({ player }: { player: PlayerRating }) {
+  const rows: [string, string | number][] = [];
+  const show = (label: string, value: number | null | undefined, digits = 2) => {
+    if (value != null) rows.push([label, digits === 0 ? value : value.toFixed(digits)]);
+  };
+
+  if (player.position === 'GK') {
+    show('Save percentage', player.save_pct, 1);
+    show('Goals against per 90', player.goals_against_per90);
+  } else {
+    show('Goals', player.goals, 0);
+    show('Assists', player.assists, 0);
+    show('Non-penalty xG', player.np_xg);
+    show('Expected assists', player.xa);
+    show('Key passes per 90', player.key_passes_per90);
+    show('Interceptions per 90', player.interceptions_per90);
+    show('Tackles won per 90', player.tackles_won_per90);
+  }
+
+  return (
+    <div className="grid gap-x-6 gap-y-1" style={{ gridTemplateColumns: '1fr 1fr' }}>
+      {rows.map(([label, value]) => (
+        <div key={label} className="flex justify-between text-xs py-0.5">
+          <span style={{ color: 'var(--muted-foreground)' }}>{label}</span>
+          <span className="font-data font-bold text-white">{value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PlayerDetailPanel({ player, onClose }: { player: PlayerRating; onClose: () => void }) {
+  const attributes = ATTRIBUTES[player.position] ?? [];
+  const color = teamColor(player.team);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -41,364 +137,294 @@ function PlayerDetailPanel({ player, onClose }: { player: Player; onClose: () =>
         style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
         onClick={e => e.stopPropagation()}
       >
-        {/* Header */}
         <div
           className="p-6 relative"
           style={{ background: 'linear-gradient(135deg, #0d1a2e 0%, #1a0d2e 100%)', borderBottom: '1px solid var(--border)' }}
         >
           <button
             onClick={onClose}
-            className="absolute top-4 right-4 w-8 h-8 rounded-full flex items-center justify-center text-sm transition-colors hover:bg-white/10"
+            className="absolute top-4 right-4 w-8 h-8 rounded-full flex items-center justify-center text-sm hover:bg-white/10"
             style={{ color: 'var(--muted-foreground)' }}
           >
             ✕
           </button>
           <div className="flex items-start gap-5">
             <div
-              className="w-20 h-20 rounded-xl flex items-center justify-center text-4xl font-display font-black"
-              style={{ background: player.photoColor, border: '2px solid rgba(255,255,255,0.1)' }}
+              className="w-20 h-20 rounded-xl flex items-center justify-center text-2xl font-display font-black"
+              style={{ background: color + '33', border: `2px solid ${color}66`, color }}
             >
-              {player.firstName.slice(0, 1)}
+              {player.player.split(' ').map(w => w[0]).join('').slice(0, 2)}
             </div>
             <div className="flex-1">
-              <div className="flex items-center gap-3 mb-1">
-                <span className="text-2xl">{player.flag}</span>
-                <div>
-                  <div className="font-display font-black text-2xl leading-tight" style={{ color: 'var(--foreground)' }}>
-                    {player.name}
-                  </div>
-                  <div className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
-                    {player.team} · {player.league}
-                  </div>
-                </div>
+              <div className="font-display font-black text-2xl" style={{ color: 'var(--foreground)' }}>
+                {player.player}
               </div>
-              <div className="flex flex-wrap gap-2 mt-3">
-                <span className="text-xs px-2 py-0.5 rounded font-display font-bold" style={{ background: '#00e67622', color: '#00e676', border: '1px solid #00e67644' }}>
-                  {player.position}
-                </span>
-                {player.altPosition !== player.position && (
-                  <span className="text-xs px-2 py-0.5 rounded font-display" style={{ background: 'var(--secondary)', color: 'var(--muted-foreground)' }}>
-                    {player.altPosition}
-                  </span>
-                )}
-                <span className="text-xs px-2 py-0.5 rounded" style={{ background: 'var(--secondary)', color: 'var(--muted-foreground)' }}>
-                  Age {player.age}
-                </span>
-                <span className="text-xs px-2 py-0.5 rounded" style={{ background: 'var(--secondary)', color: 'var(--muted-foreground)' }}>
-                  {player.height} cm
-                </span>
-                <span className="text-xs px-2 py-0.5 rounded" style={{ background: 'var(--secondary)', color: 'var(--muted-foreground)' }}>
-                  {'★'.repeat(player.skillMoves)}{'☆'.repeat(5 - player.skillMoves)} SM
-                </span>
-                <span className="text-xs px-2 py-0.5 rounded" style={{ background: 'var(--secondary)', color: 'var(--muted-foreground)' }}>
-                  {'★'.repeat(player.weakFoot)}{'☆'.repeat(5 - player.weakFoot)} WF
-                </span>
+              <div className="text-sm mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+                {player.team} · {LEAGUE_NAMES[player.league] ?? player.league} ·{' '}
+                {POSITIONS[player.position] ?? player.position}
+              </div>
+              <div className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>
+                {player.season.slice(0, 2)}/{player.season.slice(2)} · {player.minutes.toLocaleString()} minutes
               </div>
             </div>
-            <div className="flex flex-col items-center gap-1">
-              <RatingBadge value={player.overall} size="lg" />
-              <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>OVR</span>
-              <RatingBadge value={player.potential} size="md" />
-              <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>POT</span>
-            </div>
+            <RatingBadge value={player.rating} size="lg" />
           </div>
+        </div>
 
-          {/* 6 main stats */}
-          <div className="grid grid-cols-6 gap-2 mt-5">
-            {[
-              { label: 'PAC', value: player.pac },
-              { label: 'SHO', value: player.sho },
-              { label: 'PAS', value: player.pas },
-              { label: 'DRI', value: player.dri },
-              { label: 'DEF', value: player.def },
-              { label: 'PHY', value: player.phy },
-            ].map(s => (
-              <div key={s.label} className="flex flex-col items-center gap-1">
-                <RatingBadge value={s.value} size="md" />
-                <span className="text-xs font-display font-bold" style={{ color: 'var(--muted-foreground)' }}>{s.label}</span>
-              </div>
+        <div className="p-6">
+          <div className="text-xs font-display font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--muted-foreground)' }}>
+            Rating breakdown
+          </div>
+          <div className="flex flex-col gap-2 mb-6">
+            {attributes.map(a => (
+              <StatBar key={String(a.key)} label={a.label} value={player[a.key] as number | null} />
             ))}
           </div>
-        </div>
 
-        {/* Sub-stats */}
-        <div className="p-6 grid gap-5" style={{ gridTemplateColumns: '1fr 1fr' }}>
-          <div>
-            <div className="text-xs font-display font-bold uppercase tracking-wider mb-3" style={{ color: '#00e676' }}>Attacking</div>
-            <div className="flex flex-col gap-2">
-              <StatBar label="Crossing" value={player.crossing} />
-              <StatBar label="Finishing" value={player.finishing} />
-              <StatBar label="Heading Acc." value={player.headingAccuracy} />
-              <StatBar label="Short Passing" value={player.shortPassing} />
-              <StatBar label="Volleys" value={player.volleys} />
-            </div>
-            <div className="text-xs font-display font-bold uppercase tracking-wider mb-3 mt-4" style={{ color: '#3b82f6' }}>Defending</div>
-            <div className="flex flex-col gap-2">
-              <StatBar label="Def. Awareness" value={player.defensiveAwareness} />
-              <StatBar label="Stand. Tackle" value={player.standingTackle} />
-              <StatBar label="Sliding Tackle" value={player.slidingTackle} />
-              <StatBar label="Interceptions" value={player.interceptions} />
-            </div>
+          <div className="text-xs font-display font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--muted-foreground)' }}>
+            Underlying numbers
           </div>
-          <div>
-            <div className="text-xs font-display font-bold uppercase tracking-wider mb-3" style={{ color: '#f59e0b' }}>Skill</div>
-            <div className="flex flex-col gap-2">
-              <StatBar label="Dribbling" value={player.dribbling} />
-              <StatBar label="Curve" value={player.curve} />
-              <StatBar label="FK Accuracy" value={player.fkAccuracy} />
-              <StatBar label="Long Passing" value={player.longPassing} />
-              <StatBar label="Ball Control" value={player.ballControl} />
-            </div>
-            <div className="text-xs font-display font-bold uppercase tracking-wider mb-3 mt-4" style={{ color: '#a78bfa' }}>Power & Mentality</div>
-            <div className="flex flex-col gap-2">
-              <StatBar label="Shot Power" value={player.shotPower} />
-              <StatBar label="Jumping" value={player.jumping} />
-              <StatBar label="Stamina" value={player.stamina} />
-              <StatBar label="Strength" value={player.strength} />
-              <StatBar label="Vision" value={player.vision} />
-              <StatBar label="Composure" value={player.composure} />
-            </div>
-          </div>
-          <div>
-            <div className="text-xs font-display font-bold uppercase tracking-wider mb-3" style={{ color: '#fb7185' }}>Movement</div>
-            <div className="flex flex-col gap-2">
-              <StatBar label="Acceleration" value={player.acceleration} />
-              <StatBar label="Sprint Speed" value={player.sprintSpeed} />
-              <StatBar label="Agility" value={player.agility} />
-              <StatBar label="Reactions" value={player.reactions} />
-              <StatBar label="Balance" value={player.balance} />
-            </div>
-          </div>
-          <div>
-            <div className="text-xs font-display font-bold uppercase tracking-wider mb-3" style={{ color: '#34d399' }}>Data Sources</div>
-            <div className="flex flex-col gap-3">
-              <div className="rounded-lg p-3" style={{ background: 'var(--secondary)', border: '1px solid var(--border)' }}>
-                <div className="text-xs mb-1" style={{ color: 'var(--muted-foreground)' }}>EA FC Rating</div>
-                <RatingBadge value={player.overall} size="md" />
-              </div>
-              <div className="rounded-lg p-3" style={{ background: 'var(--secondary)', border: '1px solid var(--border)' }}>
-                <div className="text-xs mb-1" style={{ color: 'var(--muted-foreground)' }}>Football Manager (FM) Rating</div>
-                <RatingBadge value={player.fmRating} size="md" />
-              </div>
-              <div className="rounded-lg p-3" style={{ background: 'var(--secondary)', border: '1px solid var(--border)' }}>
-                <div className="text-xs mb-2" style={{ color: 'var(--muted-foreground)' }}>ScoutLab Percentile</div>
-                <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--muted)' }}>
-                  <div
-                    className="h-full rounded-full"
-                    style={{ width: `${player.scoutPercentile}%`, background: getRatingBg(player.scoutPercentile) }}
-                  />
-                </div>
-                <div className="text-xs font-data font-bold mt-1" style={{ color: '#00e676' }}>
-                  P{player.scoutPercentile}
-                </div>
-              </div>
-            </div>
+          <Underlying player={player} />
+
+          <div className="mt-5 pt-4 text-xs" style={{ borderTop: '1px solid var(--border)', color: 'var(--muted-foreground)' }}>
+            Ranked against {POSITIONS[player.position]?.toLowerCase()}s in the same season, then pulled
+            toward the positional average in proportion to minutes played.
           </div>
         </div>
-
-        {player.position === 'GK' && (
-          <div className="px-6 pb-6">
-            <div className="text-xs font-display font-bold uppercase tracking-wider mb-3" style={{ color: '#fbbf24' }}>Goalkeeper</div>
-            <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
-              {[
-                { label: 'Diving', value: player.gkDiving },
-                { label: 'Handling', value: player.gkHandling },
-                { label: 'Kicking', value: player.gkKicking },
-                { label: 'Positioning', value: player.gkPositioning },
-                { label: 'Reflexes', value: player.gkReflexes },
-              ].map(s => (
-                <div key={s.label} className="flex flex-col items-center gap-1">
-                  <RatingBadge value={s.value} size="sm" />
-                  <span className="text-xs text-center" style={{ color: 'var(--muted-foreground)' }}>{s.label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
 }
 
 export default function PlayerDatabase() {
-  const [selectedLeague, setSelectedLeague] = useState('All');
-  const [selectedPosition, setSelectedPosition] = useState('All');
+  const [league, setLeague] = useState('All');
+  const [position, setPosition] = useState('All');
   const [minRating, setMinRating] = useState(0);
   const [search, setSearch] = useState('');
-  const [sortBy, setSortBy] = useState<keyof Player>('overall');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
-  const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
+  const [sort, setSort] = useState('rating');
+  const [descending, setDescending] = useState(true);
+  const [selected, setSelected] = useState<PlayerRating | null>(null);
 
-  const filtered = players
-    .filter(p =>
-      (selectedLeague === 'All' || p.league === selectedLeague) &&
-      (selectedPosition === 'All' || p.position === selectedPosition || p.altPosition === selectedPosition) &&
-      p.overall >= minRating &&
-      (search === '' || p.name.toLowerCase().includes(search.toLowerCase()) || p.team.toLowerCase().includes(search.toLowerCase()))
-    )
-    .sort((a, b) => {
-      const av = a[sortBy] as number;
-      const bv = b[sortBy] as number;
-      return sortDir === 'desc' ? bv - av : av - bv;
-    });
+  const { data, loading, error, reload } = useAsync(
+    () =>
+      api.players({
+        league: league === 'All' ? undefined : league,
+        position: position === 'All' ? undefined : position,
+        search: search || undefined,
+        min_rating: minRating,
+        sort,
+        descending,
+        // Each row renders five rating badges plus an avatar, so a large page
+        // is a lot of DOM for little benefit -- filters are the way to find
+        // someone, not scrolling.
+        limit: 50,
+      }),
+    [league, position, minRating, search, sort, descending],
+  );
 
-  const handleSort = (col: keyof Player) => {
-    if (sortBy === col) setSortDir(d => (d === 'desc' ? 'asc' : 'desc'));
-    else { setSortBy(col); setSortDir('desc'); }
+  const toggleSort = (col: string) => {
+    if (sort === col) setDescending(d => !d);
+    else {
+      setSort(col);
+      setDescending(true);
+    }
   };
 
-  const SortHeader = ({ col, label }: { col: keyof Player; label: string }) => (
+  const SortHeader = ({ col, label }: { col: string; label: string }) => (
     <th
-      className="px-2 py-3 text-xs font-display font-bold uppercase tracking-wider cursor-pointer select-none transition-colors hover:text-white"
-      style={{ color: sortBy === col ? '#00e676' : 'var(--muted-foreground)', whiteSpace: 'nowrap' }}
-      onClick={() => handleSort(col)}
+      onClick={() => toggleSort(col)}
+      className="px-2 py-2 text-xs font-display font-bold uppercase tracking-wider cursor-pointer select-none"
+      style={{ color: sort === col ? '#00e676' : 'var(--muted-foreground)', whiteSpace: 'nowrap' }}
     >
-      {label}{sortBy === col ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''}
+      {label}
+      {sort === col ? (descending ? ' ↓' : ' ↑') : ''}
     </th>
   );
 
   return (
     <div>
-      <DemoBanner reason="Ratings shown are sample data. The 0-99 rating model needs the FBref player pipeline, which is not built yet." />
       <div className="mb-6">
         <h2 className="font-display font-bold text-3xl" style={{ color: 'var(--foreground)' }}>
           Player Ratings
         </h2>
         <p className="mt-1 text-sm" style={{ color: 'var(--muted-foreground)' }}>
-          ML-aggregated ratings combining EA FC stats, Football Manager attributes, and ScoutLab percentiles.
+          Ratings out of 99 built from per-90 output, ranked against positional peers.
+          Click any player for the breakdown.
         </p>
       </div>
 
-      {/* Filters */}
-      <div
-        className="rounded-xl p-4 mb-5 flex flex-wrap gap-3 items-center"
-        style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
-      >
+      <div className="flex flex-wrap gap-3 mb-5 items-center">
         <input
           value={search}
           onChange={e => setSearch(e.target.value)}
-          placeholder="Search player or club..."
-          className="rounded-lg px-3 py-2 text-sm outline-none flex-1 min-w-48"
-          style={{ background: 'var(--secondary)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+          placeholder="Search players…"
+          className="px-3 py-2 rounded-lg text-sm"
+          style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)', minWidth: 190 }}
         />
         <select
-          value={selectedLeague}
-          onChange={e => setSelectedLeague(e.target.value)}
-          className="rounded-lg px-3 py-2 text-sm outline-none"
-          style={{ background: 'var(--secondary)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+          value={league}
+          onChange={e => setLeague(e.target.value)}
+          className="px-3 py-2 rounded-lg text-sm"
+          style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
         >
-          {leagues.map(l => <option key={l} value={l}>{l}</option>)}
+          <option value="All">All leagues</option>
+          {Object.entries(LEAGUE_NAMES).map(([code, name]) => (
+            <option key={code} value={code}>{name}</option>
+          ))}
         </select>
         <select
-          value={selectedPosition}
-          onChange={e => setSelectedPosition(e.target.value)}
-          className="rounded-lg px-3 py-2 text-sm outline-none"
-          style={{ background: 'var(--secondary)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+          value={position}
+          onChange={e => setPosition(e.target.value)}
+          className="px-3 py-2 rounded-lg text-sm"
+          style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
         >
-          {positions.map(p => <option key={p} value={p}>{p}</option>)}
+          <option value="All">All positions</option>
+          {Object.entries(POSITIONS).map(([code, name]) => (
+            <option key={code} value={code}>{name}</option>
+          ))}
         </select>
         <div className="flex items-center gap-2">
-          <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>Min OVR</span>
+          <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>Min {minRating}</span>
           <input
-            type="range" min={0} max={90} step={5} value={minRating}
+            type="range"
+            min={0}
+            max={95}
+            step={1}
+            value={minRating}
             onChange={e => setMinRating(Number(e.target.value))}
-            className="w-20"
+            style={{ width: 110 }}
           />
-          <span className="text-xs font-data font-bold w-6" style={{ color: '#00e676' }}>{minRating || 'All'}</span>
         </div>
-        <span className="text-xs ml-auto" style={{ color: 'var(--muted-foreground)' }}>
-          {filtered.length} players
-        </span>
+        {data && (
+          <span className="text-xs ml-auto" style={{ color: 'var(--muted-foreground)' }}>
+            {data.total.toLocaleString()} players
+          </span>
+        )}
       </div>
 
-      {/* Table */}
-      <div
-        className="rounded-xl overflow-hidden"
-        style={{ border: '1px solid var(--border)' }}
-      >
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr style={{ background: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
-                <th className="px-4 py-3 text-left text-xs font-display font-bold uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
-                  Player
-                </th>
-                <SortHeader col="position" label="POS" />
-                <SortHeader col="overall" label="OVR" />
-                <SortHeader col="potential" label="POT" />
-                <SortHeader col="age" label="AGE" />
-                <SortHeader col="pac" label="PAC" />
-                <SortHeader col="sho" label="SHO" />
-                <SortHeader col="pas" label="PAS" />
-                <SortHeader col="dri" label="DRI" />
-                <SortHeader col="def" label="DEF" />
-                <SortHeader col="phy" label="PHY" />
-                <SortHeader col="fmRating" label="FM" />
-                <SortHeader col="scoutPercentile" label="SCOUT" />
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((p, i) => (
-                <tr
-                  key={p.id}
-                  className="cursor-pointer transition-colors"
-                  style={{
-                    background: i % 2 === 0 ? 'var(--card)' : 'rgba(255,255,255,0.015)',
-                    borderBottom: '1px solid rgba(30,45,69,0.5)',
-                  }}
-                  onClick={() => setSelectedPlayer(p)}
-                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,230,118,0.06)')}
-                  onMouseLeave={e => (e.currentTarget.style.background = i % 2 === 0 ? 'var(--card)' : 'rgba(255,255,255,0.015)')}
-                >
-                  <td className="px-4 py-2.5">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-display font-black flex-shrink-0"
-                        style={{ background: p.photoColor, border: '1px solid rgba(255,255,255,0.1)' }}
-                      >
-                        {p.firstName.slice(0, 1)}
-                      </div>
-                      <div>
-                        <div className="font-display font-bold text-sm leading-tight" style={{ color: 'var(--foreground)' }}>
-                          {p.flag} {p.name}
-                        </div>
-                        <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>{p.team}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-2 py-2.5 text-center">
-                    <span
-                      className="text-xs font-display font-bold px-2 py-0.5 rounded"
-                      style={{ background: 'var(--secondary)', color: '#00e676' }}
-                    >
-                      {p.position}
-                    </span>
-                  </td>
-                  <td className="px-2 py-2.5 text-center"><RatingBadge value={p.overall} /></td>
-                  <td className="px-2 py-2.5 text-center"><RatingBadge value={p.potential} /></td>
-                  <td className="px-2 py-2.5 text-center text-sm font-data" style={{ color: 'var(--muted-foreground)' }}>{p.age}</td>
-                  <td className="px-2 py-2.5 text-center"><RatingBadge value={p.pac} /></td>
-                  <td className="px-2 py-2.5 text-center"><RatingBadge value={p.sho} /></td>
-                  <td className="px-2 py-2.5 text-center"><RatingBadge value={p.pas} /></td>
-                  <td className="px-2 py-2.5 text-center"><RatingBadge value={p.dri} /></td>
-                  <td className="px-2 py-2.5 text-center"><RatingBadge value={p.def} /></td>
-                  <td className="px-2 py-2.5 text-center"><RatingBadge value={p.phy} /></td>
-                  <td className="px-2 py-2.5 text-center"><RatingBadge value={p.fmRating} /></td>
-                  <td className="px-2 py-2.5 text-center">
-                    <span className="text-xs font-data font-bold" style={{ color: getRatingBg(p.scoutPercentile) }}>
-                      P{p.scoutPercentile}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {error && (
+        <div className="rounded-xl p-6 text-center" style={{ background: 'rgba(244,67,54,0.08)', border: '1px solid rgba(244,67,54,0.25)' }}>
+          <div className="text-sm mb-3" style={{ color: '#f44336' }}>{error}</div>
+          <button
+            onClick={reload}
+            className="px-4 py-2 rounded-lg text-sm font-display font-bold"
+            style={{ background: 'rgba(244,67,54,0.15)', color: '#f44336' }}
+          >
+            Retry
+          </button>
         </div>
-      </div>
-
-      {selectedPlayer && (
-        <PlayerDetailPanel player={selectedPlayer} onClose={() => setSelectedPlayer(null)} />
       )}
+
+      {loading && !data && (
+        <div className="text-center py-16 text-sm" style={{ color: 'var(--muted-foreground)' }}>
+          Loading players…
+        </div>
+      )}
+
+      {data && (
+        <div className="rounded-xl overflow-hidden" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--border)' }}>
+                  <th
+                    className="px-3 py-2 text-left text-xs font-display font-bold uppercase tracking-wider"
+                    style={{ color: 'var(--muted-foreground)' }}
+                  >
+                    Player
+                  </th>
+                  <SortHeader col="position_group" label="Pos" />
+                  <SortHeader col="rating" label="OVR" />
+                  <SortHeader col="minutes" label="Min" />
+                  {SLOTS.map(i => (
+                    <th
+                      key={i}
+                      className="px-2 py-2 text-xs font-display font-bold uppercase tracking-wider"
+                      style={{ color: 'var(--muted-foreground)' }}
+                    >
+                      {`Attr ${i + 1}`}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {data.players.map((p, i) => {
+                  const attributes = ATTRIBUTES[p.position] ?? [];
+                  return (
+                    <tr
+                      key={`${p.player}-${p.team}-${i}`}
+                      onClick={() => setSelected(p)}
+                      className="cursor-pointer transition-colors hover:bg-white/5"
+                      style={{ borderBottom: '1px solid var(--border)' }}
+                    >
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <div
+                            className="w-7 h-7 rounded flex items-center justify-center text-xs font-display font-bold flex-shrink-0"
+                            style={{ background: teamColor(p.team) + '22', color: teamColor(p.team) }}
+                          >
+                            {p.player[0]}
+                          </div>
+                          <div style={{ minWidth: 0 }}>
+                            <div className="text-sm font-medium truncate" style={{ color: 'var(--foreground)' }}>
+                              {p.player}
+                            </div>
+                            <div className="text-xs truncate" style={{ color: 'var(--muted-foreground)' }}>
+                              {p.team}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <span
+                          className="text-xs font-display font-bold px-1.5 py-0.5 rounded"
+                          style={{ background: 'var(--secondary)', color: 'var(--muted-foreground)' }}
+                        >
+                          {p.position}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <RatingBadge value={p.rating} />
+                      </td>
+                      <td className="px-2 py-2 text-center text-xs font-data" style={{ color: 'var(--muted-foreground)' }}>
+                        {p.minutes.toLocaleString()}
+                      </td>
+                      {SLOTS.map(idx => {
+                        const attribute = attributes[idx];
+                        const value = attribute ? (p[attribute.key] as number | null) : null;
+                        return (
+                          <td key={idx} className="px-2 py-2 text-center">
+                            <div className="flex flex-col items-center gap-0.5">
+                              <RatingBadge value={value} />
+                              {attribute && (
+                                <span style={{ fontSize: 9, color: 'var(--muted-foreground)' }}>
+                                  {attribute.short}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {data.players.length === 0 && (
+            <div className="text-center py-10 text-sm" style={{ color: 'var(--muted-foreground)' }}>
+              No players match those filters.
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="mt-3 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+        Attribute columns differ by position — the label under each badge says which is which.
+        There is no pace or dribbling score: nothing in the underlying data measures them.
+      </div>
+
+      {selected && <PlayerDetailPanel player={selected} onClose={() => setSelected(null)} />}
     </div>
   );
 }

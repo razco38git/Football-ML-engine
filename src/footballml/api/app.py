@@ -29,6 +29,8 @@ from footballml.api.schemas import (
     Driver,
     Health,
     ModelInfo,
+    PlayerPage,
+    PlayerRating,
     Prediction,
     PredictRequest,
     TeamForm,
@@ -66,6 +68,7 @@ class State:
     features: pd.DataFrame = field(default_factory=pd.DataFrame)
     columns: list[str] = field(default_factory=list)
     form_index: dict = field(default_factory=dict)
+    players: pd.DataFrame = field(default_factory=pd.DataFrame)
     # Scored predictions, not raw fixtures. Rebuilding features over the full
     # history costs ~6.5s, which is far too slow to repeat per request when the
     # answer only changes when the fixture list does.
@@ -93,6 +96,15 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     state.features = build_match_features(state.tmh)
     state.columns = feature_columns(state.features)
     state.form_index = build_index(state.tmh)
+
+    players_path = PROCESSED_DIR / "player_ratings.csv"
+    if players_path.exists():
+        state.players = pd.read_csv(players_path)
+        state.players["Season"] = state.players["Season"].astype(str)
+        logger.info("Loaded %d player-seasons", len(state.players))
+    else:
+        logger.warning("No player ratings; run `python -m pipelines.build_players`")
+
     logger.info("Loaded %d matches, %d teams", len(state.features), len(state.form_index))
     yield
 
@@ -377,3 +389,96 @@ def accuracy(league: str | None = Query(None)) -> Accuracy:
             result.rps_market = round(evaluate(with_odds["actual_result"], market)["rps"], 4)
 
     return result
+
+
+#: Sub-rating and stat columns surfaced by the player endpoints.
+_PLAYER_SUBS = (
+    "finishing", "creation", "involvement", "volume", "defending",
+    "shot_stopping", "reliability", "workload", "penalties",
+)
+_PLAYER_STATS = (
+    "goals", "assists", "np_xg", "xa", "key_passes_per90",
+    "interceptions_per90", "tackles_won_per90", "save_pct", "goals_against_per90",
+)
+
+
+def _to_player(row: pd.Series) -> PlayerRating:
+    """Convert one rating row into an API response."""
+
+    def num(column: str, cast: type) -> int | float | None:
+        value = row.get(column)
+        return None if pd.isna(value) else cast(value)
+
+    return PlayerRating(
+        player=str(row["Player"]),
+        team=str(row["Team"]),
+        league=str(row["League"]),
+        season=str(row["Season"]),
+        position=str(row["position_group"]) if pd.notna(row.get("position_group")) else "?",
+        minutes=int(row["minutes"]),
+        rating=num("rating", int),
+        rated=bool(row.get("rated", False)),
+        unrated_reason=(
+            None if pd.isna(row.get("unrated_reason")) else str(row["unrated_reason"])
+        ),
+        **{f"sub_{name}": num(f"sub_{name}", int) for name in _PLAYER_SUBS},
+        **{
+            stat: num(stat, int if stat in {"goals", "assists"} else float)
+            for stat in _PLAYER_STATS
+        },
+    )
+
+
+@app.get("/players", response_model=PlayerPage)
+def players(
+    league: str | None = Query(None, description="Division code, e.g. E0"),
+    position: str | None = Query(None, description="GK, D, M or F"),
+    season: str | None = Query(None, description="Defaults to the latest rated season"),
+    search: str | None = Query(None, description="Case-insensitive name match"),
+    min_rating: int = Query(0, ge=0, le=99),
+    sort: str = Query("rating"),
+    descending: bool = Query(True),
+    limit: int = Query(100, le=500),
+    offset: int = Query(0, ge=0),
+) -> PlayerPage:
+    """The rated player database, filtered and sorted."""
+    if state.players.empty:
+        raise HTTPException(
+            404, "No player ratings loaded. Run `python -m pipelines.build_players`."
+        )
+
+    rows = state.players[state.players["rated"]]
+    # Default to the most recent season with ratings rather than mixing seasons,
+    # which would otherwise let an old peak outrank current form.
+    rows = rows[rows["Season"] == (season or rows["Season"].max())]
+
+    if league:
+        rows = rows[rows["League"] == league]
+    if position:
+        rows = rows[rows["position_group"] == position]
+    if search:
+        rows = rows[rows["Player"].str.contains(search, case=False, na=False)]
+    if min_rating:
+        rows = rows[rows["rating"] >= min_rating]
+
+    if sort in rows.columns:
+        rows = rows.sort_values(sort, ascending=not descending, na_position="last")
+
+    return PlayerPage(
+        total=len(rows),
+        players=[_to_player(r) for _, r in rows.iloc[offset : offset + limit].iterrows()],
+    )
+
+
+@app.get("/players/{name}", response_model=list[PlayerRating])
+def player_history(name: str) -> list[PlayerRating]:
+    """Every rated season for one player, newest first."""
+    if state.players.empty:
+        raise HTTPException(404, "No player ratings loaded")
+
+    rows = state.players[state.players["Player"].str.lower() == name.lower()]
+    if rows.empty:
+        raise HTTPException(404, f"Unknown player {name!r}")
+
+    rows = rows.sort_values("Season", ascending=False)
+    return [_to_player(r) for _, r in rows.iterrows()]
