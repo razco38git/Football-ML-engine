@@ -52,16 +52,39 @@ KEEPER_COLUMNS = {
 }
 
 
+#: Letters Unicode decomposition cannot handle.
+#:
+#: NFKD splits ``é`` into ``e`` plus a combining accent, which strips cleanly.
+#: But ``Đ``, ``ł`` and ``ø`` are distinct letters, not decorated ones, so they
+#: survive decomposition and never match their plain spellings. That is why
+#: ``"Đorđe Petrović"`` failed to match ``"Djordje Petrovic"``.
+TRANSLITERATIONS = str.maketrans({
+    "Đ": "D", "đ": "d", "Ð": "D", "ð": "d",
+    "Ł": "L", "ł": "l",
+    "Ø": "O", "ø": "o",
+    "Æ": "AE", "æ": "ae",
+    "Œ": "OE", "œ": "oe",
+    "ß": "ss",
+    "Þ": "Th", "þ": "th",
+    "Ħ": "H", "ħ": "h",
+    "Ŀ": "L", "ŀ": "l",
+    "ı": "i", "İ": "I",
+})
+
+
 def normalise_name(name: str) -> str:
     """Strip accents, punctuation and case so spellings can be compared.
 
-    ``"Benoît Badiashile Mukinayi"`` and ``"Benoit Badiashile"`` differ by an
-    accent and a surname; this handles the accent, and
-    :func:`match_players` handles the rest.
+    Two passes are needed. Explicit transliteration handles letters that are
+    their own characters rather than decorated ones (see
+    :data:`TRANSLITERATIONS`); NFKD decomposition then strips ordinary accents.
+    Running only the second, as this did originally, silently failed on every
+    Slavic, Polish and Scandinavian name.
     """
     if not isinstance(name, str):
         return ""
-    decomposed = unicodedata.normalize("NFKD", name)
+    transliterated = name.translate(TRANSLITERATIONS)
+    decomposed = unicodedata.normalize("NFKD", transliterated)
     ascii_only = "".join(c for c in decomposed if not unicodedata.combining(c))
     return "".join(c for c in ascii_only.lower() if c.isalnum() or c.isspace()).strip()
 

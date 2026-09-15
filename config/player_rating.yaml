@@ -100,8 +100,10 @@ positions:
       volume:
         shots_per90: 1.0
       defending:
-        interceptions_per90: 1.0
-        tackles_won_per90: 1.0
+        interceptions_per90: 0.5
+        interceptions_padj: 0.5
+        tackles_won_per90: 0.5
+        tackles_won_padj: 0.5
     sub_rating_weights:
       creation: 0.34
       finishing: 0.28
@@ -128,9 +130,12 @@ positions:
       volume:
         shots_per90: 1.0
       defending:
-        interceptions_per90: 2.0
-        tackles_won_per90: 2.0
-        recoveries_per90: 1.0
+        interceptions_per90: 1.0
+        interceptions_padj: 1.0
+        tackles_won_per90: 1.0
+        tackles_won_padj: 1.0
+        recoveries_per90: 0.5
+        recoveries_padj: 0.5
     sub_rating_weights:
       creation: 0.28
       involvement: 0.27
@@ -145,9 +150,12 @@ positions:
       # both jobs. Merging them is what previously let overlapping full-backs
       # out-rate every genuine centre-back.
       defending:
-        interceptions_per90: 2.5
-        tackles_won_per90: 2.5
-        recoveries_per90: 1.0
+        interceptions_per90: 1.25
+        interceptions_padj: 1.25
+        tackles_won_per90: 1.25
+        tackles_won_padj: 1.25
+        recoveries_per90: 0.5
+        recoveries_padj: 0.5
         fouls_per90: -0.5
       creation:
         crosses_per90: 2.0
@@ -175,9 +183,12 @@ positions:
       # interceptions and tackles this group was judged on attacking output
       # alone, which was indefensible.
       defending:
-        interceptions_per90: 3.0
-        tackles_won_per90: 2.5
-        recoveries_per90: 1.5
+        interceptions_per90: 1.5
+        interceptions_padj: 1.5
+        tackles_won_per90: 1.25
+        tackles_won_padj: 1.25
+        recoveries_per90: 0.75
+        recoveries_padj: 0.75
         fouls_per90: -0.5
       involvement:
         xg_buildup_share: 1.5
@@ -216,10 +227,16 @@ positions:
       penalties:
         penalties_saved_per90: 1.0
     sub_rating_weights:
-      shot_stopping: 0.60
+      shot_stopping: 0.72
       reliability: 0.25
-      workload: 0.10
-      penalties: 0.05
+      penalties: 0.03
+      # Workload is reported but carries no weight. It was meant to credit a
+      # keeper who faces more and still saves them, but in practice it punished
+      # every keeper behind a good defence: Neuer faces few shots at Bayern and
+      # was marked down for it. Shot-stopping already measures the thing that
+      # matters, and save percentage is a rate, so it needs no volume
+      # adjustment.
+      workload: 0.0
 
 # Discipline applies to every outfield role and only ever subtracts.
 discipline:

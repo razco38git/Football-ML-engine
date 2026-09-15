@@ -107,6 +107,44 @@ def _add_team_relative(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+#: Defensive actions distorted by how much a team has the ball.
+DEFENSIVE_VOLUME_METRICS = ("interceptions", "tackles_won", "recoveries")
+
+
+def _add_possession_adjusted(df: pd.DataFrame) -> pd.DataFrame:
+    """Rescale defensive volume by how much defending a team actually does.
+
+    Tackles and interceptions can only happen when the opposition has the ball,
+    so a centre-back at a side with 65% possession records far fewer of them
+    than an equally good one at a side pinned back all game. Judged on raw
+    volume, every defender at a dominant club looks poor -- which is exactly what
+    happened: Rudiger, Tah, Zabarnyi and Huijsen all scored in the 50s and 60s
+    while EA rates them low 80s.
+
+    Dividing by the team's own defensive volume asks the better question: of the
+    defensive work this team did, how much did this player do? That is a
+    property of the player, not of their possession share.
+    """
+    out = df.copy()
+    available = [
+        m for m in DEFENSIVE_VOLUME_METRICS if f"{m}_per90" in out.columns
+    ]
+    if not available:
+        return out
+
+    weights = out["nineties"].clip(lower=0)
+    for metric in available:
+        totals = out.groupby(["League", "Season", "team"], observed=True)[metric].transform("sum")
+        team_nineties = weights.groupby(
+            [out["League"], out["Season"], out["team"]]
+        ).transform("sum")
+        # Ten outfielders defend at once, so squad nineties are ~10x team ones.
+        team_rate = (totals / team_nineties.replace(0, np.nan)) * 10.0
+        out[f"{metric}_padj"] = out[f"{metric}_per90"].div(team_rate).where(team_rate > 0)
+
+    return out
+
+
 def _career_position(df: pd.DataFrame) -> pd.Series:
     """Resolve each player to one position across their whole career.
 
@@ -192,12 +230,14 @@ def fetch_player_seasons(
     )
 
     df = _add_team_relative(df)
+    df = _add_possession_adjusted(df)
 
     keep = [
         "League", "Season", "player", "team", "position", "position_group",
         "season_position", "nineties", *numeric,
         *[f"{m}_per90" for m in PER_90_METRICS], "finishing_delta_per90",
         *[f"{m}_share" for m in TEAM_RELATIVE_METRICS],
+        *[f"{m}_padj" for m in DEFENSIVE_VOLUME_METRICS],
     ]
     # dict.fromkeys preserves order while dropping repeats: `numeric` already
     # contains minutes and matches, and a duplicated name makes df[col] return a

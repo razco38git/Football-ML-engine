@@ -226,6 +226,69 @@ def load_fifa(directory: Path | None = None) -> pd.DataFrame:
     )
 
 
+def _match_loosely(
+    merged: pd.DataFrame, fifa: pd.DataFrame, columns: list[str]
+) -> pd.DataFrame:
+    """Second pass for names the two sources spell differently.
+
+    Three kinds of mismatch remain after exact comparison, each handled by its
+    own key and tried strongest first:
+
+    - **Extra given names.** ``"Ionuț Andrei Radu"`` against ``"Ionut Radu"``,
+      matched on first-plus-last.
+    - **Short names.** EA often stores a Spanish or Portuguese player under a
+      surname alone -- ``"De Gea"``, ``"Sivera"``, ``"Álex Remiro"`` -- where the
+      performance source has the full name.
+    - **Surname only.** Last resort, and accepted *only where that surname is
+      unique across the whole EA database*. Without that guard, every Petrović
+      and every Silva would collapse onto one player.
+    """
+    unmatched = merged["fifa_overall"].isna()
+    if not unmatched.any():
+        return merged
+
+    def keys_for(name: str) -> list[str]:
+        parts = normalise_name(name).split()
+        if not parts:
+            return []
+        keys = [" ".join(parts)]
+        if len(parts) > 2:
+            keys.append(f"{parts[0]} {parts[-1]}")
+        return keys
+
+    # Strong keys may map to several players; keep the highest-rated, which is
+    # overwhelmingly the one a top-five-league dataset means.
+    strong: dict[str, pd.Series] = {}
+    surname_counts: dict[str, int] = {}
+    surname_rows: dict[str, pd.Series] = {}
+
+    for _, row in fifa.iterrows():
+        for key in keys_for(str(row["fifa_name"])):
+            strong.setdefault(key, row)
+        parts = normalise_name(str(row["fifa_name"])).split()
+        if parts:
+            surname = parts[-1]
+            surname_counts[surname] = surname_counts.get(surname, 0) + 1
+            surname_rows.setdefault(surname, row)
+
+    for idx in merged.index[unmatched]:
+        name = str(merged.at[idx, "Player"])
+        hit = next((strong[k] for k in keys_for(name) if k in strong), None)
+
+        if hit is None:
+            parts = normalise_name(name).split()
+            surname = parts[-1] if parts else ""
+            # Unique surnames only: anything shared is too risky to guess at.
+            if surname and surname_counts.get(surname) == 1:
+                hit = surname_rows[surname]
+
+        if hit is not None:
+            for col in columns:
+                merged.at[idx, col] = hit[col]
+
+    return merged
+
+
 def attach_fifa(players: pd.DataFrame, fifa: pd.DataFrame) -> pd.DataFrame:
     """Attach FIFA ratings and roles to performance rows, matched by name.
 
@@ -239,9 +302,13 @@ def attach_fifa(players: pd.DataFrame, fifa: pd.DataFrame) -> pd.DataFrame:
 
     columns = [c for c in fifa.columns if c.startswith("fifa_") or c == "role"]
     merged = out.merge(fifa[["_norm", *columns]], on="_norm", how="left")
+    logger.info("FIFA exact match: %.0f%%", merged["fifa_overall"].notna().mean() * 100)
 
-    rate = merged["fifa_overall"].notna().mean()
-    logger.info("FIFA match rate: %.0f%% of %d player-seasons", rate * 100, len(merged))
+    merged = _match_loosely(merged, fifa, columns)
+    logger.info(
+        "FIFA match rate: %.0f%% of %d player-seasons",
+        merged["fifa_overall"].notna().mean() * 100, len(merged),
+    )
 
     # Players with no EA entry keep a coarse role from Understat, so they are
     # still rated rather than dropped.
