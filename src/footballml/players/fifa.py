@@ -33,12 +33,19 @@ FIFA_DIR = RAW_DIR / "fifa"
 #: Candidate column names per field, tried in order. Covers the naming used by
 #: the common Kaggle EA FC exports without forcing one publisher's schema.
 COLUMN_CANDIDATES: dict[str, tuple[str, ...]] = {
-    "name": ("short_name", "long_name", "name", "player_name", "Name", "Player", "PLAYER"),
+    "name": (
+        "short_name", "common_name", "long_name", "name", "player_name",
+        "Name", "Player", "PLAYER",
+    ),
+    "first_name": ("first_name", "firstname", "given_name"),
+    "last_name": ("last_name", "lastname", "surname", "family_name"),
     "overall": ("overall", "overall_rating", "Overall", "OVR", "ovr", "rating"),
     "club": ("club_name", "club", "Club", "team", "Team", "TEAM", "club_team"),
     "positions": (
         "player_positions", "positions", "position", "Position", "POS", "best_position",
     ),
+    "gender": ("gender", "Gender", "sex"),
+    "league": ("league", "League", "league_name"),
     "age": ("age", "Age", "AGE"),
     "pace": ("pace", "Pace", "PAC"),
     "shooting": ("shooting", "Shooting", "SHO"),
@@ -110,6 +117,35 @@ def primary_role(positions: str | float) -> str | None:
     return None
 
 
+def _build_names(df: pd.DataFrame) -> pd.Series | None:
+    """Assemble a display name, whichever columns the export provides.
+
+    Exports disagree about this more than any other field. The FC27 database
+    carries ``common_name`` but leaves it blank for most players -- Mbappé has
+    an empty one and only ``first_name`` / ``last_name`` filled -- so a single
+    column is never enough. Falls back to joining first and last, and fills any
+    remaining blanks from the other source.
+    """
+    name_col = _find_column(df, "name")
+    first_col = _find_column(df, "first_name")
+    last_col = _find_column(df, "last_name")
+
+    combined = None
+    if first_col and last_col:
+        combined = (
+            df[first_col].fillna("").astype(str).str.strip()
+            + " "
+            + df[last_col].fillna("").astype(str).str.strip()
+        ).str.strip()
+        combined = combined.replace("", pd.NA)
+
+    if name_col:
+        primary = df[name_col].astype("string").str.strip().replace("", pd.NA)
+        return primary.fillna(combined) if combined is not None else primary.fillna("")
+
+    return combined
+
+
 def load_fifa(directory: Path | None = None) -> pd.DataFrame:
     """Load an EA FC export from ``data/raw/fifa/``.
 
@@ -120,19 +156,40 @@ def load_fifa(directory: Path | None = None) -> pd.DataFrame:
         FifaDataMissingError: When no usable CSV is found, with instructions.
     """
     directory = directory or FIFA_DIR
-    candidates = sorted(directory.glob("*.csv")) if directory.exists() else []
+    # Largest first: a partial export sitting alongside a full one should not
+    # win just because it sorts earlier.
+    candidates = (
+        sorted(directory.glob("*.csv"), key=lambda p: p.stat().st_size, reverse=True)
+        if directory.exists()
+        else []
+    )
 
     for path in candidates:
         df = pd.read_csv(path, low_memory=False)
-        name_col = _find_column(df, "name")
         overall_col = _find_column(df, "overall")
-        if not name_col or not overall_col:
-            logger.warning("%s has no recognisable name/overall column, skipping", path.name)
+        if not overall_col:
+            logger.warning("%s has no recognisable overall column, skipping", path.name)
             continue
+
+        names = _build_names(df)
+        if names is None:
+            logger.warning("%s has no recognisable name column, skipping", path.name)
+            continue
+
+        # Women's players share the file but never our leagues, and their names
+        # can collide with men's. Drop them rather than risk a wrong join.
+        gender_col = _find_column(df, "gender")
+        if gender_col is not None:
+            mens = df[gender_col].astype(str).str.contains("men", case=False, na=True)
+            womens = df[gender_col].astype(str).str.contains("women", case=False, na=False)
+            keep = mens & ~womens
+            if keep.any():
+                logger.info("Filtered out %d non-men's entries", int((~keep).sum()))
+                df, names = df[keep], names[keep]
 
         out = pd.DataFrame(
             {
-                "fifa_name": df[name_col].astype(str),
+                "fifa_name": names.astype(str),
                 "fifa_overall": pd.to_numeric(df[overall_col], errors="coerce"),
             }
         )

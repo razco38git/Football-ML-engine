@@ -45,9 +45,18 @@ LINE_BY_ROLE = {
     "F": "attack",
 }
 
-#: Slots per line in a 4-3-3. Used both to build an eleven and to weight the
-#: overall, so a brilliant keeper cannot carry a poor outfield.
+#: Slots per line in a 4-3-3. Used to build the eleven.
 FORMATION = {"goalkeeper": 1, "defence": 4, "midfield": 3, "attack": 3}
+
+#: Lines that count toward the overall rating, weighted by how many are on the
+#: pitch.
+#:
+#: Goalkeepers are selected into the eleven and reported, but excluded from the
+#: overall. Their rating rests on save percentage and goals conceded, both of
+#: which depend heavily on the defence in front of them, so folding a keeper
+#: into a team number imports that noise twice. The outfield ten is the more
+#: stable signal.
+OVERALL_LINES = {"defence": 4, "midfield": 3, "attack": 3}
 
 #: Roles are filled in this order when a line is short, so a team missing a
 #: recognised full-back borrows a centre-back rather than leaving a hole.
@@ -148,15 +157,18 @@ def team_strength(
     counts = selected.groupby(keys, observed=True).size().reset_index(name="n_players")
     wide = wide.merge(counts, on=keys, how="left")
 
-    available = [line for line in FORMATION if line in wide.columns]
-    weights = pd.Series({line: FORMATION[line] for line in available})
+    available = [line for line in OVERALL_LINES if line in wide.columns]
+    weights = pd.Series({line: OVERALL_LINES[line] for line in available})
     present = wide[available]
     # Normalise by the weights actually present, so a team with no rated keeper
     # is not dragged down by a missing line.
     wide["overall"] = (present * weights).sum(axis=1) / (present.notna() * weights).sum(axis=1)
 
     wide = wide.rename(
-        columns={**{line: f"strength_{line}" for line in available}, "overall": "strength_overall"}
+        columns={
+            **{line: f"strength_{line}" for line in FORMATION if line in wide.columns},
+            "overall": "strength_overall",
+        }
     )
     wide["method"] = method
 

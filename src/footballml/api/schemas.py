@@ -103,7 +103,7 @@ class PlayerRating(BaseModel):
     team: str
     league: str
     season: str
-    position: str = Field(description="GK, D, M or F")
+    position: str = Field(description="GK, CB, FB, MID, AMW or FWD")
     minutes: int
     rating: int | None = None
     rated: bool

@@ -422,7 +422,9 @@ def _to_player(row: pd.Series) -> PlayerRating:
         team=str(row["Team"]),
         league=str(row["League"]),
         season=str(row["Season"]),
-        position=str(row["position_group"]) if pd.notna(row.get("position_group")) else "?",
+        # `role` is the detailed position (CB/FB/MID/AMW/FWD/GK) derived from
+        # EA data; `position_group` is the coarse Understat fallback.
+        position=str(row.get("role") or row.get("position_group") or "?"),
         minutes=int(row["minutes"]),
         rating=num("rating", int),
         rated=bool(row.get("rated", False)),
@@ -463,7 +465,7 @@ def players(
     if league:
         rows = rows[rows["League"] == league]
     if position:
-        rows = rows[rows["position_group"] == position]
+        rows = rows[rows["role"] == position]
     if search:
         rows = rows[rows["Player"].str.contains(search, case=False, na=False)]
     if min_rating:

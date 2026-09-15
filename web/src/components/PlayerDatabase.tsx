@@ -6,9 +6,11 @@ import { getRatingBg, getRatingTextColor } from '../data/footballData';
 
 const POSITIONS: Record<string, string> = {
   GK: 'Goalkeeper',
-  D: 'Defender',
-  M: 'Midfielder',
-  F: 'Forward',
+  CB: 'Centre back',
+  FB: 'Full back',
+  MID: 'Midfielder',
+  AMW: 'Attacking mid / winger',
+  FWD: 'Forward',
 };
 
 /**
@@ -25,19 +27,31 @@ const ATTRIBUTES: Record<string, { key: keyof PlayerRating; label: string; short
     { key: 'sub_workload', label: 'Workload faced', short: 'WRK' },
     { key: 'sub_penalties', label: 'Penalties', short: 'PEN' },
   ],
-  D: [
+  CB: [
     { key: 'sub_defending', label: 'Defending', short: 'DEF' },
     { key: 'sub_involvement', label: 'Build-up', short: 'BLD' },
     { key: 'sub_creation', label: 'Creation', short: 'CRE' },
     { key: 'sub_finishing', label: 'Finishing', short: 'FIN' },
   ],
-  M: [
+  FB: [
+    { key: 'sub_defending', label: 'Defending', short: 'DEF' },
+    { key: 'sub_creation', label: 'Creation & crossing', short: 'CRE' },
+    { key: 'sub_involvement', label: 'Build-up', short: 'BLD' },
+    { key: 'sub_finishing', label: 'Finishing', short: 'FIN' },
+  ],
+  MID: [
     { key: 'sub_creation', label: 'Creation', short: 'CRE' },
     { key: 'sub_involvement', label: 'Build-up', short: 'BLD' },
     { key: 'sub_defending', label: 'Defending', short: 'DEF' },
     { key: 'sub_finishing', label: 'Finishing', short: 'FIN' },
   ],
-  F: [
+  AMW: [
+    { key: 'sub_creation', label: 'Creation', short: 'CRE' },
+    { key: 'sub_finishing', label: 'Finishing', short: 'FIN' },
+    { key: 'sub_involvement', label: 'Build-up', short: 'BLD' },
+    { key: 'sub_volume', label: 'Shot volume', short: 'VOL' },
+  ],
+  FWD: [
     { key: 'sub_finishing', label: 'Finishing', short: 'FIN' },
     { key: 'sub_creation', label: 'Creation', short: 'CRE' },
     { key: 'sub_involvement', label: 'Build-up', short: 'BLD' },

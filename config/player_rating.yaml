@@ -16,16 +16,18 @@
 
 # How much EA FC's overall contributes, against our performance rating.
 #
-# 0.5 is an even split. The two measure different things and cover each other's
-# gaps: EA's is balanced across positions by people who watch players and takes
-# no account of minutes; ours is grounded in what happened this season and moves
-# with form. Set to 0 to ignore FIFA entirely.
+# 0.7 leads with EA's judgement and lets performance adjust it. EA's ratings are
+# balanced across positions by people who watch players and take no account of
+# minutes; ours are grounded in what actually happened this season and move with
+# form. Leading with EA keeps the numbers familiar and well-calibrated across
+# positions; the 0.3 of performance is what stops a player coasting on
+# reputation after a poor season. Set to 0 to ignore FIFA entirely.
 #
 # EA's overall is mapped onto our scale by within-role percentile before
 # blending, since the raw scales differ and averaging directly would let
 # whichever is wider dominate. Players with no EA entry keep their performance
 # rating rather than being penalised for the gap.
-fifa_weight: 0.5
+fifa_weight: 0.7
 
 # Minimum minutes before a player is rated. Below this the sample is too thin
 # for percentiles to mean anything, however hard shrinkage works.

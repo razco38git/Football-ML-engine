@@ -221,8 +221,14 @@ def rate_players(
     work["rating"] = _blend_with_fifa(work, config)
     work["rated"] = True
 
-    for column in [*sub_columns, "composite_raw", "composite", "rating"]:
-        df.loc[work.index, column] = work[column]
+    # `performance_rating` is carried through alongside the blended `rating` so
+    # the two can be compared. Where they disagree is the interesting part: a
+    # player well above their EA overall is in form, one well below is coasting
+    # on reputation.
+    carried = [*sub_columns, "composite_raw", "composite", "performance_rating", "rating"]
+    for column in carried:
+        if column in work.columns:
+            df.loc[work.index, column] = work[column]
     df.loc[work.index, "rated"] = True
 
     # Sub-ratings are nicer to read on the same 0-99 scale as the overall.
