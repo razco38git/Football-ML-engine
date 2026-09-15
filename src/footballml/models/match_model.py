@@ -1,0 +1,207 @@
+"""The match predictor: two Poisson goal-rate models plus a Dixon-Coles matrix.
+
+Rather than classifying home/draw/away directly, we predict *how many goals each
+side is expected to score* and derive everything else from the resulting
+scoreline distribution. Three reasons this is the better shape:
+
+1. Expected goals are an output the description explicitly asks for, and here
+   they are the model's native prediction rather than a bolt-on.
+2. 1X2 probabilities, scorelines, over/under and BTTS all come from one object,
+   so they can never contradict each other on the site.
+3. Draws are notoriously hard to classify directly. Deriving them from a goal
+   distribution handles them naturally.
+
+Gradient boosting with a Poisson objective is the right estimator for a count
+target: it models the conditional *rate*, keeps predictions positive, and its
+loss matches the data-generating process.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingRegressor
+
+from footballml.models.dixon_coles import (
+    DEFAULT_MAX_GOALS,
+    both_teams_score,
+    fit_rho,
+    most_likely_score,
+    outcome_probs,
+    over_under,
+    score_matrix,
+)
+
+#: Conservative defaults for a few thousand training rows. Deliberately *not*
+#: using early stopping: its validation split is random, which on time-ordered
+#: football data means training against future matches. The walk-forward
+#: backtest is the honest way to choose ``max_iter``.
+DEFAULT_GBM_PARAMS: dict[str, Any] = {
+    "loss": "poisson",
+    "learning_rate": 0.05,
+    "max_iter": 300,
+    "max_leaf_nodes": 15,
+    "min_samples_leaf": 40,
+    "l2_regularization": 1.0,
+    "early_stopping": False,
+    "random_state": 7,
+}
+
+OUTCOMES = ("H", "D", "A")
+
+
+@dataclass
+class MatchPredictor:
+    """Predicts goal rates and the full scoreline distribution for a fixture."""
+
+    max_goals: int = DEFAULT_MAX_GOALS
+    gbm_params: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_GBM_PARAMS))
+    use_dixon_coles: bool = True
+
+    home_model_: HistGradientBoostingRegressor | None = field(default=None, init=False)
+    away_model_: HistGradientBoostingRegressor | None = field(default=None, init=False)
+    rho_: float = field(default=0.0, init=False)
+    feature_names_: list[str] = field(default_factory=list, init=False)
+
+    def fit(
+        self,
+        X: pd.DataFrame,
+        home_goals: np.ndarray | pd.Series,
+        away_goals: np.ndarray | pd.Series,
+    ) -> MatchPredictor:
+        """Fit both goal-rate models and the Dixon-Coles correlation.
+
+        ``X`` may contain NaNs -- histogram gradient boosting handles missing
+        values natively by learning a default split direction. That matters here
+        because early-season fixtures genuinely have no prior form, and imputing
+        zeros would tell the model something false.
+        """
+        self.feature_names_ = list(X.columns)
+        hg = np.asarray(home_goals, dtype="float64")
+        ag = np.asarray(away_goals, dtype="float64")
+
+        self.home_model_ = HistGradientBoostingRegressor(**self.gbm_params).fit(X, hg)
+        self.away_model_ = HistGradientBoostingRegressor(**self.gbm_params).fit(X, ag)
+
+        if self.use_dixon_coles:
+            # Fitted in-sample. It is a single scalar estimated from thousands of
+            # scorelines, so the overfitting risk is negligible.
+            mu_h, mu_a = self.predict_goal_rates(X)
+            self.rho_ = fit_rho(mu_h, mu_a, hg, ag, max_goals=self.max_goals)
+
+        return self
+
+    def predict_goal_rates(self, X: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+        """Expected goals for each side. This is the site's headline number."""
+        self._check_fitted()
+        X = X[self.feature_names_]
+        # Poisson-loss HGB returns the rate directly, but clip anyway: a rate of
+        # zero would make the scoreline matrix degenerate.
+        mu_h = np.clip(self.home_model_.predict(X), 1e-6, None)
+        mu_a = np.clip(self.away_model_.predict(X), 1e-6, None)
+        return mu_h, mu_a
+
+    def predict_matrix(self, X: pd.DataFrame) -> np.ndarray:
+        """Full ``(n, G+1, G+1)`` scoreline probability matrix."""
+        mu_h, mu_a = self.predict_goal_rates(X)
+        return score_matrix(mu_h, mu_a, rho=self.rho_, max_goals=self.max_goals)
+
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        """1X2 probabilities as ``(n, 3)`` columns ``[H, D, A]``."""
+        return outcome_probs(self.predict_matrix(X))
+
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        """Most likely outcome label per fixture."""
+        return np.array(OUTCOMES, dtype=object)[self.predict_proba(X).argmax(axis=1)]
+
+    def predict_frame(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Everything the site needs for one fixture, in one table.
+
+        Columns: expected goals per side, 1X2 probabilities, the modal scoreline,
+        over/under 2.5 and both-teams-to-score.
+        """
+        mu_h, mu_a = self.predict_goal_rates(X)
+        matrix = score_matrix(mu_h, mu_a, rho=self.rho_, max_goals=self.max_goals)
+        probs = outcome_probs(matrix)
+        modal = most_likely_score(matrix)
+
+        return pd.DataFrame(
+            {
+                "expected_goals_home": mu_h,
+                "expected_goals_away": mu_a,
+                "prob_home_win": probs[:, 0],
+                "prob_draw": probs[:, 1],
+                "prob_away_win": probs[:, 2],
+                "predicted_outcome": np.array(OUTCOMES, dtype=object)[probs.argmax(axis=1)],
+                "modal_score_home": modal[:, 0],
+                "modal_score_away": modal[:, 1],
+                "prob_over_2_5": over_under(matrix, 2.5),
+                "prob_btts": both_teams_score(matrix),
+            },
+            index=X.index,
+        )
+
+    def explain(self, X: pd.DataFrame, top_n: int = 5) -> list[dict[str, list[tuple[str, float]]]]:
+        """Per-fixture feature contributions to each side's expected goals.
+
+        Uses SHAP, which apportions the gap between a prediction and the dataset
+        average across the features that caused it. A contribution of ``+0.18``
+        on ``xg_diff_last_5_diff`` means that feature pushed the expected goal
+        count up by 0.18 relative to an average fixture.
+
+        This is what lets the site answer "why did you predict that?" with the
+        model's actual reasoning rather than a plausible-sounding story.
+
+        Args:
+            X: Fixtures to explain.
+            top_n: Contributions to keep per side, ranked by absolute magnitude.
+
+        Returns:
+            One dict per fixture with ``home`` and ``away`` lists of
+            ``(feature, contribution)`` pairs, largest effect first.
+        """
+        import shap  # imported lazily: heavy, and only needed for explanations
+
+        self._check_fitted()
+        X = X[self.feature_names_]
+
+        contributions = {
+            side: shap.TreeExplainer(model).shap_values(X)
+            for side, model in (("home", self.home_model_), ("away", self.away_model_))
+        }
+
+        out: list[dict[str, list[tuple[str, float]]]] = []
+        for row in range(len(X)):
+            entry: dict[str, list[tuple[str, float]]] = {}
+            for side, values in contributions.items():
+                pairs = list(zip(self.feature_names_, values[row], strict=True))
+                pairs.sort(key=lambda kv: abs(kv[1]), reverse=True)
+                entry[side] = [(name, float(v)) for name, v in pairs[:top_n]]
+            out.append(entry)
+        return out
+
+    def _check_fitted(self) -> None:
+        if self.home_model_ is None or self.away_model_ is None:
+            raise RuntimeError("MatchPredictor is not fitted; call fit() first")
+
+
+def feature_columns(df: pd.DataFrame) -> list[str]:
+    """Model input columns: every numeric column that is not an identifier or target.
+
+    Note what is deliberately absent: bookmaker odds. They are the strongest
+    single predictor available and using them would inflate every metric, but a
+    model that predicts the market by reading the market has learned nothing.
+    Odds are kept strictly as an evaluation benchmark.
+    """
+    excluded = {
+        "League", "Season", "Date", "HomeTeam", "AwayTeam",
+        "FTHG", "FTAG", "FTR",
+    }
+    return [
+        c
+        for c in df.columns
+        if c not in excluded and pd.api.types.is_numeric_dtype(df[c])
+    ]

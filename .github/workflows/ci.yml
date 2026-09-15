@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # Deliberately not installing the `ingest` extra: soccerdata pulls
+      # seleniumbase and a full browser stack, which CI does not need to lint
+      # and test the model code.
+      - name: Install
+        run: pip install -e ".[model,api,dev]"
+
+      - name: Lint
+        run: ruff check src pipelines tests
+
+      - name: Format check
+        run: ruff format --check src pipelines tests
+
+      - name: Type check
+        run: mypy src
+
+      - name: Test
+        run: pytest -v

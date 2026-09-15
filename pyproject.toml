@@ -1,0 +1,64 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "footballml"
+version = "0.1.0"
+description = "Football match prediction, player ratings, and accuracy tracking"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "scipy>=1.12",
+    "scikit-learn>=1.4",
+    "pyyaml>=6.0",
+    "typer>=0.12",
+]
+
+[project.optional-dependencies]
+# Kept separate: soccerdata pulls seleniumbase/selenium, a heavyweight browser
+# automation stack. Only the nightly ingest job needs it -- the API and the
+# model training path must stay installable without it.
+ingest = [
+    "soccerdata>=1.9.1",
+    "requests>=2.31",
+]
+model = [
+    "lightgbm>=4.3",
+    "shap>=0.45",
+]
+api = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "psycopg[binary]>=3.1",
+]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "pandas-stubs",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/footballml"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "PD"]
+ignore = ["PD901"]  # `df` is a fine name for a dataframe
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_ignores = true
+warn_redundant_casts = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

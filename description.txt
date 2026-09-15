@@ -1,0 +1,11 @@
+I want a full football Machine learning site that can do the following:
+1. a machine learning match predictor that can predict the expected result (with expected goals) of a certain match based on the following metrics (and maybe more):
+last 5 games team form (results) - overall and also last 5 games at the next venue (meaning if they are at home then last 5 home games), last 5 games expected goals, whether they are home or away, their shots and shots on target in their last 5 games.
+i want the site to show that for each upcoming match while showing selected variables of those we discussed or those you think can be relevant, and in that way we can explain people why we predict that result.
+2. 2.1 a machine learning player rating out of 99 on all aspects possible: all fifa game - ea fc stats, all football manager stats translated to 99 from out of 20, scoutlab site player percentiles. and any other metric that you think can can be useful to determine a player's strength.
+i want the site to look like the fifa game - ea fc meaning there are all the players in a table with their overall rating and show all the metrics.
+2.2 i would also like for the players - a player similarity generator that can show based on all these metrics which players are the most similar to a certain player.
+3. by having the player strength/rating we can create a team strength/rating and that can be a major influence as well on our match predictor.
+
+
+i want you to collect all the data of a match we predicted and show the difference to what we predicted to what actually happened, and in that way we can show people how accurate our predictor is and also for ourselves we can make the model learn better.
