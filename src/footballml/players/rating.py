@@ -106,12 +106,20 @@ def rate_players(
     k = float(config["shrinkage_nineties"])
 
     df = players.copy()
+    # Ratings are computed per role. `role` carries the five outfield roles plus
+    # goalkeeper and comes from EA positions; without a FIFA export we fall back
+    # to Understat's coarse GK/D/M/F, which cannot tell a centre-back from a
+    # full-back but still rates everyone.
+    if "role" not in df.columns:
+        from footballml.players.fifa import FALLBACK_ROLE
+
+        df["role"] = df["position_group"].map(FALLBACK_ROLE)
     df["rated"] = False
     df["unrated_reason"] = pd.Series([None] * len(df), dtype="object")
 
-    df.loc[df["position_group"].isna(), "unrated_reason"] = "No position recorded"
+    df.loc[df["role"].isna(), "unrated_reason"] = "No position recorded"
     for group, reason in UNRATED_GROUPS.items():
-        df.loc[df["position_group"] == group, "unrated_reason"] = reason
+        df.loc[df["role"] == group, "unrated_reason"] = reason
     df.loc[
         (df["minutes"] < min_minutes) & df["unrated_reason"].isna(), "unrated_reason"
     ] = f"Under {min_minutes} minutes played"
@@ -121,10 +129,10 @@ def rate_players(
     min_group = int(config.get("min_group_size", 0))
     if min_group:
         qualified = df[df["unrated_reason"].isna()]
-        sizes = qualified.groupby(["position_group", "Season"], observed=True).size()
+        sizes = qualified.groupby(["role", "Season"], observed=True).size()
         sparse = {key for key, size in sizes.items() if size < min_group}
         if sparse:
-            keys = list(zip(df["position_group"], df["Season"], strict=True))
+            keys = list(zip(df["role"], df["Season"], strict=True))
             too_small = pd.Series([k in sparse for k in keys], index=df.index)
             df.loc[too_small & df["unrated_reason"].isna(), "unrated_reason"] = (
                 f"Fewer than {min_group} comparable players this season"
@@ -137,14 +145,14 @@ def rate_players(
         return df
 
     work = df[eligible].copy()
-    by = ["position_group", "Season"]
+    by = ["role", "Season"]
 
     # --- 1 & 2: percentiles into sub-ratings -------------------------------
     sub_columns: set[str] = set()
     composites = pd.Series(np.nan, index=work.index)
 
     for group, spec in config["positions"].items():
-        mask = work["position_group"] == group
+        mask = work["role"] == group
         if not mask.any():
             continue
         block = work[mask]
@@ -206,10 +214,11 @@ def rate_players(
     # Within-position ranking means the best keeper and the best forward land
     # on the same rating, which is both what the eye expects and how EA's own
     # scale behaves.
-    work["rating"] = _to_scale(
+    work["performance_rating"] = _to_scale(
         work.groupby(by, observed=True)["composite"].rank(pct=True),
         config["scale"],
     )
+    work["rating"] = _blend_with_fifa(work, config)
     work["rated"] = True
 
     for column in [*sub_columns, "composite_raw", "composite", "rating"]:
@@ -226,6 +235,51 @@ def rate_players(
         int(df["rated"].sum()), len(df), int((~df["rated"]).sum()),
     )
     return df
+
+
+def _blend_with_fifa(work: pd.DataFrame, config: dict[str, Any]) -> pd.Series:
+    """Combine the performance rating with EA's overall.
+
+    The two measure genuinely different things and each covers the other's gap.
+    EA's rating is balanced across positions by people who watch players, and it
+    does not care how many minutes someone played. Ours is grounded in what
+    actually happened on the pitch this season, and moves when form does.
+
+    Blending needs care on one point: the two scales are not the same. EA's
+    ratings cluster in the sixties and seventies with a long thin top, ours are
+    spread by construction. Averaging them raw would let whichever is wider
+    dominate, so EA's overall is first mapped onto our scale by percentile --
+    within position, so a keeper is compared with keepers.
+
+    Players with no EA entry keep their performance rating unchanged rather than
+    being penalised for the gap.
+    """
+    weight = float(config.get("fifa_weight", 0.0))
+    performance = work["performance_rating"]
+
+    if weight <= 0 or "fifa_overall" not in work.columns:
+        return performance
+
+    present = work["fifa_overall"].notna()
+    if not present.any():
+        logger.warning("fifa_weight set but no FIFA ratings matched; using performance only")
+        return performance
+
+    group = "role" if "role" in work.columns else "position_group"
+    fifa_percentile = work.groupby([group, "Season"], observed=True)["fifa_overall"].rank(
+        pct=True
+    )
+    fifa_on_our_scale = _to_scale(fifa_percentile, config["scale"])
+
+    blended = performance.copy()
+    blended[present] = (
+        performance[present] * (1 - weight) + fifa_on_our_scale[present] * weight
+    )
+    logger.info(
+        "Blended %d/%d ratings with FIFA at weight %.2f",
+        int(present.sum()), len(work), weight,
+    )
+    return blended
 
 
 def _to_scale(percentiles: pd.Series, anchors: list[list[float]]) -> pd.Series:

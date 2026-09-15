@@ -1,54 +1,58 @@
 # Player rating configuration.
 #
-# Every judgement call in the rating lives here rather than in code, so the
-# model can be argued with. If you think buildup play is undervalued for
-# defenders, change the number and re-run.
+# Every judgement call lives here rather than in code, so the model can be
+# argued with. If you think build-up play is undervalued for full-backs, change
+# the number and re-run.
 #
 # How a rating is produced:
-#   1. Each metric is converted to a per-90 rate.
-#   2. Within a position group and season, each rate becomes a percentile
-#      (0-1) against that group's peers. This is the free equivalent of a
-#      scouting percentile report, and it means a defender is only ever
-#      compared with defenders.
-#   3. Percentiles combine into sub-ratings using `weights` below.
-#   4. Sub-ratings combine into one composite using `sub_rating_weights`.
-#   5. The composite is shrunk toward the position mean for players with few
-#      minutes, then mapped onto the 0-99 scale by `scale`.
+#   1. Each counting stat becomes a per-90 rate.
+#   2. Within a role and season, each rate becomes a percentile against peers.
+#      This is the free equivalent of a scouting percentile report, and it means
+#      a centre-back is only ever compared with centre-backs.
+#   3. Percentiles combine into sub-ratings using the weights below.
+#   4. Sub-ratings combine into one composite.
+#   5. The composite is shrunk toward the role mean for players with few
+#      minutes, mapped onto 0-99 by `scale`, then blended with EA's overall.
 
-# Minimum minutes before a player is rated at all. Below this the sample is too
-# thin for percentiles to mean anything, however hard shrinkage works.
+# How much EA FC's overall contributes, against our performance rating.
+#
+# 0.5 is an even split. The two measure different things and cover each other's
+# gaps: EA's is balanced across positions by people who watch players and takes
+# no account of minutes; ours is grounded in what happened this season and moves
+# with form. Set to 0 to ignore FIFA entirely.
+#
+# EA's overall is mapped onto our scale by within-role percentile before
+# blending, since the raw scales differ and averaging directly would let
+# whichever is wider dominate. Players with no EA entry keep their performance
+# rating rather than being penalised for the gap.
+fifa_weight: 0.5
+
+# Minimum minutes before a player is rated. Below this the sample is too thin
+# for percentiles to mean anything, however hard shrinkage works.
 min_minutes: 450
 
-# Minimum peers in a (position, season) pool before it is rated at all.
+# Minimum peers in a (role, season) pool before it is rated at all.
 #
 # A percentile is only meaningful against a real distribution. Five matchweeks
 # into a season barely anyone has cleared the minutes floor, so whoever has
-# lands in the 99th percentile of a pool of twelve. That is how a player with
-# exactly 450 minutes came out rated 94.
-#
-# Groups below this size are left unrated, and the player's last complete
-# season is shown instead -- which is the honest answer to "how good are they?"
-# five games in.
+# lands in the 99th percentile of a pool of twelve.
 min_group_size: 40
 
 # Empirical-Bayes shrinkage strength, in 90-minute appearances.
 #
-# A player's composite is pulled toward their position's mean with weight
-# k / (n + k), where n is nineties played. At k = 8, a player with 8 full
-# matches sits halfway between their own numbers and the positional average;
-# by 30 matches they are ~79% their own.
+# A player's composite is pulled toward their role's mean with weight
+# k / (n + k). At k = 8, eight full matches sits halfway between their own
+# numbers and the role average; by thirty they are ~79% their own.
 #
-# Without this, a striker who scored twice in 500 minutes rates above Haaland.
+# This interacts with position: goalkeepers play whole seasons and so are shrunk
+# least, which is why ratings are ranked within role rather than across all
+# players.
 shrinkage_nineties: 8
 
-# Sub-ratings per position group. Weights within each sub-rating are relative
-# and get normalised, so only their ratios matter.
-#
-# Goalkeepers are absent on purpose: Understat carries no saves, no post-shot
-# xG and nothing defensive, so there is no honest way to rate them from this
-# source. They are reported as unrated rather than given an invented number.
+# Roles. Weights within a sub-rating are relative and get normalised, so only
+# their ratios matter. A negative weight means lower is better.
 positions:
-  F:
+  FWD:
     label: Forward
     sub_ratings:
       finishing:
@@ -72,7 +76,38 @@ positions:
       volume: 0.13
       involvement: 0.20
 
-  M:
+  AMW:
+    label: Attacking midfielder / winger
+    sub_ratings:
+      # Split from central midfield because the jobs differ: wingers and number
+      # tens are judged on what they produce in the final third, not on how much
+      # of the build-up runs through them.
+      creation:
+        xa_per90: 3.0
+        key_passes_per90: 2.0
+        assists_per90: 1.0
+      finishing:
+        np_xg_per90: 2.5
+        np_goals_per90: 2.0
+        finishing_delta_per90: 0.3
+      involvement:
+        xg_chain_share: 1.0
+        xg_chain_per90: 1.0
+        xg_buildup_share: 0.5
+        xg_buildup_per90: 0.5
+      volume:
+        shots_per90: 1.0
+      defending:
+        interceptions_per90: 1.0
+        tackles_won_per90: 1.0
+    sub_rating_weights:
+      creation: 0.34
+      finishing: 0.28
+      involvement: 0.22
+      volume: 0.08
+      defending: 0.08
+
+  MID:
     label: Midfielder
     sub_ratings:
       creation:
@@ -82,7 +117,7 @@ positions:
       involvement:
         xg_chain_share: 1.0
         xg_chain_per90: 1.0
-        xg_buildup_share: 1.0        # buildup matters most in midfield
+        xg_buildup_share: 1.0        # build-up matters most in central midfield
         xg_buildup_per90: 1.0
       finishing:
         np_xg_per90: 2.0
@@ -101,49 +136,77 @@ positions:
       defending: 0.20
       volume: 0.08
 
-  D:
-    label: Defender
+  FB:
+    label: Full back
     sub_ratings:
-      # Defending is now measured directly, from FBref interceptions and
-      # tackles won, and carries the most weight. Before these existed the
-      # group was judged purely on attacking involvement, which put wingers
-      # and attacking full-backs above every genuine centre-back.
+      # Full-backs are separated from centre-backs because they are judged on
+      # both jobs. Merging them is what previously let overlapping full-backs
+      # out-rate every genuine centre-back.
       defending:
         interceptions_per90: 2.5
         tackles_won_per90: 2.5
         recoveries_per90: 1.0
-        fouls_per90: -0.5          # negative: conceding fouls is a cost
+        fouls_per90: -0.5
+      creation:
+        crosses_per90: 2.0
+        xa_per90: 2.0
+        key_passes_per90: 1.5
+        assists_per90: 1.0
       involvement:
         xg_buildup_share: 1.5
         xg_buildup_per90: 1.5
         xg_chain_share: 1.0
         xg_chain_per90: 1.0
-      creation:
-        xa_per90: 2.0
-        key_passes_per90: 1.5
-        assists_per90: 1.0
       finishing:
         np_xg_per90: 1.0
         np_goals_per90: 1.0
     sub_rating_weights:
-      defending: 0.50
+      defending: 0.38
+      creation: 0.32
       involvement: 0.25
-      creation: 0.20
       finishing: 0.05
+
+  CB:
+    label: Centre back
+    sub_ratings:
+      # Defending dominates, as it should for the role. Before FBref supplied
+      # interceptions and tackles this group was judged on attacking output
+      # alone, which was indefensible.
+      defending:
+        interceptions_per90: 3.0
+        tackles_won_per90: 2.5
+        recoveries_per90: 1.5
+        fouls_per90: -0.5
+      involvement:
+        xg_buildup_share: 1.5
+        xg_buildup_per90: 1.5
+        xg_chain_share: 0.5
+        xg_chain_per90: 0.5
+      creation:
+        xa_per90: 1.0
+        key_passes_per90: 0.5
+      finishing:
+        np_xg_per90: 1.0
+        np_goals_per90: 1.0          # set-piece goals are real value from a CB
+    sub_rating_weights:
+      defending: 0.62
+      involvement: 0.24
+      creation: 0.07
+      finishing: 0.07
 
   GK:
     label: Goalkeeper
     sub_ratings:
-      # FBref keeper stats, not FIFA ratings. Save percentage is what happened;
-      # a FIFA rating is an opinion, and SoFIFA is behind Cloudflare anyway.
+      # FBref keeper stats, not FIFA ratings, for the performance half. Save
+      # percentage is what happened; a FIFA rating is an opinion. The blend
+      # brings EA's judgement back in at `fifa_weight`.
       #
-      # Caveat worth knowing: without post-shot xG there is no way to adjust for
-      # shot difficulty, so a keeper behind a poor defence faces harder chances
-      # and will be understated. Workload is carried as a partial counterweight,
-      # since facing more shots and still saving them is genuinely harder.
+      # Caveat: without post-shot xG there is no adjustment for shot difficulty,
+      # so a keeper behind a poor defence faces harder chances and is
+      # understated. Workload is a partial counterweight.
       shot_stopping:
         save_pct: 3.0
-        goals_against_per90: -2.0     # negative: conceding is bad
+        goals_against_per90: -2.0
       reliability:
         clean_sheet_pct: 2.0
       workload:
@@ -156,7 +219,7 @@ positions:
       workload: 0.10
       penalties: 0.05
 
-# Discipline applies to every outfield group and only ever subtracts.
+# Discipline applies to every outfield role and only ever subtracts.
 discipline:
   weight: 0.03
   metrics:
@@ -165,10 +228,8 @@ discipline:
 
 # Composite percentile -> 0-99, by interpolating between these anchors.
 #
-# Shaped to match how people already read football ratings: a crowded middle
-# around 65-72, a long thin tail at the top, and nobody at 99. The scale is
-# asserted here rather than fitted to EA's numbers, which keeps the rating
-# honestly ours and removes a dependency on a scraper that is currently broken.
+# Shaped like ratings people already read: a crowded middle around 65-72, a long
+# thin tail at the top, nobody at 99.
 scale:
   - [0.00, 48]
   - [0.10, 58]

@@ -21,8 +21,10 @@ from footballml.data import PROCESSED_DIR  # noqa: E402
 from footballml.ingest.understat import UNDERSTAT_LEAGUES, season_labels  # noqa: E402
 from footballml.players.ingest import fetch_player_seasons  # noqa: E402
 from footballml.players.rating import latest_ratings, rate_players  # noqa: E402
+from footballml.players.team_strength import team_strength  # noqa: E402
 
 OUTPUT = PROCESSED_DIR / "player_ratings.csv"
+TEAM_OUTPUT = PROCESSED_DIR / "team_strength.csv"
 
 
 def main() -> None:
@@ -74,6 +76,21 @@ def main() -> None:
 
     print("\n=== Rating distribution (rated players, latest season) ===")
     print(current["rating"].describe().to_string(float_format=lambda v: f"{v:.1f}"))
+
+    strength = team_strength(rated)
+    if not strength.empty:
+        strength.to_csv(TEAM_OUTPUT, index=False)
+        log.info("Wrote %s", TEAM_OUTPUT)
+
+        strength["Season"] = strength["Season"].astype(str)
+        latest = strength[strength["Season"] == strength["Season"].max()]
+        lines = [c for c in latest.columns if c.startswith("strength_")]
+        print(f"\n=== Strongest squads, {latest['Season'].iloc[0]} ===")
+        print(
+            latest.nlargest(12, "strength_overall")[["Team", "League", *lines]].to_string(
+                index=False, float_format=lambda v: f"{v:.1f}"
+            )
+        )
 
 
 if __name__ == "__main__":

@@ -141,6 +141,7 @@ def fetch_player_seasons(
     leagues: list[str] | None = None,
     seasons: list[str] | None = None,
     with_fbref: bool = True,
+    with_fifa: bool = True,
 ) -> pd.DataFrame:
     """Fetch per-season player totals and derive per-90 rates.
 
@@ -217,5 +218,15 @@ def fetch_player_seasons(
             on=["League", "Season", "Team"],
             fallback_on=["League", "Season"],
         )
+
+    if with_fifa:
+        # Optional: adds EA overalls for the blend and, more importantly, the
+        # detailed positions no free performance source provides.
+        from footballml.players.fifa import FifaDataMissingError, attach_fifa, load_fifa
+
+        try:
+            out = attach_fifa(out, load_fifa())
+        except FifaDataMissingError as exc:
+            logger.warning("%s", exc)
 
     return out.sort_values(["Season", "League", "Player"]).reset_index(drop=True)
