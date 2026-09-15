@@ -132,6 +132,12 @@ export const api = {
   /** Every rated season for one player, newest first. */
   playerHistory: (name: string) => fetchPlayerHistory(name),
 
+  /** Team ratings built from player ratings. */
+  teams: (league?: string, limit = 100) => fetchTeams(league, limit),
+
+  /** The players behind a team's rating. */
+  squad: (team: string) => fetchSquad(team),
+
   /** Any pairing, scored live using each side's form as of today. */
   predict: async (home_team: string, away_team: string, explain = true) => {
     const response = await fetch(`${BASE_URL}/predict`, {
@@ -225,4 +231,30 @@ export function fetchPlayers(query: PlayerQuery = {}): Promise<PlayerPage> {
 /** Every rated season for one player, newest first. */
 export function fetchPlayerHistory(name: string): Promise<PlayerRating[]> {
   return get<PlayerRating[]>(`/players/${encodeURIComponent(name)}`);
+}
+
+export interface TeamStrength {
+  team: string;
+  league: string;
+  season: string;
+  /** eleven | best_n | squad */
+  method: string;
+  n_players: number;
+  strength_overall: number;
+  strength_goalkeeper: number | null;
+  strength_defence: number | null;
+  strength_midfield: number | null;
+  strength_attack: number | null;
+}
+
+/** Team ratings built from player ratings, strongest first. */
+export function fetchTeams(league?: string, limit = 100): Promise<TeamStrength[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (league && league !== 'All') params.set('league', league);
+  return get<TeamStrength[]>(`/teams?${params}`);
+}
+
+/** The players a team's rating was built from, highest minutes first. */
+export function fetchSquad(team: string): Promise<PlayerRating[]> {
+  return get<PlayerRating[]>(`/teams/${encodeURIComponent(team)}/squad`);
 }

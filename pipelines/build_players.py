@@ -33,6 +33,12 @@ def main() -> None:
     parser.add_argument("--start-season", default="1415")
     parser.add_argument("--end-season", default=None)
     parser.add_argument("--top", type=int, default=20, help="How many to print.")
+    parser.add_argument(
+        "--team-method",
+        default="eleven",
+        choices=["eleven", "best_n", "squad"],
+        help="How a team rating is built. Default is the predicted starting eleven.",
+    )
     args = parser.parse_args()
 
     # Player names carry accents that a default Windows console codepage cannot
@@ -77,7 +83,7 @@ def main() -> None:
     print("\n=== Rating distribution (rated players, latest season) ===")
     print(current["rating"].describe().to_string(float_format=lambda v: f"{v:.1f}"))
 
-    strength = team_strength(rated)
+    strength = team_strength(rated, method=args.team_method)
     if not strength.empty:
         strength.to_csv(TEAM_OUTPUT, index=False)
         log.info("Wrote %s", TEAM_OUTPUT)

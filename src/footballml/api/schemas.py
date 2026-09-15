@@ -139,6 +139,26 @@ class PlayerPage(BaseModel):
     players: list[PlayerRating]
 
 
+class TeamStrength(BaseModel):
+    """A team's rating, built from its players.
+
+    ``method`` records how the squad was reduced: ``eleven`` is the predicted
+    starting eleven (highest-minute player per formation slot), ``best_n`` the
+    top-rated N regardless of minutes, ``squad`` everyone weighted by minutes.
+    """
+
+    team: str
+    league: str
+    season: str
+    method: str
+    n_players: int
+    strength_overall: float
+    strength_goalkeeper: float | None = None
+    strength_defence: float | None = None
+    strength_midfield: float | None = None
+    strength_attack: float | None = None
+
+
 class PredictRequest(BaseModel):
     home_team: str
     away_team: str

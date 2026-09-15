@@ -1,19 +1,26 @@
-"""Squad strength from player ratings.
+"""Squad and starting-eleven strength from player ratings.
 
-Item 3 of the original brief: turn player ratings into a team rating that can
-feed the match model.
+Item 3 of the original brief: turn player ratings into a team rating the match
+model can use.
 
-The honest framing is that this is a **squad** rating, not a starting eleven.
-Predicted line-ups for matches that have not been played are not freely
-available anywhere -- nobody publishes Saturday's teamsheet in a form that can
-be ingested. What can be measured is who has actually been playing, which in
-practice is the same eleven: minutes are the best available proxy for selection.
+Predicted line-ups for unplayed matches are not freely available anywhere, so
+the eleven has to be inferred. Minutes are the evidence: a player who has
+started every match will almost certainly start the next one, and one who has
+played 200 minutes almost certainly will not. Picking the highest-minute player
+for each slot in a formation reconstructs the likely eleven without needing a
+teamsheet.
 
-Weighting by minutes does the work. A player who started every match counts
-roughly ten times a fringe squad player, so the number reflects the side that
-actually takes the field rather than the depth chart. It cannot anticipate a
-surprise rotation or an injury announced on the morning of the match, and that
-gap is part of why bookmakers stay ahead of us.
+Three methods are offered, because they answer slightly different questions:
+
+``eleven``
+    Most likely starting eleven -- top players by minutes, filling a formation.
+    Best estimate of who actually takes the field.
+``squad``
+    Every rated player, weighted by minutes. Smoother across rotation and
+    injuries, and a better description of a squad's depth over a season.
+``best_n``
+    The N highest-rated players regardless of minutes. Describes the talent
+    available rather than what gets used.
 """
 
 from __future__ import annotations
@@ -38,24 +45,68 @@ LINE_BY_ROLE = {
     "F": "attack",
 }
 
-#: How many players of each line are on the pitch, used to weight the overall.
-#: Roughly a 4-3-3: one keeper, four defenders, three midfielders, three ahead.
-LINE_SIZES = {"goalkeeper": 1, "defence": 4, "midfield": 3, "attack": 3}
+#: Slots per line in a 4-3-3. Used both to build an eleven and to weight the
+#: overall, so a brilliant keeper cannot carry a poor outfield.
+FORMATION = {"goalkeeper": 1, "defence": 4, "midfield": 3, "attack": 3}
+
+#: Roles are filled in this order when a line is short, so a team missing a
+#: recognised full-back borrows a centre-back rather than leaving a hole.
+_LINE_ORDER = ("goalkeeper", "defence", "midfield", "attack")
+
+
+def select_eleven(
+    players: pd.DataFrame, formation: dict[str, int] | None = None
+) -> pd.DataFrame:
+    """Pick the most likely starting eleven for one team-season.
+
+    Slots are filled by minutes played, not by rating. That distinction matters:
+    the question is who *will* play, and a manager's team selection is better
+    evidence of that than our opinion of who deserves to.
+
+    Short lines are topped up from whoever is left over, so a team with only
+    three rated defenders still returns eleven players.
+    """
+    formation = formation or FORMATION
+    chosen: list[pd.DataFrame] = []
+    used: set = set()
+
+    for line in _LINE_ORDER:
+        slots = formation.get(line, 0)
+        if slots <= 0:
+            continue
+        pool = players[(players["line"] == line) & (~players.index.isin(used))]
+        picked = pool.nlargest(slots, "minutes")
+        used.update(picked.index)
+        chosen.append(picked)
+
+    eleven = pd.concat(chosen) if chosen else players.head(0)
+
+    shortfall = sum(formation.values()) - len(eleven)
+    if shortfall > 0:
+        # Fill from whoever has played most, regardless of line.
+        spare = players[~players.index.isin(used)].nlargest(shortfall, "minutes")
+        eleven = pd.concat([eleven, spare])
+
+    return eleven
 
 
 def team_strength(
-    rated: pd.DataFrame, top_n_per_line: int | None = None
+    rated: pd.DataFrame,
+    method: str = "eleven",
+    best_n: int = 14,
+    formation: dict[str, int] | None = None,
 ) -> pd.DataFrame:
-    """Minutes-weighted squad rating per team and season.
+    """Team rating per team and season.
 
     Args:
         rated: Output of :func:`footballml.players.rating.rate_players`.
-        top_n_per_line: When set, use only this many highest-rated players per
-            line. Approximates a first eleven more tightly than weighting the
-            whole squad, at the cost of ignoring rotation.
+        method: ``"eleven"``, ``"squad"`` or ``"best_n"``.
+        best_n: Squad size when ``method="best_n"``.
+        formation: Slots per line. Defaults to a 4-3-3.
 
     Returns:
-        One row per team-season with an overall rating and one per line.
+        One row per team-season: an overall rating, one per line, and how many
+        players it was computed from.
     """
     players = rated[rated["rated"] & rated["rating"].notna()].copy()
     if players.empty:
@@ -67,35 +118,49 @@ def team_strength(
     players = players.dropna(subset=["line"])
     players["rating"] = players["rating"].astype(float)
 
-    if top_n_per_line:
-        players = (
-            players.sort_values("rating", ascending=False)
-            .groupby(["League", "Season", "Team", "line"], observed=True)
-            .head(top_n_per_line)
-        )
-
     keys = ["League", "Season", "Team"]
+
+    if method == "eleven":
+        # A plain loop rather than groupby.apply: apply's handling of the group
+        # keys varies with include_groups, and concatenating the returned frames
+        # keeps every original column intact without any index gymnastics.
+        picks = [select_eleven(g, formation) for _, g in players.groupby(keys, observed=True)]
+        selected = pd.concat(picks) if picks else players.head(0)
+    elif method == "best_n":
+        selected = (
+            players.sort_values("rating", ascending=False)
+            .groupby(keys, observed=True)
+            .head(best_n)
+        )
+    elif method == "squad":
+        selected = players
+    else:
+        raise ValueError(f"unknown method {method!r}; use eleven, squad or best_n")
+
     lines = (
-        players.groupby([*keys, "line"], observed=True)
+        selected.groupby([*keys, "line"], observed=True)
         .apply(_weighted_mean, include_groups=False)
         .reset_index(name="rating")
     )
     wide = lines.pivot_table(index=keys, columns="line", values="rating").reset_index()
     wide.columns.name = None
 
-    # Overall weights each line by how many of them are on the pitch, so a
-    # brilliant keeper cannot carry a poor outfield.
-    available = [line for line in LINE_SIZES if line in wide.columns]
-    weights = pd.Series({line: LINE_SIZES[line] for line in available})
+    counts = selected.groupby(keys, observed=True).size().reset_index(name="n_players")
+    wide = wide.merge(counts, on=keys, how="left")
+
+    available = [line for line in FORMATION if line in wide.columns]
+    weights = pd.Series({line: FORMATION[line] for line in available})
     present = wide[available]
-    wide["overall"] = (present * weights).sum(axis=1) / (
-        present.notna() * weights
-    ).sum(axis=1)
+    # Normalise by the weights actually present, so a team with no rated keeper
+    # is not dragged down by a missing line.
+    wide["overall"] = (present * weights).sum(axis=1) / (present.notna() * weights).sum(axis=1)
 
-    renamed = {line: f"strength_{line}" for line in available}
-    wide = wide.rename(columns={**renamed, "overall": "strength_overall"})
+    wide = wide.rename(
+        columns={**{line: f"strength_{line}" for line in available}, "overall": "strength_overall"}
+    )
+    wide["method"] = method
 
-    logger.info("Computed strength for %d team-seasons", len(wide))
+    logger.info("Computed %s strength for %d team-seasons", method, len(wide))
     return wide.sort_values(["Season", "strength_overall"], ascending=[False, False])
 
 

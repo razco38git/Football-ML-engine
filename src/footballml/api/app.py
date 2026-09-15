@@ -34,6 +34,7 @@ from footballml.api.schemas import (
     Prediction,
     PredictRequest,
     TeamForm,
+    TeamStrength,
 )
 from footballml.data import ODDS_COLUMNS, PROCESSED_DIR, load_team_match_history
 from footballml.features.build import build_match_features, build_upcoming_features
@@ -69,6 +70,7 @@ class State:
     columns: list[str] = field(default_factory=list)
     form_index: dict = field(default_factory=dict)
     players: pd.DataFrame = field(default_factory=pd.DataFrame)
+    teams: pd.DataFrame = field(default_factory=pd.DataFrame)
     # Scored predictions, not raw fixtures. Rebuilding features over the full
     # history costs ~6.5s, which is far too slow to repeat per request when the
     # answer only changes when the fixture list does.
@@ -104,6 +106,12 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         logger.info("Loaded %d player-seasons", len(state.players))
     else:
         logger.warning("No player ratings; run `python -m pipelines.build_players`")
+
+    teams_path = PROCESSED_DIR / "team_strength.csv"
+    if teams_path.exists():
+        state.teams = pd.read_csv(teams_path)
+        state.teams["Season"] = state.teams["Season"].astype(str)
+        logger.info("Loaded %d team-seasons", len(state.teams))
 
     logger.info("Loaded %d matches, %d teams", len(state.features), len(state.form_index))
     yield
@@ -482,3 +490,66 @@ def player_history(name: str) -> list[PlayerRating]:
 
     rows = rows.sort_values("Season", ascending=False)
     return [_to_player(r) for _, r in rows.iterrows()]
+
+
+@app.get("/teams", response_model=list[TeamStrength])
+def teams(
+    league: str | None = Query(None, description="Division code, e.g. E0"),
+    season: str | None = Query(None, description="Defaults to the latest available"),
+    limit: int = Query(100, le=200),
+) -> list[TeamStrength]:
+    """Team ratings built from player ratings, strongest first."""
+    if state.teams.empty:
+        raise HTTPException(
+            404, "No team ratings loaded. Run `python -m pipelines.build_players`."
+        )
+
+    rows = state.teams
+    rows = rows[rows["Season"] == (season or rows["Season"].max())]
+    if league:
+        rows = rows[rows["League"] == league]
+
+    rows = rows.sort_values("strength_overall", ascending=False).head(limit)
+
+    def num(row: pd.Series, column: str) -> float | None:
+        value = row.get(column)
+        return None if pd.isna(value) else round(float(value), 1)
+
+    return [
+        TeamStrength(
+            team=str(r["Team"]),
+            league=str(r["League"]),
+            season=str(r["Season"]),
+            method=str(r.get("method", "eleven")),
+            n_players=int(r.get("n_players", 0)),
+            strength_overall=round(float(r["strength_overall"]), 1),
+            strength_goalkeeper=num(r, "strength_goalkeeper"),
+            strength_defence=num(r, "strength_defence"),
+            strength_midfield=num(r, "strength_midfield"),
+            strength_attack=num(r, "strength_attack"),
+        )
+        for _, r in rows.iterrows()
+    ]
+
+
+@app.get("/teams/{name}/squad", response_model=list[PlayerRating])
+def team_squad(
+    name: str,
+    season: str | None = Query(None),
+) -> list[PlayerRating]:
+    """The players behind a team's rating, highest minutes first.
+
+    Shows who the eleven was built from, so the team number can be checked
+    against the players that produced it.
+    """
+    if state.players.empty:
+        raise HTTPException(404, "No player ratings loaded")
+
+    rows = state.players[
+        state.players["rated"] & (state.players["Team"].str.lower() == name.lower())
+    ]
+    if rows.empty:
+        raise HTTPException(404, f"Unknown team {name!r}")
+
+    rows = rows[rows["Season"] == (season or rows["Season"].max())]
+    return [_to_player(r) for _, r in rows.sort_values("minutes", ascending=False).iterrows()]

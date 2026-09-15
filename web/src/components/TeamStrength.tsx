@@ -1,233 +1,255 @@
-import { players, getRatingBg, getRatingTextColor } from '../data/footballData';
-import DemoBanner from './DemoBanner';
+import { useState } from 'react';
+import { api, LEAGUE_NAMES, type PlayerRating, type TeamStrength } from '../api/client';
+import { teamColor } from '../api/display';
+import { useAsync } from '../api/hooks';
+import { getRatingBg, getRatingTextColor } from '../data/footballData';
 
-interface TeamData {
-  name: string;
-  league: string;
-  players: typeof players;
-  top11Avg: number;
-  squadDepth: number;
-  attackRating: number;
-  midfieldRating: number;
-  defenceRating: number;
-  overallStrength: number;
-}
-
-function computeTeamData(teamName: string, league: string): TeamData {
-  const squad = players.filter(p => p.team === teamName);
-  if (squad.length === 0) return {
-    name: teamName, league, players: [],
-    top11Avg: 0, squadDepth: 0, attackRating: 0, midfieldRating: 0, defenceRating: 0, overallStrength: 0,
-  };
-
-  const sorted = [...squad].sort((a, b) => b.overall - a.overall);
-  const top11 = sorted.slice(0, Math.min(11, sorted.length));
-  const top11Avg = top11.reduce((s, p) => s + p.overall, 0) / top11.length;
-  const squadDepth = sorted.length > 11
-    ? sorted.slice(11).reduce((s, p) => s + p.overall, 0) / (sorted.length - 11)
-    : top11Avg - 5;
-
-  const attackers = squad.filter(p => ['ST', 'CF', 'LW', 'RW'].includes(p.position));
-  const mids = squad.filter(p => ['CAM', 'CM', 'CDM'].includes(p.position));
-  const defenders = squad.filter(p => ['CB', 'RB', 'LB', 'GK'].includes(p.position));
-
-  const avg = (arr: typeof players) =>
-    arr.length ? arr.reduce((s, p) => s + p.overall, 0) / arr.length : top11Avg;
-
-  const overallStrength = top11Avg * 0.65 + squadDepth * 0.15 + (top11.length >= 8 ? 8 : 0);
-
-  return {
-    name: teamName, league, players: squad,
-    top11Avg: Math.round(top11Avg * 10) / 10,
-    squadDepth: Math.round(squadDepth * 10) / 10,
-    attackRating: Math.round(avg(attackers) * 10) / 10,
-    midfieldRating: Math.round(avg(mids) * 10) / 10,
-    defenceRating: Math.round(avg(defenders) * 10) / 10,
-    overallStrength: Math.round(overallStrength * 10) / 10,
-  };
-}
-
-const teamEntries: { name: string; league: string }[] = [
-  { name: 'Real Madrid', league: 'LaLiga EA SPORTS' },
-  { name: 'Manchester City', league: 'Premier League' },
-  { name: 'Liverpool', league: 'Premier League' },
-  { name: 'FC Barcelona', league: 'LaLiga EA SPORTS' },
-  { name: 'Bayern München', league: 'Bundesliga' },
-  { name: 'Arsenal', league: 'Premier League' },
-  { name: 'Atlético Madrid', league: 'LaLiga EA SPORTS' },
+const LINES: { key: keyof TeamStrength; label: string }[] = [
+  { key: 'strength_goalkeeper', label: 'GK' },
+  { key: 'strength_defence', label: 'DEF' },
+  { key: 'strength_midfield', label: 'MID' },
+  { key: 'strength_attack', label: 'ATT' },
 ];
 
-function RatingBadge({ value }: { value: number }) {
+function Badge({ value, size = 34 }: { value: number | null; size?: number }) {
+  if (value == null) {
+    return (
+      <span
+        className="inline-flex items-center justify-center rounded font-display"
+        style={{
+          width: size, height: size * 0.78, background: 'var(--secondary)',
+          color: 'var(--muted-foreground)', fontSize: size * 0.36,
+        }}
+      >
+        –
+      </span>
+    );
+  }
+  const rounded = Math.round(value);
   return (
     <span
-      className="inline-flex items-center justify-center font-display font-bold rounded"
-      style={{ background: getRatingBg(value), color: getRatingTextColor(value), width: 44, height: 36, fontSize: 15 }}
+      className="inline-flex items-center justify-center rounded font-display font-bold"
+      style={{
+        width: size, height: size * 0.78, fontSize: size * 0.38,
+        background: getRatingBg(rounded), color: getRatingTextColor(rounded),
+      }}
     >
-      {value.toFixed(0)}
+      {rounded}
     </span>
   );
 }
 
-function StrengthBar({ value, max = 95 }: { value: number; max?: number }) {
-  const pct = (value / max) * 100;
+function SquadPanel({ team, onClose }: { team: TeamStrength; onClose: () => void }) {
+  const { data, loading, error } = useAsync(() => api.squad(team.team), [team.team]);
+  const color = teamColor(team.team);
+
   return (
-    <div className="flex items-center gap-2">
-      <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'var(--secondary)' }}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.8)' }}
+      onClick={onClose}
+    >
+      <div
+        className="rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+        style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+        onClick={e => e.stopPropagation()}
+      >
         <div
-          className="h-full rounded-full"
-          style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${getRatingBg(value)}, ${getRatingBg(Math.min(99, value + 5))})` }}
-        />
+          className="p-6 relative"
+          style={{ background: 'linear-gradient(135deg, #0d1a2e 0%, #1a0d2e 100%)', borderBottom: '1px solid var(--border)' }}
+        >
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 w-8 h-8 rounded-full flex items-center justify-center text-sm hover:bg-white/10"
+            style={{ color: 'var(--muted-foreground)' }}
+          >
+            ✕
+          </button>
+          <div className="flex items-center gap-4">
+            <div
+              className="w-16 h-16 rounded-xl flex items-center justify-center text-xl font-display font-black"
+              style={{ background: color + '33', border: `2px solid ${color}66`, color }}
+            >
+              {team.team.slice(0, 2).toUpperCase()}
+            </div>
+            <div className="flex-1">
+              <div className="font-display font-black text-2xl" style={{ color: 'var(--foreground)' }}>
+                {team.team}
+              </div>
+              <div className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
+                {LEAGUE_NAMES[team.league] ?? team.league} · {team.season.slice(0, 2)}/{team.season.slice(2)}
+                {' · '}built from {team.n_players} players
+              </div>
+            </div>
+            <Badge value={team.strength_overall} size={54} />
+          </div>
+        </div>
+
+        <div className="p-6">
+          <div className="text-xs font-display font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--muted-foreground)' }}>
+            Squad by minutes played
+          </div>
+
+          {loading && (
+            <div className="text-sm py-6 text-center" style={{ color: 'var(--muted-foreground)' }}>Loading…</div>
+          )}
+          {error && <div className="text-sm py-6 text-center" style={{ color: '#f44336' }}>{error}</div>}
+
+          {data && (
+            <div className="flex flex-col gap-1">
+              {data.slice(0, 22).map((p: PlayerRating, i) => (
+                <div
+                  key={`${p.player}-${i}`}
+                  className="flex items-center gap-3 py-1.5"
+                  style={{ borderBottom: i < Math.min(data.length, 22) - 1 ? '1px solid var(--border)' : undefined }}
+                >
+                  <Badge value={p.rating} size={30} />
+                  <span
+                    className="text-xs font-display font-bold px-1.5 py-0.5 rounded"
+                    style={{ background: 'var(--secondary)', color: 'var(--muted-foreground)', minWidth: 32, textAlign: 'center' }}
+                  >
+                    {p.position}
+                  </span>
+                  <span className="text-sm flex-1 truncate" style={{ color: 'var(--foreground)' }}>{p.player}</span>
+                  <span className="text-xs font-data" style={{ color: 'var(--muted-foreground)' }}>
+                    {p.minutes.toLocaleString()} min
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="mt-4 pt-3 text-xs" style={{ borderTop: '1px solid var(--border)', color: 'var(--muted-foreground)' }}>
+            The rating uses the likely starting eleven — the highest-minute player in each
+            formation slot. Minutes are the best available evidence of who a manager picks:
+            predicted line-ups for unplayed matches are not published anywhere readable.
+          </div>
+        </div>
       </div>
-      <span className="text-xs font-data font-bold w-8 text-right" style={{ color: getRatingBg(value) }}>
-        {value.toFixed(1)}
-      </span>
     </div>
   );
 }
 
 export default function TeamStrength() {
-  const teams = teamEntries.map(t => computeTeamData(t.name, t.league))
-    .sort((a, b) => b.overallStrength - a.overallStrength);
+  const [league, setLeague] = useState('All');
+  const [selected, setSelected] = useState<TeamStrength | null>(null);
 
-  const maxStrength = teams[0]?.overallStrength || 95;
+  const { data, loading, error, reload } = useAsync(
+    () => api.teams(league === 'All' ? undefined : league),
+    [league],
+  );
+
+  const best = data?.[0]?.strength_overall ?? 100;
 
   return (
     <div>
-      <DemoBanner reason="Squad strength is sample data. It derives from player ratings, which are not built yet." />
       <div className="mb-6">
         <h2 className="font-display font-bold text-3xl" style={{ color: 'var(--foreground)' }}>
           Team Strength
         </h2>
         <p className="mt-1 text-sm" style={{ color: 'var(--muted-foreground)' }}>
-          Aggregated squad ratings derived from player ML ratings. Used as a key input to the match predictor.
+          Built from the likely starting eleven — the highest-minute player in each formation
+          slot, rated and weighted by line. Click a team to see the squad behind it.
         </p>
       </div>
 
-      {/* Method explainer */}
-      <div
-        className="rounded-xl p-4 mb-6"
-        style={{ background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.2)' }}
-      >
-        <div className="text-xs font-display font-bold uppercase tracking-wider mb-2" style={{ color: '#3b82f6' }}>
-          Strength Calculation Method
-        </div>
-        <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-          <strong className="text-white">Overall Strength</strong> = Top 11 Avg Rating × 0.65 + Squad Depth Avg × 0.15 + Team Coverage Bonus.
-          Attack, Midfield, and Defence ratings are computed from position-grouped players in each squad.
-          This rating feeds directly into the Match Predictor model.
-        </div>
+      <div className="flex flex-wrap gap-3 mb-5 items-center">
+        <select
+          value={league}
+          onChange={e => setLeague(e.target.value)}
+          className="px-3 py-2 rounded-lg text-sm"
+          style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+        >
+          <option value="All">All leagues</option>
+          {Object.entries(LEAGUE_NAMES).map(([code, name]) => (
+            <option key={code} value={code}>{name}</option>
+          ))}
+        </select>
+        {data && data.length > 0 && (
+          <span className="text-xs ml-auto" style={{ color: 'var(--muted-foreground)' }}>
+            {data.length} teams · {data[0].season.slice(0, 2)}/{data[0].season.slice(2)}
+          </span>
+        )}
       </div>
 
-      {/* League table */}
-      <div className="grid gap-3">
-        {teams.map((team, rank) => (
-          <div
-            key={team.name}
-            className="rounded-xl overflow-hidden"
-            style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+      {error && (
+        <div className="rounded-xl p-6 text-center" style={{ background: 'rgba(244,67,54,0.08)', border: '1px solid rgba(244,67,54,0.25)' }}>
+          <div className="text-sm mb-3" style={{ color: '#f44336' }}>{error}</div>
+          <button
+            onClick={reload}
+            className="px-4 py-2 rounded-lg text-sm font-display font-bold"
+            style={{ background: 'rgba(244,67,54,0.15)', color: '#f44336' }}
           >
-            <div className="p-5">
-              <div className="flex items-center gap-4">
-                {/* Rank */}
-                <div
-                  className="w-10 h-10 rounded-xl flex items-center justify-center font-display font-black text-xl flex-shrink-0"
-                  style={{
-                    background: rank === 0 ? '#f59e0b22' : rank === 1 ? '#9ca3af22' : rank === 2 ? '#cd7c3222' : 'var(--secondary)',
-                    color: rank === 0 ? '#f59e0b' : rank === 1 ? '#9ca3af' : rank === 2 ? '#cd7c32' : 'var(--muted-foreground)',
-                    border: `1px solid ${rank === 0 ? '#f59e0b44' : rank === 1 ? '#9ca3af44' : rank === 2 ? '#cd7c3244' : 'var(--border)'}`,
-                  }}
-                >
-                  {rank + 1}
-                </div>
+            Retry
+          </button>
+        </div>
+      )}
 
-                {/* Team info */}
-                <div className="flex-1">
-                  <div className="font-display font-bold text-lg leading-tight" style={{ color: 'var(--foreground)' }}>
-                    {team.name}
+      {loading && !data && (
+        <div className="text-center py-16 text-sm" style={{ color: 'var(--muted-foreground)' }}>
+          Loading team ratings…
+        </div>
+      )}
+
+      {data && (
+        <div className="flex flex-col gap-2">
+          {data.map((t, i) => (
+            <div
+              key={`${t.team}-${i}`}
+              onClick={() => setSelected(t)}
+              className="rounded-xl p-4 cursor-pointer transition-colors hover:bg-white/5"
+              style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+            >
+              <div className="flex items-center gap-4">
+                <span className="text-xs font-data w-6 text-right" style={{ color: 'var(--muted-foreground)' }}>
+                  {i + 1}
+                </span>
+                <div
+                  className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-display font-bold flex-shrink-0"
+                  style={{ background: teamColor(t.team) + '22', color: teamColor(t.team) }}
+                >
+                  {t.team.slice(0, 2).toUpperCase()}
+                </div>
+                <div style={{ minWidth: 0, flex: '0 0 180px' }}>
+                  <div className="font-display font-bold text-base truncate" style={{ color: 'var(--foreground)' }}>
+                    {t.team}
                   </div>
                   <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                    {team.league} · {team.players.length} players in database
+                    {LEAGUE_NAMES[t.league] ?? t.league}
                   </div>
                 </div>
 
-                {/* Overall strength */}
-                <div className="flex flex-col items-center gap-1">
-                  <div
-                    className="font-display font-black text-3xl"
-                    style={{ color: getRatingBg(team.overallStrength) }}
-                  >
-                    {team.overallStrength.toFixed(1)}
-                  </div>
-                  <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>Overall</div>
-                </div>
-
-                {/* Rating breakdown */}
-                <div className="flex gap-3">
-                  {[
-                    { label: 'ATT', value: team.attackRating },
-                    { label: 'MID', value: team.midfieldRating },
-                    { label: 'DEF', value: team.defenceRating },
-                    { label: 'TOP11', value: team.top11Avg },
-                  ].map(s => (
-                    <div key={s.label} className="flex flex-col items-center gap-1">
-                      {s.value > 0 ? <RatingBadge value={s.value} /> : (
-                        <span className="text-xs font-data" style={{ color: 'var(--muted-foreground)' }}>N/A</span>
-                      )}
-                      <span className="text-xs font-display font-bold" style={{ color: 'var(--muted-foreground)' }}>{s.label}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Strength bars */}
-              <div className="mt-4 grid gap-2" style={{ gridTemplateColumns: '80px 1fr' }}>
-                <span className="text-xs self-center" style={{ color: 'var(--muted-foreground)' }}>Squad Power</span>
-                <StrengthBar value={team.overallStrength} max={maxStrength + 2} />
-                <span className="text-xs self-center" style={{ color: 'var(--muted-foreground)' }}>Attack</span>
-                {team.attackRating > 0
-                  ? <StrengthBar value={team.attackRating} max={maxStrength + 2} />
-                  : <div className="text-xs flex items-center" style={{ color: 'var(--muted-foreground)' }}>Not enough data</div>
-                }
-                <span className="text-xs self-center" style={{ color: 'var(--muted-foreground)' }}>Midfield</span>
-                {team.midfieldRating > 0
-                  ? <StrengthBar value={team.midfieldRating} max={maxStrength + 2} />
-                  : <div className="text-xs flex items-center" style={{ color: 'var(--muted-foreground)' }}>Not enough data</div>
-                }
-                <span className="text-xs self-center" style={{ color: 'var(--muted-foreground)' }}>Defence</span>
-                {team.defenceRating > 0
-                  ? <StrengthBar value={team.defenceRating} max={maxStrength + 2} />
-                  : <div className="text-xs flex items-center" style={{ color: 'var(--muted-foreground)' }}>Not enough data</div>
-                }
-              </div>
-
-              {/* Squad players */}
-              {team.players.length > 0 && (
-                <div className="mt-4 flex flex-wrap gap-1.5">
-                  {[...team.players].sort((a, b) => b.overall - a.overall).map(p => (
+                <div className="flex-1 min-w-0">
+                  <div className="h-2 rounded-full" style={{ background: 'var(--secondary)' }}>
                     <div
-                      key={p.id}
-                      className="flex items-center gap-1.5 rounded-lg px-2 py-1"
-                      style={{ background: 'var(--secondary)', border: '1px solid var(--border)' }}
-                      title={p.name}
-                    >
-                      <span className="text-xs font-display font-bold" style={{ color: 'var(--muted-foreground)' }}>
-                        {p.position}
-                      </span>
-                      <span className="text-xs font-display" style={{ color: 'var(--foreground)' }}>{p.lastName}</span>
-                      <span
-                        className="text-xs font-data font-bold rounded px-1"
-                        style={{ background: getRatingBg(p.overall), color: getRatingTextColor(p.overall) }}
-                      >
-                        {p.overall}
-                      </span>
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${(t.strength_overall / best) * 100}%`,
+                        background: 'linear-gradient(90deg, #00e676, #3b82f6)',
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 flex-shrink-0">
+                  {LINES.map(line => (
+                    <div key={String(line.key)} className="flex flex-col items-center gap-0.5">
+                      <Badge value={t[line.key] as number | null} size={30} />
+                      <span style={{ fontSize: 9, color: 'var(--muted-foreground)' }}>{line.label}</span>
                     </div>
                   ))}
+                  <div className="flex flex-col items-center gap-0.5 ml-1">
+                    <Badge value={t.strength_overall} size={40} />
+                    <span style={{ fontSize: 9, color: 'var(--muted-foreground)' }}>OVR</span>
+                  </div>
                 </div>
-              )}
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
+
+      {selected && <SquadPanel team={selected} onClose={() => setSelected(null)} />}
     </div>
   );
 }
