@@ -18,6 +18,7 @@ loss matches the data-generating process.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -50,6 +51,8 @@ DEFAULT_GBM_PARAMS: dict[str, Any] = {
     "random_state": 7,
 }
 
+logger = logging.getLogger(__name__)
+
 OUTCOMES = ("H", "D", "A")
 
 
@@ -79,7 +82,21 @@ class MatchPredictor:
         because early-season fixtures genuinely have no prior form, and imputing
         zeros would tell the model something false.
         """
-        self.feature_names_ = list(X.columns)
+        # Drop features with no values anywhere in training. They carry no
+        # information, and sklearn's histogram binner raises "window shape
+        # cannot be larger than input array shape" on them rather than ignoring
+        # them -- which is how a feature that only exists in later seasons (team
+        # strength) crashes a backtest that trains on earlier ones.
+        usable = [c for c in X.columns if X[c].notna().any()]
+        dropped = [c for c in X.columns if c not in usable]
+        if dropped:
+            logger.info(
+                "Ignoring %d feature(s) with no values in training: %s",
+                len(dropped), dropped[:6],
+            )
+
+        self.feature_names_ = usable
+        X = X[usable]
         hg = np.asarray(home_goals, dtype="float64")
         ag = np.asarray(away_goals, dtype="float64")
 

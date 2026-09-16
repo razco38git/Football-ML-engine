@@ -159,6 +159,47 @@ class TeamStrength(BaseModel):
     strength_attack: float | None = None
 
 
+class MatchResult(BaseModel):
+    """One settled match: what we predicted, and what happened.
+
+    ``source`` separates two different claims. ``live`` means the prediction was
+    stored before kickoff and settled afterwards -- a genuine track record.
+    ``backtest`` means it came from the walk-forward run: the model was trained
+    only on earlier seasons and never saw this match, so it is honestly
+    out-of-sample, but it was generated retrospectively rather than timestamped
+    in advance. Conflating the two would overstate the record.
+    """
+
+    source: str = Field(description="live | backtest")
+    league: str
+    date: date
+    home_team: str
+    away_team: str
+
+    predicted_outcome: str
+    prob_home_win: float
+    prob_draw: float
+    prob_away_win: float
+    expected_goals_home: float | None = None
+    expected_goals_away: float | None = None
+
+    actual_home_goals: int
+    actual_away_goals: int
+    actual_result: str
+    correct: bool
+    #: Probability assigned to the outcome we picked, 0-100.
+    confidence: float
+
+
+class MatchResultPage(BaseModel):
+    """A page of settled matches plus the summary for the same filters."""
+
+    source: str
+    total: int
+    summary: Accuracy | None = None
+    matches: list[MatchResult]
+
+
 class PredictRequest(BaseModel):
     home_team: str
     away_team: str

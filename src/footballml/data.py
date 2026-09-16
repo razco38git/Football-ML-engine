@@ -29,6 +29,24 @@ def load_matches(path: Path | None = None) -> pd.DataFrame:
     return df
 
 
+TEAM_STRENGTH = PROCESSED_DIR / "team_strength.csv"
+
+
+def load_team_strength(path: Path | None = None) -> pd.DataFrame:
+    """Load squad strength per team-season, or an empty frame if not built yet.
+
+    Returns empty rather than raising so the match pipeline still runs before
+    `pipelines.build_players` has been executed -- the strength features simply
+    come back NaN, which the model handles.
+    """
+    path = path or TEAM_STRENGTH
+    if not path.exists():
+        return pd.DataFrame()
+    df = pd.read_csv(path)
+    df["Season"] = df["Season"].astype(str)
+    return df
+
+
 #: Bet365 1X2 decimal odds columns in the football-data.co.uk schema.
 ODDS_COLUMNS = ("B365H", "B365D", "B365A")
 

@@ -28,6 +28,8 @@ from footballml.api.schemas import (
     CalibrationBin,
     Driver,
     Health,
+    MatchResult,
+    MatchResultPage,
     ModelInfo,
     PlayerPage,
     PlayerRating,
@@ -71,6 +73,7 @@ class State:
     form_index: dict = field(default_factory=dict)
     players: pd.DataFrame = field(default_factory=pd.DataFrame)
     teams: pd.DataFrame = field(default_factory=pd.DataFrame)
+    backtest: pd.DataFrame = field(default_factory=pd.DataFrame)
     # Scored predictions, not raw fixtures. Rebuilding features over the full
     # history costs ~6.5s, which is far too slow to repeat per request when the
     # answer only changes when the fixture list does.
@@ -112,6 +115,12 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         state.teams = pd.read_csv(teams_path)
         state.teams["Season"] = state.teams["Season"].astype(str)
         logger.info("Loaded %d team-seasons", len(state.teams))
+
+    backtest_path = PROCESSED_DIR / "backtest_predictions.csv"
+    if backtest_path.exists():
+        state.backtest = pd.read_csv(backtest_path)
+        state.backtest["Date"] = pd.to_datetime(state.backtest["Date"])
+        logger.info("Loaded %d backtest predictions", len(state.backtest))
 
     logger.info("Loaded %d matches, %d teams", len(state.features), len(state.form_index))
     yield
@@ -555,3 +564,147 @@ def team_squad(
 
     rows = rows[rows["Season"] == (season or rows["Season"].max())]
     return [_to_player(r) for _, r in rows.sort_values("minutes", ascending=False).iterrows()]
+
+
+#: Column names differ between the two sources; this maps each onto MatchResult.
+_LIVE_COLUMNS = {
+    "prob_home_win": "prob_home_win",
+    "prob_draw": "prob_draw",
+    "prob_away_win": "prob_away_win",
+    "predicted_outcome": "predicted_outcome",
+    "expected_goals_home": "expected_goals_home",
+    "expected_goals_away": "expected_goals_away",
+    "actual_home_goals": "actual_home_goals",
+    "actual_away_goals": "actual_away_goals",
+    "actual_result": "actual_result",
+}
+_BACKTEST_COLUMNS = {
+    "prob_home_win": "prob_H",
+    "prob_draw": "prob_D",
+    "prob_away_win": "prob_A",
+    "expected_goals_home": "mu_home",
+    "expected_goals_away": "mu_away",
+    "actual_home_goals": "FTHG",
+    "actual_away_goals": "FTAG",
+    "actual_result": "FTR",
+}
+
+
+def _to_match_result(row: pd.Series, source: str, columns: dict[str, str]) -> MatchResult:
+    """Build one settled-match row from whichever source it came from."""
+    probs = {
+        key: float(row[columns[key]])
+        for key in ("prob_home_win", "prob_draw", "prob_away_win")
+    }
+    actual = str(row[columns["actual_result"]])
+
+    predicted = row.get(columns.get("predicted_outcome", ""))
+    if pd.isna(predicted):
+        # The backtest stores probabilities but not the pick; it is the argmax.
+        by_outcome = {
+            "H": probs["prob_home_win"],
+            "D": probs["prob_draw"],
+            "A": probs["prob_away_win"],
+        }
+        predicted = max(by_outcome, key=lambda k: by_outcome[k])
+
+    chosen = {"H": "prob_home_win", "D": "prob_draw", "A": "prob_away_win"}[str(predicted)]
+
+    def maybe(key: str) -> float | None:
+        column = columns.get(key)
+        if column is None or column not in row or pd.isna(row[column]):
+            return None
+        return round(float(row[column]), 3)
+
+    return MatchResult(
+        source=source,
+        league=str(row["League"]),
+        date=pd.Timestamp(row["Date"]).date(),
+        home_team=str(row["HomeTeam"]),
+        away_team=str(row["AwayTeam"]),
+        predicted_outcome=str(predicted),
+        prob_home_win=round(probs["prob_home_win"], 4),
+        prob_draw=round(probs["prob_draw"], 4),
+        prob_away_win=round(probs["prob_away_win"], 4),
+        expected_goals_home=maybe("expected_goals_home"),
+        expected_goals_away=maybe("expected_goals_away"),
+        actual_home_goals=int(row[columns["actual_home_goals"]]),
+        actual_away_goals=int(row[columns["actual_away_goals"]]),
+        actual_result=actual,
+        correct=str(predicted) == actual,
+        confidence=round(probs[chosen] * 100, 1),
+    )
+
+
+def _summarise(rows: pd.DataFrame, prob_cols: list[str], actual_col: str) -> Accuracy:
+    """Metric block for a set of settled matches."""
+    probs = rows[prob_cols].to_numpy()
+    actual = rows[actual_col]
+    metrics = evaluate(actual, probs)
+    return Accuracy(
+        n=metrics["n"],
+        accuracy=round(metrics["accuracy"], 4),
+        rps=round(metrics["rps"], 4),
+        log_loss=round(metrics["log_loss"], 4),
+        brier=round(metrics["brier"], 4),
+        rps_base_rate=round(evaluate(actual, base_rate_probs(actual, len(rows)))["rps"], 4),
+        by_league={
+            str(lg): round(evaluate(g[actual_col], g[prob_cols].to_numpy())["rps"], 4)
+            for lg, g in rows.groupby("League")
+        },
+        calibration=[
+            CalibrationBin(**row)
+            for row in calibration_table(actual, probs).drop(columns=["gap"]).to_dict("records")
+        ],
+    )
+
+
+@app.get("/accuracy/history", response_model=MatchResultPage)
+def accuracy_history(
+    source: str = Query("backtest", description="live | backtest"),
+    league: str | None = Query(None),
+    limit: int = Query(50, le=500),
+    offset: int = Query(0, ge=0),
+) -> MatchResultPage:
+    """Settled matches with the prediction beside the real score, newest first.
+
+    ``live`` reads only predictions stored before kickoff -- the honest track
+    record, currently very short. ``backtest`` reads the walk-forward run, where
+    every match was predicted by a model trained solely on earlier seasons.
+    Both are out-of-sample; only the first was committed to in advance, and the
+    two are kept apart so the stronger claim is never made for the weaker data.
+    """
+    if source not in {"live", "backtest"}:
+        raise HTTPException(400, "source must be 'live' or 'backtest'")
+
+    if source == "live":
+        rows = store.settled()
+        columns, prob_cols, actual_col = _LIVE_COLUMNS, PROB_COLUMNS, "actual_result"
+    else:
+        rows = state.backtest
+        columns = _BACKTEST_COLUMNS
+        prob_cols, actual_col = ["prob_H", "prob_D", "prob_A"], "FTR"
+
+    if rows.empty:
+        hint = (
+            "Run `python -m pipelines.score_upcoming` regularly to build one."
+            if source == "live"
+            else "Run `python -m pipelines.backtest --all-leagues --save-predictions`."
+        )
+        raise HTTPException(404, f"No {source} results yet. {hint}")
+
+    rows = rows[rows[actual_col].notna()]
+    if league:
+        rows = rows[rows["League"] == league]
+    if rows.empty:
+        raise HTTPException(404, f"No {source} results for {league}")
+
+    summary = _summarise(rows, prob_cols, actual_col)
+    window = rows.sort_values("Date", ascending=False).iloc[offset : offset + limit]
+
+    return MatchResultPage(
+        source=source,
+        total=len(rows),
+        summary=summary,
+        matches=[_to_match_result(r, source, columns) for _, r in window.iterrows()],
+    )

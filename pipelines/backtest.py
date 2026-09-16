@@ -27,6 +27,7 @@ from footballml.data import (  # noqa: E402
     PROCESSED_DIR,
     load_raw_odds,
     load_team_match_history,
+    load_team_strength,
 )
 from footballml.features.build import build_match_features  # noqa: E402
 from footballml.models.calibration import (  # noqa: E402
@@ -169,6 +170,16 @@ def main() -> None:
     parser.add_argument(
         "--leagues", nargs="+", help="Restrict to these division codes, e.g. E0 SP1."
     )
+    parser.add_argument(
+        "--no-strength",
+        action="store_true",
+        help="Exclude squad-strength features, for an A/B against the baseline.",
+    )
+    parser.add_argument(
+        "--save-predictions",
+        action="store_true",
+        help="Write every walk-forward prediction to data/processed/.",
+    )
     args = parser.parse_args()
 
     path = PROCESSED_DIR / ("team_match_history_all.csv" if args.all_leagues else None or "")
@@ -186,8 +197,18 @@ def main() -> None:
     if args.leagues:
         tmh = tmh[tmh["League"].isin(args.leagues)]
 
-    features = build_match_features(tmh)
-    print(f"features: {len(feature_columns(features))} columns, {len(features)} matches")
+    # Strength is joined from the *previous* season. It is computed over a whole
+    # season, so a match seeing its own would be predicting October from May.
+    strength = None if args.no_strength else load_team_strength()
+    features = build_match_features(tmh, strength=strength)
+
+    cols = feature_columns(features)
+    note = ""
+    if strength is not None and "home_strength_overall" in features.columns:
+        covered = features["home_strength_overall"].notna()
+        seasons = sorted(features.loc[covered, "Season"].astype(str).unique())
+        note = f" | strength on {int(covered.sum())} matches, seasons {seasons}"
+    print(f"features: {len(cols)} columns, {len(features)} matches{note}")
     odds = load_raw_odds()
 
     per_season, preds = run_backtest(
@@ -240,6 +261,14 @@ def main() -> None:
             [c for c in ["league", "n", "rps", "rps_market", "accuracy"] if c in rows[0]]
         ]
         print(by_league.to_string(index=False, float_format=lambda v: f"{v:.4f}"))
+
+    if args.save_predictions:
+        # Every walk-forward prediction, each made by a model trained only on
+        # earlier seasons. This is what the site's accuracy page reads as its
+        # backtest history.
+        out = PROCESSED_DIR / "backtest_predictions.csv"
+        preds.to_csv(out, index=False)
+        print(f"\nWrote {len(preds):,} walk-forward predictions to {out.name}")
 
     print("\n=== Calibration ===")
     table = calibration_table(preds["FTR"], probs)

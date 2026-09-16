@@ -138,6 +138,10 @@ export const api = {
   /** The players behind a team's rating. */
   squad: (team: string) => fetchSquad(team),
 
+  /** Settled matches: prediction beside the real score. */
+  history: (source: 'live' | 'backtest', league?: string, limit = 50) =>
+    fetchHistory(source, league, limit),
+
   /** Any pairing, scored live using each side's form as of today. */
   predict: async (home_team: string, away_team: string, explain = true) => {
     const response = await fetch(`${BASE_URL}/predict`, {
@@ -257,4 +261,63 @@ export function fetchTeams(league?: string, limit = 100): Promise<TeamStrength[]
 /** The players a team's rating was built from, highest minutes first. */
 export function fetchSquad(team: string): Promise<PlayerRating[]> {
   return get<PlayerRating[]>(`/teams/${encodeURIComponent(team)}/squad`);
+}
+
+export interface MatchResult {
+  /** live = stored before kickoff; backtest = walk-forward, model never saw it */
+  source: 'live' | 'backtest';
+  league: string;
+  date: string;
+  home_team: string;
+  away_team: string;
+
+  predicted_outcome: 'H' | 'D' | 'A';
+  prob_home_win: number;
+  prob_draw: number;
+  prob_away_win: number;
+  expected_goals_home: number | null;
+  expected_goals_away: number | null;
+
+  actual_home_goals: number;
+  actual_away_goals: number;
+  actual_result: 'H' | 'D' | 'A';
+  correct: boolean;
+  /** Probability assigned to the outcome we picked, 0-100. */
+  confidence: number;
+}
+
+export interface Accuracy {
+  n: number;
+  accuracy: number;
+  rps: number;
+  log_loss: number;
+  brier: number;
+  rps_base_rate: number;
+  rps_market: number | null;
+  by_league: Record<string, number>;
+  calibration: {
+    bin_lower: number;
+    bin_upper: number;
+    n: number;
+    mean_predicted: number;
+    observed_rate: number;
+  }[];
+}
+
+export interface MatchResultPage {
+  source: string;
+  total: number;
+  summary: Accuracy | null;
+  matches: MatchResult[];
+}
+
+/** Settled matches with the prediction beside the real score, newest first. */
+export function fetchHistory(
+  source: 'live' | 'backtest',
+  league?: string,
+  limit = 50,
+): Promise<MatchResultPage> {
+  const params = new URLSearchParams({ source, limit: String(limit) });
+  if (league && league !== 'All') params.set('league', league);
+  return get<MatchResultPage>(`/accuracy/history?${params}`);
 }

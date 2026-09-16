@@ -41,7 +41,13 @@ DIFF_STEMS: tuple[str, ...] = (
     "npxg_diff_last_5",
     "ppda_last_5",
     "days_since_last_match",
+    "strength_overall",
+    "strength_attack",
+    "strength_defence",
 )
+
+#: Team-strength columns joined from the player ratings.
+STRENGTH_COLUMNS = ("strength_overall", "strength_attack", "strength_defence")
 
 #: Columns identifying a match rather than describing it.
 _ID_COLS = ("League", "Season", "Date", "HomeTeam", "AwayTeam")
@@ -52,6 +58,76 @@ _ID_COLS = ("League", "Season", "Date", "HomeTeam", "AwayTeam")
 #: fixed rather than derived from the data so that a model trained on four
 #: leagues still interprets the feature correctly when scoring a fifth.
 LEAGUE_CODES = {"E0": 0, "SP1": 1, "D1": 2, "I1": 3, "F1": 4}
+
+
+def add_team_strength(
+    matches: pd.DataFrame,
+    strength: pd.DataFrame,
+    previous_season: bool = True,
+) -> pd.DataFrame:
+    """Attach squad strength to each match, from the player ratings.
+
+    Three numbers per side -- overall, attack and defence -- which map onto the
+    model's two goal rates directly: a side's attack is set against the
+    opposition's defence.
+
+    Args:
+        matches: Wide match table with ``League``, ``Season`` and both teams.
+        strength: ``team_strength.csv``, one row per team-season.
+        previous_season: Join the *preceding* season's strength rather than the
+            match's own. This is the leakage guard and the default.
+
+    Returns:
+        ``matches`` with ``home_``/``away_`` strength columns. Teams with no
+        strength row get NaN, which the gradient booster handles natively.
+
+    .. warning::
+        Strength is computed from **whole-season** player ratings, so joining a
+        match to its own season lets end-of-season information predict an
+        October fixture. That leak is invisible to the truncation test in
+        ``tests/test_leakage.py``: it truncates *match* data, and strength comes
+        from a separate file that would not change.
+
+        ``previous_season=True`` is therefore correct for training and
+        backtesting. Live prediction is the one legitimate exception -- today's
+        squad is what plays tomorrow -- and passes ``False``.
+    """
+    out = matches.copy()
+    available = [c for c in STRENGTH_COLUMNS if c in strength.columns]
+    if strength.empty or not available:
+        return out
+
+    # Match on a temporary string key rather than casting `Season` in place.
+    # Callers compare seasons numerically (`run_backtest` filters `s >= start`),
+    # so silently turning the column into strings breaks them well downstream of
+    # here, with an error that points nowhere near this function.
+    lookup = strength[["League", "Season", "Team", *available]].copy()
+    lookup["_season_key"] = lookup["Season"].astype(str)
+    lookup = lookup.drop(columns=["Season"])
+    out["_season_key"] = out["Season"].astype(str)
+
+    if previous_season:
+        # Shift the strength forward a season so a 2425 squad rating is what a
+        # 2526 match sees. Season labels are "2425"-style, so the successor of
+        # season YYZZ is ZZ(ZZ+1).
+        lookup["_season_key"] = lookup["_season_key"].map(_next_season)
+
+    for side in ("Home", "Away"):
+        prefixed = lookup.rename(
+            columns={"Team": f"{side}Team", **{c: f"{side.lower()}_{c}" for c in available}}
+        )
+        out = out.merge(prefixed, on=["League", "_season_key", f"{side}Team"], how="left")
+
+    return out.drop(columns=["_season_key"])
+
+
+def _next_season(label: str) -> str:
+    """``"2425"`` -> ``"2526"``. Returns the input unchanged if unparseable."""
+    text = str(label)
+    if len(text) != 4 or not text.isdigit():
+        return text
+    start = int(text[:2]) + 1
+    return f"{start % 100:02d}{(start + 1) % 100:02d}"
 
 
 def build_team_features(
@@ -71,6 +147,8 @@ def build_match_features(
     tmh: pd.DataFrame,
     windows: Sequence[int] = (5,),
     congestion_days: int = 14,
+    strength: pd.DataFrame | None = None,
+    previous_season_strength: bool = True,
 ) -> pd.DataFrame:
     """Build the wide, model-ready match feature table from long team-match rows.
 
@@ -79,6 +157,10 @@ def build_match_features(
             ``Venue`` column of ``"Home"``/``"Away"``).
         windows: Rolling window sizes to compute form over.
         congestion_days: Lookback for the fixture-congestion count.
+        strength: Optional ``team_strength.csv`` to join squad quality from.
+        previous_season_strength: Join the preceding season's strength. Leave
+            True for training and backtesting; pass False only for live
+            prediction, where the current squad is the right one.
 
     Returns:
         One row per match: identifiers, the actual result (``FTHG``, ``FTAG``,
@@ -124,6 +206,11 @@ def build_match_features(
 
     matches = targets.merge(home_feats, on=list(_ID_COLS), how="inner", validate="1:1")
     matches = matches.merge(away_feats, on=list(_ID_COLS), how="inner", validate="1:1")
+
+    if strength is not None:
+        matches = add_team_strength(
+            matches, strength, previous_season=previous_season_strength
+        )
 
     matches = _add_diffs(matches)
     matches["league_code"] = matches["League"].map(LEAGUE_CODES).astype("float64")
