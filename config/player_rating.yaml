@@ -25,9 +25,24 @@
 #
 # EA's overall is mapped onto our scale by within-role percentile before
 # blending, since the raw scales differ and averaging directly would let
-# whichever is wider dominate. Players with no EA entry keep their performance
-# rating rather than being penalised for the gap.
+# whichever is wider dominate. Players with no EA entry are not penalised for
+# the gap, but see `unmatched_shrinkage_nineties`.
 fifa_weight: 0.7
+
+# Shrinkage for players with no EA entry, in 90-minute appearances.
+#
+# Blending pulls every matched player toward EA's clustered middle, so a player
+# left unblended keeps an untempered percentile and lands in the tails far more
+# often than his evidence justifies: unmatched players were ~16% of rated
+# player-seasons but 11-18 of each season's top fifty. Their performance rating
+# is shrunk toward the role-season mean with the same n / (n + k) form as
+# `shrinkage_nineties`.
+#
+# k = 4 was chosen for distribution parity, not to empty the leaderboard: it
+# brings the unmatched p95 (84) level with the matched p95 (81). k = 8, the
+# value used for minutes, overshoots to 80 and under-represents them instead.
+# Set to 0 to leave unmatched players unblended and unshrunk.
+unmatched_shrinkage_nineties: 4
 
 # Minimum minutes before a player is rated. Below this the sample is too thin
 # for percentiles to mean anything, however hard shrinkage works.

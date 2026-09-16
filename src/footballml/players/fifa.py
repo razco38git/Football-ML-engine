@@ -299,6 +299,38 @@ def load_fifa(directory: Path | None = None) -> pd.DataFrame:
     )
 
 
+#: Minimum exact-name matches before a team's EA club name is trusted, and the
+#: share of those matches the most common club must hold.
+CLUB_EVIDENCE_MIN = 3
+CLUB_EVIDENCE_SHARE = 0.5
+
+
+def _club_names(merged: pd.DataFrame) -> dict[str, str]:
+    """Learn what EA calls each of our teams, from players already matched.
+
+    The two sources spell clubs nothing alike -- ``"Bayern Munich"`` against
+    ``"FC Bayern München"``, ``"FC Cologne"`` against ``"1. FC Köln"`` -- and
+    comparing the strings would happily confuse ``Real Betis`` with
+    ``Real Sociedad``. The exact name matches already say which is which: if
+    most of a team's matched players carry one EA club, that is its EA name.
+    Transfers put a few players under their old club, hence the majority rule
+    rather than unanimity.
+    """
+    if "Team" not in merged.columns or "fifa_club" not in merged.columns:
+        return {}
+    # The loader stringifies clubs, so a missing one arrives as "nan".
+    clubs = merged["fifa_club"].astype("string")
+    known = merged["fifa_overall"].notna() & clubs.notna() & (clubs != "nan")
+    matched = merged[known]
+    names: dict[str, str] = {}
+    for team, clubs in matched.groupby("Team", observed=True)["fifa_club"]:
+        counts = clubs.value_counts()
+        top = counts.iloc[0]
+        if top >= CLUB_EVIDENCE_MIN and top / len(clubs) >= CLUB_EVIDENCE_SHARE:
+            names[str(team)] = counts.index[0]
+    return names
+
+
 def _match_loosely(
     merged: pd.DataFrame, fifa: pd.DataFrame, columns: list[str]
 ) -> pd.DataFrame:
@@ -327,10 +359,22 @@ def _match_loosely(
     identifies several players identifies none of them. Measured on the 2025/26
     edition, the leading-pair key is unique for 256 of the 269 names it resolves,
     so the guard costs little and removes the guesswork.
+
+    **Club breaks ties, and only ties.** ``"David García"`` at Las Palmas shares
+    a leading pair with both David García Santana (Las Palmas) and David García
+    Zubiría (Osasuna), so neither is taken on name alone -- but exactly one is
+    at his club. Where a key names several players and exactly one of them is
+    at the row's club, that one is taken. Club is never *required*: EA's club
+    is one transfer-window snapshot, so demanding it would lose every player
+    who moved (see :func:`attach_fifa`). The surname tier also demands the
+    given name appear somewhere in the EA name, since "same surname, same club"
+    alone is not proof -- brothers and namesakes share dressing rooms.
     """
     unmatched = merged["fifa_overall"].isna()
     if not unmatched.any():
         return merged
+
+    club_names = _club_names(merged)
 
     def keys_for(name: str) -> list[str]:
         parts = normalise_name(name).split()
@@ -341,45 +385,70 @@ def _match_loosely(
             keys.append(f"{parts[0]} {parts[-1]}")
         return keys
 
-    # Strong keys may map to several players; keep the highest-rated, which is
-    # overwhelmingly the one a top-five-league dataset means.
-    strong: dict[str, pd.Series] = {}
-    leading_counts: dict[str, int] = {}
-    leading_rows: dict[str, pd.Series] = {}
-    surname_counts: dict[str, int] = {}
-    surname_rows: dict[str, pd.Series] = {}
+    # Every candidate per key, in export order -- highest-rated first, since
+    # the loader sorts that way.
+    strong: dict[str, list[pd.Series]] = {}
+    leading: dict[str, list[pd.Series]] = {}
+    surnames: dict[str, list[pd.Series]] = {}
 
     for _, row in fifa.iterrows():
         for key in keys_for(str(row["fifa_name"])):
-            strong.setdefault(key, row)
+            strong.setdefault(key, []).append(row)
         parts = normalise_name(str(row["fifa_name"])).split()
         if len(parts) > 2:
-            leading = f"{parts[0]} {parts[1]}"
-            leading_counts[leading] = leading_counts.get(leading, 0) + 1
-            leading_rows.setdefault(leading, row)
+            leading.setdefault(f"{parts[0]} {parts[1]}", []).append(row)
         if parts:
-            surname = parts[-1]
-            surname_counts[surname] = surname_counts.get(surname, 0) + 1
-            surname_rows.setdefault(surname, row)
+            surnames.setdefault(parts[-1], []).append(row)
 
+    def at_club(candidates: list[pd.Series], team: object) -> pd.Series | None:
+        """The single candidate at the row's club, if there is exactly one."""
+        club = club_names.get(str(team))
+        if club is None or "fifa_club" not in fifa.columns:
+            return None
+        here = [c for c in candidates if c["fifa_club"] == club]
+        return here[0] if len(here) == 1 else None
+
+    has_team = "Team" in merged.columns
     for idx in merged.index[unmatched]:
         name = str(merged.at[idx, "Player"])
-        hit = next((strong[k] for k in keys_for(name) if k in strong), None)
+        team = merged.at[idx, "Team"] if has_team else None
+        parts = normalise_name(name).split()
+        hit = None
+
+        # Strong keys may map to several players. Prefer the one at his club;
+        # otherwise keep the highest-rated, which is overwhelmingly the one a
+        # top-five-league dataset means.
+        for key in keys_for(name):
+            if key in strong:
+                candidates = strong[key]
+                hit = candidates[0]
+                if len(candidates) > 1:
+                    local = at_club(candidates, team)
+                    hit = local if local is not None else hit
+                break
 
         if hit is None:
-            parts = normalise_name(name).split()
             # A two-token name against an EA entry carrying extra family names.
             # Unique leading pairs only: "jose maria" names several players.
-            whole = " ".join(parts)
-            if leading_counts.get(whole) == 1:
-                hit = leading_rows[whole]
+            candidates = leading.get(" ".join(parts), [])
+            if len(candidates) == 1:
+                hit = candidates[0]
+            elif candidates:
+                hit = at_club(candidates, team)
 
-        if hit is None:
-            parts = normalise_name(name).split()
-            surname = parts[-1] if parts else ""
-            # Unique surnames only: anything shared is too risky to guess at.
-            if surname and surname_counts.get(surname) == 1:
-                hit = surname_rows[surname]
+        if hit is None and parts:
+            # Unique surnames only: anything shared is too risky to guess at,
+            # unless the club and given name both confirm it.
+            candidates = surnames.get(parts[-1], [])
+            if len(candidates) == 1:
+                hit = candidates[0]
+            elif candidates:
+                given = parts[0]
+                named = [
+                    c for c in candidates
+                    if given in normalise_name(str(c["fifa_name"])).split()
+                ]
+                hit = at_club(named, team) if named else None
 
         if hit is not None:
             for col in columns:

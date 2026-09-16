@@ -13,7 +13,12 @@ import pandas as pd
 import pytest
 
 from footballml.players.ingest import position_group
-from footballml.players.rating import UNRATED_GROUPS, percentile_within, rate_players
+from footballml.players.rating import (
+    UNRATED_GROUPS,
+    load_config,
+    percentile_within,
+    rate_players,
+)
 
 
 @pytest.mark.parametrize(
@@ -217,3 +222,30 @@ def test_percentile_direction_can_invert() -> None:
     )
     pct = percentile_within(df, "cards", ["position_group", "Season"], higher_is_better=False)
     assert pct.iloc[0] > pct.iloc[2]
+
+
+def test_unmatched_players_are_shrunk_but_matched_ones_are_not() -> None:
+    """A player with no EA entry has less evidence, so his rating is less extreme.
+
+    Left unblended, unmatched players kept untempered percentiles and crowded
+    the tails. They are pulled toward the role mean; matched players are
+    blended exactly as before.
+    """
+    squad = _squad()
+    squad["fifa_overall"] = np.where(np.arange(len(squad)) % 2 == 0, 75.0, np.nan)
+    squad.loc[squad.index % 4 == 0, "fifa_overall"] = 65.0
+
+    config = load_config()
+    shrunk = rate_players(squad, {**config, "unmatched_shrinkage_nineties": 4})
+    raw = rate_players(squad, {**config, "unmatched_shrinkage_nineties": 0})
+
+    matched = squad["fifa_overall"].notna()
+    assert (shrunk.loc[matched, "rating"] == raw.loc[matched, "rating"]).all()
+
+    missing = ~matched
+    mean = raw.loc[missing, "performance_rating"].astype(float).mean()
+    distance = lambda frame: (frame.loc[missing, "rating"].astype(float) - mean).abs()  # noqa: E731
+    assert distance(shrunk).max() < distance(raw).max()
+    assert raw.loc[missing, "rating"].equals(
+        raw.loc[missing, "performance_rating"].round().astype("Int64")
+    )
