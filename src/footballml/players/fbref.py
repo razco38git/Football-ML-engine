@@ -239,30 +239,53 @@ def fetch_fbref_stats(
 
     frames = []
     for stat_type, wanted in (("misc", MISC_COLUMNS), ("keeper", KEEPER_COLUMNS)):
-        raw = fb.read_player_season_stats(stat_type).reset_index()
-        raw.columns = _flatten_columns(raw.columns)
-
-        out = pd.DataFrame(
-            {
-                "League": raw["league"].map(inverse),
-                "Season": raw["season"].astype(str),
-                "Team": raw["team"],
-                "Player": raw["player"],
-            }
-        )
-        nineties = pd.to_numeric(raw.get("90s"), errors="coerce")
-        for source, name in wanted.items():
-            if source not in raw.columns:
+        # One season at a time. soccerdata fetches every requested league-season
+        # in a single call, so a single unparseable page -- older seasons use a
+        # different layout and raise "not enough values to unpack" -- aborts the
+        # entire run. Per-season means a bad page costs that season, not the
+        # eleven that parsed fine.
+        seasonal: list[pd.DataFrame] = []
+        for season in seasons or [None]:
+            reader = fb if season is None else sd.FBref(leagues=names, seasons=season)
+            try:
+                raw = reader.read_player_season_stats(stat_type).reset_index()
+            except Exception as exc:  # noqa: BLE001 - keep going on a bad page
+                logger.warning("FBref %s %s unavailable: %s", stat_type, season, exc)
                 continue
-            values = pd.to_numeric(raw[source], errors="coerce")
-            # Percentages and rates are already normalised; counts are not.
-            if source.endswith("%") or source.endswith("90"):
-                out[name] = values
-            else:
-                out[f"{name}_per90"] = values.div(nineties).where(nineties > 0)
-                out[name] = values
-        frames.append(out)
-        logger.info("FBref %s: %d rows", stat_type, len(out))
+
+            raw.columns = _flatten_columns(raw.columns)
+            out = pd.DataFrame(
+                {
+                    "League": raw["league"].map(inverse),
+                    "Season": raw["season"].astype(str),
+                    "Team": raw["team"],
+                    "Player": raw["player"],
+                }
+            )
+            nineties = pd.to_numeric(raw.get("90s"), errors="coerce")
+            for source, name in wanted.items():
+                if source not in raw.columns:
+                    continue
+                values = pd.to_numeric(raw[source], errors="coerce")
+                # Percentages and rates are already normalised; counts are not.
+                if source.endswith("%") or source.endswith("90"):
+                    out[name] = values
+                else:
+                    out[f"{name}_per90"] = values.div(nineties).where(nineties > 0)
+                    out[name] = values
+            seasonal.append(out)
+
+        if not seasonal:
+            logger.warning("FBref %s: no seasons could be read", stat_type)
+            frames.append(pd.DataFrame(columns=["League", "Season", "Team", "Player"]))
+            continue
+
+        combined = pd.concat(seasonal, ignore_index=True)
+        frames.append(combined)
+        logger.info(
+            "FBref %s: %d rows across %d season(s)",
+            stat_type, len(combined), combined["Season"].nunique(),
+        )
 
     misc, keeper = frames
     return misc.merge(
