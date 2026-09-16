@@ -21,7 +21,11 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from footballml.data import PROCESSED_DIR, load_team_match_history  # noqa: E402
+from footballml.data import (  # noqa: E402
+    PROCESSED_DIR,
+    load_team_match_history,
+    load_team_strength,
+)
 from footballml.features.build import build_match_features  # noqa: E402
 from footballml.labels import humanise  # noqa: E402
 from footballml.models.evaluate import evaluate  # noqa: E402
@@ -40,7 +44,7 @@ def main() -> None:
 
     path = PROCESSED_DIR / "team_match_history_all.csv"
     tmh = load_team_match_history(path if path.exists() else None)
-    features = build_match_features(tmh)
+    features = build_match_features(tmh, strength=load_team_strength())
 
     train = features[features["Date"] < cutoff]
     upcoming = features[features["Date"] >= cutoff]

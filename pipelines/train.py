@@ -21,7 +21,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from footballml import registry  # noqa: E402
-from footballml.data import PROCESSED_DIR, load_team_match_history  # noqa: E402
+from footballml.data import (  # noqa: E402
+    PROCESSED_DIR,
+    load_team_match_history,
+    load_team_strength,
+)
 from footballml.features.build import build_match_features  # noqa: E402
 from footballml.ingest.matchhistory import LEAGUES  # noqa: E402
 from footballml.models.evaluate import base_rate_probs, evaluate  # noqa: E402
@@ -49,10 +53,22 @@ def main() -> None:
     if args.leagues:
         tmh = tmh[tmh["League"].isin(args.leagues)]
 
-    features = build_match_features(tmh)
+    # Squad strength from the previous season -- the same quantity every serving
+    # path supplies. Train and serve must agree on it, or the artifact expects
+    # columns the API cannot build.
+    features = build_match_features(tmh, strength=load_team_strength())
     played = features[features["FTR"].notna()].copy()
     cols = feature_columns(features)
     leagues = sorted(played["League"].unique())
+
+    if "home_strength_overall" in played.columns:
+        covered = played["home_strength_overall"].notna()
+        log.info(
+            "Squad strength on %d of %d matches (%.0f%%)",
+            int(covered.sum()), len(played), 100 * covered.mean(),
+        )
+    else:
+        log.warning("No team_strength.csv -- training without squad strength")
 
     metrics: dict[str, float] = {}
     if not args.skip_holdout:

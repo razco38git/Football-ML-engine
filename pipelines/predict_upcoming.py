@@ -26,7 +26,12 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from footballml.data import ODDS_COLUMNS, PROCESSED_DIR, load_team_match_history  # noqa: E402
+from footballml.data import (  # noqa: E402
+    ODDS_COLUMNS,
+    PROCESSED_DIR,
+    load_team_match_history,
+    load_team_strength,
+)
 from footballml.features.build import (  # noqa: E402
     build_match_features,
     build_upcoming_features,
@@ -56,7 +61,8 @@ def main() -> None:
         raise SystemExit("No upcoming fixtures published right now")
 
     # Train on every completed match, including the current season so far.
-    history = build_match_features(tmh)
+    strength = load_team_strength()
+    history = build_match_features(tmh, strength=strength)
     cols = feature_columns(history)
     played = history[history["FTR"].notna()]
     print(
@@ -65,7 +71,7 @@ def main() -> None:
     )
     model = MatchPredictor().fit(played[cols], played["FTHG"], played["FTAG"])
 
-    upcoming = build_upcoming_features(tmh, fixtures)
+    upcoming = build_upcoming_features(tmh, fixtures, strength=strength)
     if upcoming.empty:
         raise SystemExit("Fixtures found, but none could be matched to known teams")
 

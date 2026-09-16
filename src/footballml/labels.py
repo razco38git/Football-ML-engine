@@ -38,6 +38,11 @@ METRIC_NAMES = {
     "matches_used": "matches of history",
     "days_since_last_match": "days of rest",
     "league_code": "league",
+    # Squad strength, from player ratings. Always the previous season's, which
+    # is worth knowing when reading an early-season explanation.
+    "strength_overall": "squad rating",
+    "strength_attack": "attack rating",
+    "strength_defence": "defence rating",
 }
 
 

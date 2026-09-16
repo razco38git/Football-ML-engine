@@ -26,7 +26,12 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from footballml import registry, store  # noqa: E402
-from footballml.data import ODDS_COLUMNS, PROCESSED_DIR, load_team_match_history  # noqa: E402
+from footballml.data import (  # noqa: E402
+    ODDS_COLUMNS,
+    PROCESSED_DIR,
+    load_team_match_history,
+    load_team_strength,
+)
 from footballml.features.build import build_match_features, build_upcoming_features  # noqa: E402
 from footballml.ingest.matchhistory import LEAGUES, fetch_fixtures  # noqa: E402
 
@@ -48,9 +53,10 @@ def main() -> None:
     log = logging.getLogger("score_upcoming")
 
     tmh = load_team_match_history(PROCESSED_DIR / "team_match_history_all.csv")
+    strength = load_team_strength()
 
     # Settle first: a fixture predicted last week may have been played since.
-    played = build_match_features(tmh)
+    played = build_match_features(tmh, strength=strength)
     settled = store.settle(played[played["FTR"].notna()])
     log.info("Settled %d previously stored predictions", settled)
 
@@ -65,7 +71,9 @@ def main() -> None:
         log.info("No upcoming fixtures published")
         return
 
-    scored = build_upcoming_features(tmh, fixtures)
+    # Without strength here the artifact's feature list cannot be satisfied, and
+    # this is the path that writes the live pre-kickoff track record.
+    scored = build_upcoming_features(tmh, fixtures, strength=strength)
     if scored.empty:
         log.warning("No fixtures could be matched to known teams")
         return

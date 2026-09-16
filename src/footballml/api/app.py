@@ -38,7 +38,12 @@ from footballml.api.schemas import (
     TeamForm,
     TeamStrength,
 )
-from footballml.data import ODDS_COLUMNS, PROCESSED_DIR, load_team_match_history
+from footballml.data import (
+    ODDS_COLUMNS,
+    PROCESSED_DIR,
+    load_team_match_history,
+    load_team_strength,
+)
 from footballml.features.build import build_match_features, build_upcoming_features
 from footballml.form import build_index, recent_form
 from footballml.ingest.matchhistory import LEAGUES, fetch_fixtures
@@ -74,6 +79,10 @@ class State:
     players: pd.DataFrame = field(default_factory=pd.DataFrame)
     teams: pd.DataFrame = field(default_factory=pd.DataFrame)
     backtest: pd.DataFrame = field(default_factory=pd.DataFrame)
+    #: Squad strength for the model's features -- distinct from `teams`, which is
+    #: the same file presented for display. Every feature build must pass it, or
+    #: the artifact's expected columns cannot be produced.
+    strength: pd.DataFrame = field(default_factory=pd.DataFrame)
     # Scored predictions, not raw fixtures. Rebuilding features over the full
     # history costs ~6.5s, which is far too slow to repeat per request when the
     # answer only changes when the fixture list does.
@@ -98,7 +107,18 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
     path = PROCESSED_DIR / "team_match_history_all.csv"
     state.tmh = load_team_match_history(path)
-    state.features = build_match_features(state.tmh)
+    state.strength = load_team_strength()
+    state.features = build_match_features(state.tmh, strength=state.strength)
+
+    # Fail loudly at startup rather than on the first request: an artifact
+    # trained with columns this process cannot build would 500 every prediction.
+    missing = [c for c in state.metadata.feature_names if c not in state.features.columns]
+    if missing:
+        logger.error(
+            "Model %s expects %d feature(s) the API cannot build, e.g. %s -- "
+            "retrain with `python -m pipelines.train`",
+            state.metadata.version, len(missing), missing[:3],
+        )
     state.columns = feature_columns(state.features)
     state.form_index = build_index(state.tmh)
 
@@ -269,7 +289,7 @@ def _score_upcoming() -> list[Prediction]:
     if fixtures.empty:
         return []
 
-    scored = build_upcoming_features(state.tmh, fixtures)
+    scored = build_upcoming_features(state.tmh, fixtures, strength=state.strength)
     if scored.empty:
         logger.warning("No published fixtures matched a known team")
         return []
@@ -349,7 +369,7 @@ def predict(request: PredictRequest) -> Prediction:
         ]
     )
 
-    scored = build_upcoming_features(state.tmh, fixture)
+    scored = build_upcoming_features(state.tmh, fixture, strength=state.strength)
     if scored.empty:
         raise HTTPException(422, "Could not build features for that pairing")
 

@@ -89,8 +89,21 @@ def add_team_strength(
         from a separate file that would not change.
 
         ``previous_season=True`` is therefore correct for training and
-        backtesting. Live prediction is the one legitimate exception -- today's
-        squad is what plays tomorrow -- and passes ``False``.
+        backtesting -- and for live prediction too, for two reasons that each
+        suffice on their own:
+
+        - **Current-season strength does not exist when it is needed.** Ratings
+          require a minimum number of minutes, so four weeks into 2026/27 not
+          one player was rated and ``team_strength.csv`` had no rows for it.
+          ``False`` would hand every live fixture all-NaN strength, silently
+          identical to not using the feature.
+        - **Train/serve consistency.** The model learns "this match, given last
+          season's squad". Serving it this season's squad is a different
+          quantity, and skew even where the data exists.
+
+        ``False`` remains for analysis only. A promoted side has no
+        previous-season row in its new league and gets NaN; the model was
+        trained with exactly those gaps, so it degrades rather than breaks.
     """
     out = matches.copy()
     available = [c for c in STRENGTH_COLUMNS if c in strength.columns]

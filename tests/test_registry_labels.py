@@ -67,6 +67,10 @@ def test_versions_are_unique_per_build() -> None:
         ("points_last_5_diff", "points (last 5, edge over opponent)"),
         ("league_code", "league"),
         ("days_since_last_match", "days of rest"),
+        ("home_strength_overall", "home team squad rating"),
+        ("away_strength_attack", "away team attack rating"),
+        ("home_strength_defence", "home team defence rating"),
+        ("strength_overall_diff", "squad rating (edge over opponent)"),
     ],
 )
 def test_humanise(raw: str, expected: str) -> None:
