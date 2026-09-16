@@ -108,7 +108,26 @@ def _add_team_relative(df: pd.DataFrame) -> pd.DataFrame:
 
 
 #: Defensive actions distorted by how much a team has the ball.
-DEFENSIVE_VOLUME_METRICS = ("interceptions", "tackles_won", "recoveries")
+#:
+#: Every one of these is a *count* of something that can only happen while the
+#: opposition has possession. Clearances and blocks belong here every bit as
+#: much as tackles: a centre-back at a side with 65% of the ball simply gets
+#: fewer chances to make any of them. Adding the new metrics raw made Saliba and
+#: Van Dijk score *lower* than before, which is the bias arriving by the front
+#: door.
+#:
+#: Rates are deliberately absent -- `dribbler_tackle_pct` is already a success
+#: rate, so dividing it by team volume would be meaningless.
+DEFENSIVE_VOLUME_METRICS = (
+    "interceptions",
+    "tackles_won",
+    "tackles",
+    "recoveries",
+    "clearances",
+    "blocks",
+    "shots_blocked",
+    "passes_blocked",
+)
 
 
 def _add_possession_adjusted(df: pd.DataFrame) -> pd.DataFrame:
@@ -126,21 +145,24 @@ def _add_possession_adjusted(df: pd.DataFrame) -> pd.DataFrame:
     property of the player, not of their possession share.
     """
     out = df.copy()
+    team_col = "Team" if "Team" in out.columns else "team"
     available = [
         m for m in DEFENSIVE_VOLUME_METRICS if f"{m}_per90" in out.columns
     ]
-    if not available:
+    if not available or team_col not in out.columns:
         return out
 
     weights = out["nineties"].clip(lower=0)
+    keys = [out["League"], out["Season"], out[team_col]]
     for metric in available:
-        totals = out.groupby(["League", "Season", "team"], observed=True)[metric].transform("sum")
-        team_nineties = weights.groupby(
-            [out["League"], out["Season"], out["team"]]
-        ).transform("sum")
+        # The per-90 rate is the reliable input: several of these metrics arrive
+        # from FBref already divided by minutes, with no raw total alongside.
+        rate = out[f"{metric}_per90"]
+        totals = (rate * weights).groupby(keys).transform("sum")
+        team_nineties = weights.groupby(keys).transform("sum")
         # Ten outfielders defend at once, so squad nineties are ~10x team ones.
         team_rate = (totals / team_nineties.replace(0, np.nan)) * 10.0
-        out[f"{metric}_padj"] = out[f"{metric}_per90"].div(team_rate).where(team_rate > 0)
+        out[f"{metric}_padj"] = rate.div(team_rate).where(team_rate > 0)
 
     return out
 
@@ -179,6 +201,7 @@ def fetch_player_seasons(
     leagues: list[str] | None = None,
     seasons: list[str] | None = None,
     with_fbref: bool = True,
+    with_extended: bool = True,
     with_fifa: bool = True,
 ) -> pd.DataFrame:
     """Fetch per-season player totals and derive per-90 rates.
@@ -230,7 +253,6 @@ def fetch_player_seasons(
     )
 
     df = _add_team_relative(df)
-    df = _add_possession_adjusted(df)
 
     keep = [
         "League", "Season", "player", "team", "position", "position_group",
@@ -259,6 +281,22 @@ def fetch_player_seasons(
             fallback_on=["League", "Season"],
         )
 
+        if with_extended:
+            # Defending, possession and passing -- the tables soccerdata does
+            # not list. Without these a defender is judged on three numbers.
+            # Nested rather than combined: turning the extended tables off must
+            # not also drop the basic ones.
+            from footballml.players.fbref_extended import fetch_extended_stats
+
+            deep = fetch_extended_stats(codes, seasons)
+            if not deep.empty:
+                out = match_players(
+                    out,
+                    deep,
+                    on=["League", "Season", "Team"],
+                    fallback_on=["League", "Season"],
+                )
+
     if with_fifa:
         # Optional: adds EA overalls for the blend and, more importantly, the
         # detailed positions no free performance source provides.
@@ -268,5 +306,12 @@ def fetch_player_seasons(
             out = attach_fifa(out, load_fifa())
         except FifaDataMissingError as exc:
             logger.warning("%s", exc)
+
+    # Possession adjustment runs last, once every defensive metric has arrived.
+    # Placed before the FBref merges it silently produced nothing at all: the
+    # clearances and blocks it needs did not exist yet, and neither did the
+    # tackles and interceptions, so every `_padj` column the config referenced
+    # was quietly absent.
+    out = _add_possession_adjusted(out)
 
     return out.sort_values(["Season", "League", "Player"]).reset_index(drop=True)

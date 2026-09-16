@@ -138,8 +138,25 @@ def match_players(
     left["_norm"] = left["Player"].map(normalise_name)
     right["_norm"] = right["Player"].map(normalise_name)
 
-    merged = left.merge(right, on=[*on, "_norm"], how="left", suffixes=("", "_fb"))
-    extra = [c for c in right.columns if c not in {*on, "Player", "_norm"}]
+    # Only the new metric columns are carried across. Merging `right` whole
+    # brings its `Player` column along as `Player_fb`, and a second call then
+    # fails outright because that suffixed name already exists. Overlapping
+    # metric names are dropped too -- `Int` and `TklW` appear in both the misc
+    # and defense tables with identical values, so first source wins.
+    extra = [
+        c
+        for c in right.columns
+        if c not in {*on, "Player", "_norm"} and c not in left.columns
+    ]
+    dropped = [
+        c
+        for c in right.columns
+        if c not in {*on, "Player", "_norm"} and c in left.columns
+    ]
+    if dropped:
+        logger.debug("Already present, not re-merged: %s", dropped)
+
+    merged = left.merge(right[[*on, "_norm", *extra]], on=[*on, "_norm"], how="left")
     if not extra:
         return merged.drop(columns=["_norm"], errors="ignore")
 

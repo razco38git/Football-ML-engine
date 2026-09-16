@@ -76,7 +76,17 @@ def _weighted(frame: pd.DataFrame, weights: dict[str, float]) -> pd.Series:
     player with one unavailable metric is treated as average on it rather than
     worst.
     """
-    usable = {c: w for c, w in weights.items() if c in frame.columns and w != 0}
+    # A column that is entirely missing carries no information, and filling it
+    # with 0.5 would drag every player toward the middle of a sub-rating while
+    # looking like a contribution. FBref serves several of its tables with the
+    # values stripped -- headers present, cells empty -- so this is not
+    # hypothetical: without the guard, ~25 empty columns quietly diluted the
+    # metrics that did have data.
+    usable = {
+        c: w
+        for c, w in weights.items()
+        if c in frame.columns and w != 0 and frame[c].notna().any()
+    }
     if not usable:
         return pd.Series(np.nan, index=frame.index)
 
