@@ -255,3 +255,29 @@ def test_upcoming_fixture_without_strength_has_no_strength_columns(
     )
     built = build_upcoming_features(recent_history, fixture)
     assert not any("strength" in c for c in built.columns)
+
+
+def test_understat_club_names_reach_football_data_fixtures(
+    strength: pd.DataFrame,
+) -> None:
+    """Strength rows named by Understat must join to football-data fixtures.
+
+    Player data -- and so strength -- carries "Borussia Dortmund"; matches carry
+    "Dortmund". A left merge on the raw names does not fail, it just leaves NaN,
+    which is how the feature silently reached only 40% of Bundesliga
+    team-seasons while every test above passed.
+    """
+    renamed = strength.replace({"Team": {"Arsenal": "Borussia Dortmund",
+                                         "Chelsea": "Atletico Madrid"}})
+    matches = pd.DataFrame(
+        {
+            "League": ["E0"],
+            "Season": ["2526"],
+            "Date": pd.to_datetime(["2025-10-01"]),
+            "HomeTeam": ["Dortmund"],
+            "AwayTeam": ["Ath Madrid"],
+        }
+    )
+    joined = add_team_strength(matches, renamed, previous_season=True)
+    assert joined["home_strength_overall"].iloc[0] == 70.0
+    assert joined["away_strength_overall"].iloc[0] == 70.0

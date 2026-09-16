@@ -17,6 +17,7 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 
+from footballml.entities import load_aliases
 from footballml.features.rolling import (
     add_rest_features,
     add_team_form,
@@ -115,6 +116,16 @@ def add_team_strength(
     # so silently turning the column into strings breaks them well downstream of
     # here, with an error that points nowhere near this function.
     lookup = strength[["League", "Season", "Team", *available]].copy()
+
+    # Strength is built from player data, which carries Understat's club names
+    # ("Borussia Dortmund", "Atletico Madrid"); matches carry football-data's
+    # ("Dortmund", "Ath Madrid"). Without translating, the join fails silently --
+    # a left merge just leaves NaN -- and before this line it reached only 40% of
+    # Bundesliga and 52% of La Liga team-seasons, missing Dortmund, Leverkusen,
+    # Leipzig and both Madrid clubs. Resolved here rather than in the CSV so the
+    # Team Strength page keeps the fuller display names. Canonical names are not
+    # alias keys, so this is safe on an already-resolved frame.
+    lookup["Team"] = lookup["Team"].replace(load_aliases("understat"))
     lookup["_season_key"] = lookup["Season"].astype(str)
     lookup = lookup.drop(columns=["Season"])
     out["_season_key"] = out["Season"].astype(str)
