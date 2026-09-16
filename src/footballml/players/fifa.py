@@ -18,6 +18,7 @@ than demanding one exact schema.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -33,9 +34,15 @@ FIFA_DIR = RAW_DIR / "fifa"
 #: Candidate column names per field, tried in order. Covers the naming used by
 #: the common Kaggle EA FC exports without forcing one publisher's schema.
 COLUMN_CANDIDATES: dict[str, tuple[str, ...]] = {
+    # `long_name` outranks `short_name` deliberately. sofifa exports carry both,
+    # and the short form is an initial plus surname -- "K. Mbappe" -- which the
+    # loose matcher cannot resolve: the first-plus-last key never matches, and
+    # the surname fallback rejects it because Ethan Mbappe exists too. The long
+    # form ("Kylian Mbappe Lottin") does match. `short_name` stays last as a
+    # fallback for exports that carry nothing else.
     "name": (
-        "short_name", "common_name", "long_name", "name", "player_name",
-        "Name", "Player", "PLAYER",
+        "long_name", "common_name", "name", "player_name",
+        "Name", "Player", "PLAYER", "short_name",
     ),
     "first_name": ("first_name", "firstname", "given_name"),
     "last_name": ("last_name", "lastname", "surname", "family_name"),
@@ -146,16 +153,123 @@ def _build_names(df: pd.DataFrame) -> pd.Series | None:
     return combined
 
 
-def load_fifa(directory: Path | None = None) -> pd.DataFrame:
-    """Load an EA FC export from ``data/raw/fifa/``.
+#: Per-season exports, named by the season they describe rather than by edition.
+#:
+#: Naming by season is deliberate. EA editions are named for the year *after*
+#: release -- FIFA 16 shipped in September 2015 and describes 2015/16 -- so a
+#: file called ``fifa_16.csv`` is ambiguous in exactly the way that produces an
+#: off-by-one-season error, which is indistinguishable from the leakage this
+#: whole arrangement exists to prevent.
+SEASON_FILE_GLOB = "fifa_[0-9][0-9][0-9][0-9].csv"
 
-    Any CSV in that directory is accepted; the first with a detectable name and
-    overall column wins.
+#: Characters outside Latin and its extensions, which some exports append to a
+#: name with no separator at all.
+#:
+#: The FC26 database stores Mohamed Salah as ``"Mohamed Salah Hamed Ghalyمحمد صلاح"``
+#: -- the Arabic runs straight on from "Ghaly" -- and does this to 9.8% of its
+#: entries, which is enough on its own to drop a season's match rate by twenty
+#: points. The ranges kept are ASCII, Latin-1 Supplement, Latin Extended-A/B and
+#: Latin Extended Additional, so accented names survive untouched:
+#: ``"Willum Þór Willumsson"`` and ``"Tjaš Begić"`` pass through unchanged.
+_FOREIGN_SCRIPT = re.compile(r"[^\x00-\x7FÀ-ɏḀ-ỿ]")
+
+
+def _strip_foreign_script(name: str) -> str:
+    """Drop non-Latin script from a name and tidy the whitespace it leaves."""
+    return re.sub(r"\s+", " ", _FOREIGN_SCRIPT.sub("", str(name))).strip()
+
+
+def _normalise_export(df: pd.DataFrame, source: str) -> pd.DataFrame | None:
+    """Reduce one export to the canonical ``fifa_*`` columns.
+
+    Returns ``None`` when the frame has no detectable name or overall column,
+    so the caller can skip it rather than fail the whole load.
+    """
+    overall_col = _find_column(df, "overall")
+    if not overall_col:
+        logger.warning("%s has no recognisable overall column, skipping", source)
+        return None
+
+    names = _build_names(df)
+    if names is None:
+        logger.warning("%s has no recognisable name column, skipping", source)
+        return None
+
+    # Women's players share the file but never our leagues, and their names
+    # can collide with men's. Drop them rather than risk a wrong join.
+    gender_col = _find_column(df, "gender")
+    if gender_col is not None:
+        mens = df[gender_col].astype(str).str.contains("men", case=False, na=True)
+        womens = df[gender_col].astype(str).str.contains("women", case=False, na=False)
+        keep = mens & ~womens
+        if keep.any():
+            logger.info("Filtered out %d non-men's entries", int((~keep).sum()))
+            df, names = df[keep], names[keep]
+
+    out = pd.DataFrame(
+        {
+            "fifa_name": names.astype(str).map(_strip_foreign_script),
+            "fifa_overall": pd.to_numeric(df[overall_col], errors="coerce"),
+        }
+    )
+    for field in ("club", "positions", "age", "pace", "shooting", "passing",
+                  "dribbling", "defending", "physical"):
+        column = _find_column(df, field)
+        if column is not None:
+            values = df[column]
+            out[f"fifa_{field}"] = (
+                values.astype(str) if field in {"club", "positions"}
+                else pd.to_numeric(values, errors="coerce")
+            )
+
+    out["role"] = out.get("fifa_positions", pd.Series(dtype="object")).map(primary_role)
+    out["_norm"] = out["fifa_name"].map(normalise_name)
+    out = out.dropna(subset=["fifa_overall"])
+    # Keep the best-rated entry per name: exports often carry several versions
+    # of the same player across rating updates.
+    out = out.sort_values("fifa_overall", ascending=False).drop_duplicates("_norm")
+    return out.reset_index(drop=True)
+
+
+def load_fifa(directory: Path | None = None) -> pd.DataFrame:
+    """Load EA FC exports from ``data/raw/fifa/``.
+
+    Prefers one file per season (``fifa_1516.csv`` ... ``fifa_2627.csv``), and
+    returns them stacked with a ``Season`` column so each season can be matched
+    against the ratings that were current *at the time*.
+
+    Falls back to the old behaviour -- any single CSV, no season -- when no
+    per-season files are present. That fallback is a real compromise, not a
+    convenience: a single export describes one moment, so using it for every
+    season means a player carries today's rating back through his whole career.
+    The 2026 database rated Lamine Yamal 90, which applied to 2015/16 would
+    describe an eight-year-old. Per-season files are strongly preferred.
 
     Raises:
         FifaDataMissingError: When no usable CSV is found, with instructions.
     """
     directory = directory or FIFA_DIR
+    seasonal = sorted(directory.glob(SEASON_FILE_GLOB)) if directory.exists() else []
+
+    if seasonal:
+        frames = []
+        for path in seasonal:
+            season = path.stem.split("_")[-1]
+            normalised = _normalise_export(pd.read_csv(path, low_memory=False), path.name)
+            if normalised is None:
+                continue
+            normalised["Season"] = season
+            frames.append(normalised)
+
+        if frames:
+            out = pd.concat(frames, ignore_index=True)
+            logger.info(
+                "Loaded %d FIFA player-seasons across %d editions (%s..%s)",
+                len(out), len(frames),
+                out["Season"].min(), out["Season"].max(),
+            )
+            return out
+
     # Largest first: a partial export sitting alongside a full one should not
     # win just because it sorts earlier.
     candidates = (
@@ -163,58 +277,15 @@ def load_fifa(directory: Path | None = None) -> pd.DataFrame:
         if directory.exists()
         else []
     )
-
     for path in candidates:
-        df = pd.read_csv(path, low_memory=False)
-        overall_col = _find_column(df, "overall")
-        if not overall_col:
-            logger.warning("%s has no recognisable overall column, skipping", path.name)
+        normalised = _normalise_export(pd.read_csv(path, low_memory=False), path.name)
+        if normalised is None:
             continue
-
-        names = _build_names(df)
-        if names is None:
-            logger.warning("%s has no recognisable name column, skipping", path.name)
-            continue
-
-        # Women's players share the file but never our leagues, and their names
-        # can collide with men's. Drop them rather than risk a wrong join.
-        gender_col = _find_column(df, "gender")
-        if gender_col is not None:
-            mens = df[gender_col].astype(str).str.contains("men", case=False, na=True)
-            womens = df[gender_col].astype(str).str.contains("women", case=False, na=False)
-            keep = mens & ~womens
-            if keep.any():
-                logger.info("Filtered out %d non-men's entries", int((~keep).sum()))
-                df, names = df[keep], names[keep]
-
-        out = pd.DataFrame(
-            {
-                "fifa_name": names.astype(str),
-                "fifa_overall": pd.to_numeric(df[overall_col], errors="coerce"),
-            }
+        logger.warning(
+            "Using %s for every season -- no per-season files found, so ratings "
+            "will not reflect the season they are applied to", path.name,
         )
-        for field in ("club", "positions", "age", "pace", "shooting", "passing",
-                      "dribbling", "defending", "physical"):
-            column = _find_column(df, field)
-            if column is not None:
-                values = df[column]
-                out[f"fifa_{field}"] = (
-                    values.astype(str) if field in {"club", "positions"}
-                    else pd.to_numeric(values, errors="coerce")
-                )
-
-        out["role"] = out.get("fifa_positions", pd.Series(dtype="object")).map(primary_role)
-        out["_norm"] = out["fifa_name"].map(normalise_name)
-        out = out.dropna(subset=["fifa_overall"])
-        # Keep the best-rated entry per name: exports often carry several
-        # versions of the same player across rating updates.
-        out = out.sort_values("fifa_overall", ascending=False).drop_duplicates("_norm")
-
-        logger.info(
-            "Loaded %d FIFA players from %s (%d with a mapped role)",
-            len(out), path.name, int(out["role"].notna().sum()),
-        )
-        return out.reset_index(drop=True)
+        return normalised
 
     raise FifaDataMissingError(
         f"No EA FC export found in {directory}.\n"
@@ -222,7 +293,9 @@ def load_fifa(directory: Path | None = None) -> pd.DataFrame:
         "  https://www.kaggle.com/datasets/justdhia/ea-sports-fc-26-player-ratings\n"
         "  https://www.kaggle.com/datasets/flynn28/eafc26-player-database\n"
         "  https://www.kaggle.com/datasets/nyagami/ea-sports-fc-25-database-ratings-and-stats\n"
-        "Any schema works: the loader detects the name, overall and position columns."
+        "Any schema works: the loader detects the name, overall and position columns.\n"
+        "Name each file for the season it describes -- fifa_1516.csv for FIFA 16 --\n"
+        "so ratings are matched to the season they were current in."
     )
 
 
@@ -231,17 +304,29 @@ def _match_loosely(
 ) -> pd.DataFrame:
     """Second pass for names the two sources spell differently.
 
-    Three kinds of mismatch remain after exact comparison, each handled by its
+    Four kinds of mismatch remain after exact comparison, each handled by its
     own key and tried strongest first:
 
     - **Extra given names.** ``"Ionuț Andrei Radu"`` against ``"Ionut Radu"``,
       matched on first-plus-last.
+    - **Trailing family names.** The mirror image, and the common case in
+      Iberian, French and Brazilian naming: EA stores the full legal name
+      ``"Kylian Mbappé Lottin"`` where the performance source has
+      ``"Kylian Mbappe"``. First-plus-last builds ``"kylian lottin"`` here and
+      never matches, so the first *two* tokens are tried as well. sofifa exports
+      carry three or more tokens for roughly half their entries, against 8% of
+      the EA-site exports, which is why those seasons matched ~14 points worse.
     - **Short names.** EA often stores a Spanish or Portuguese player under a
       surname alone -- ``"De Gea"``, ``"Sivera"``, ``"Álex Remiro"`` -- where the
       performance source has the full name.
     - **Surname only.** Last resort, and accepted *only where that surname is
       unique across the whole EA database*. Without that guard, every Petrović
       and every Silva would collapse onto one player.
+
+    The last two tiers are guarded by uniqueness for the same reason: a key that
+    identifies several players identifies none of them. Measured on the 2025/26
+    edition, the leading-pair key is unique for 256 of the 269 names it resolves,
+    so the guard costs little and removes the guesswork.
     """
     unmatched = merged["fifa_overall"].isna()
     if not unmatched.any():
@@ -259,6 +344,8 @@ def _match_loosely(
     # Strong keys may map to several players; keep the highest-rated, which is
     # overwhelmingly the one a top-five-league dataset means.
     strong: dict[str, pd.Series] = {}
+    leading_counts: dict[str, int] = {}
+    leading_rows: dict[str, pd.Series] = {}
     surname_counts: dict[str, int] = {}
     surname_rows: dict[str, pd.Series] = {}
 
@@ -266,6 +353,10 @@ def _match_loosely(
         for key in keys_for(str(row["fifa_name"])):
             strong.setdefault(key, row)
         parts = normalise_name(str(row["fifa_name"])).split()
+        if len(parts) > 2:
+            leading = f"{parts[0]} {parts[1]}"
+            leading_counts[leading] = leading_counts.get(leading, 0) + 1
+            leading_rows.setdefault(leading, row)
         if parts:
             surname = parts[-1]
             surname_counts[surname] = surname_counts.get(surname, 0) + 1
@@ -274,6 +365,14 @@ def _match_loosely(
     for idx in merged.index[unmatched]:
         name = str(merged.at[idx, "Player"])
         hit = next((strong[k] for k in keys_for(name) if k in strong), None)
+
+        if hit is None:
+            parts = normalise_name(name).split()
+            # A two-token name against an EA entry carrying extra family names.
+            # Unique leading pairs only: "jose maria" names several players.
+            whole = " ".join(parts)
+            if leading_counts.get(whole) == 1:
+                hit = leading_rows[whole]
 
         if hit is None:
             parts = normalise_name(name).split()
@@ -289,22 +388,76 @@ def _match_loosely(
     return merged
 
 
+def _attach_per_season(
+    players: pd.DataFrame, fifa: pd.DataFrame, columns: list[str]
+) -> pd.DataFrame:
+    """Match each season's players against the edition current that season.
+
+    This is the whole point of holding per-season exports. Matching every season
+    against one export gives a player a single rating for his entire career:
+    Aaron Cresswell was 69 in 2015/16 and still 69 in 2024/25, and a player who
+    was seventeen and ordinary in 2016 carried his 2026 rating backwards. Both
+    are future knowledge, and both inflate a backtest while being worthless in
+    production.
+    """
+    fifa = fifa.copy()
+    fifa["Season"] = fifa["Season"].astype(str)
+    by_season = {season: group for season, group in fifa.groupby("Season")}
+
+    pieces: list[pd.DataFrame] = []
+    for season, group in players.groupby(players["Season"].astype(str), sort=False):
+        edition = by_season.get(season)
+        if edition is None:
+            # Better an unrated season than one rated from the wrong year.
+            logger.warning(
+                "No FIFA export for season %s; %d players keep performance only",
+                season, len(group),
+            )
+            piece = group.copy()
+            for column in columns:
+                piece[column] = pd.NA
+            pieces.append(piece.reset_index(drop=True))
+            continue
+
+        edition = edition.reset_index(drop=True)
+        piece = group.reset_index(drop=True).merge(
+            edition[["_norm", *columns]], on="_norm", how="left"
+        )
+        piece = _match_loosely(piece, edition, columns)
+        logger.info(
+            "  %s: %.0f%% of %d player-seasons matched",
+            season, piece["fifa_overall"].notna().mean() * 100, len(piece),
+        )
+        pieces.append(piece)
+
+    return pd.concat(pieces, ignore_index=True)
+
+
 def attach_fifa(players: pd.DataFrame, fifa: pd.DataFrame) -> pd.DataFrame:
     """Attach FIFA ratings and roles to performance rows, matched by name.
 
-    Matched on normalised name across the whole export rather than within a
-    club, because EA's club field reflects one moment in a transfer window and
-    our rows span whole seasons. Full names are distinctive enough that this is
-    safe; club-constrained matching loses far more than it protects.
+    Matched on normalised name rather than within a club, because EA's club
+    field reflects one moment in a transfer window and our rows span whole
+    seasons. Full names are distinctive enough that this is safe;
+    club-constrained matching loses far more than it protects.
+
+    When ``fifa`` carries a ``Season`` column, each season is matched against
+    its own edition -- see :func:`_attach_per_season`. Otherwise every season is
+    matched against the one export available, which is the legacy behaviour and
+    applies one year's ratings to all of them.
     """
     out = players.copy()
     out["_norm"] = out["Player"].map(normalise_name)
 
     columns = [c for c in fifa.columns if c.startswith("fifa_") or c == "role"]
-    merged = out.merge(fifa[["_norm", *columns]], on="_norm", how="left")
-    logger.info("FIFA exact match: %.0f%%", merged["fifa_overall"].notna().mean() * 100)
 
-    merged = _match_loosely(merged, fifa, columns)
+    if "Season" in fifa.columns and "Season" in out.columns:
+        merged = _attach_per_season(out, fifa, columns)
+    else:
+        merged = out.merge(fifa[["_norm", *columns]], on="_norm", how="left")
+        logger.info("FIFA exact match: %.0f%%", merged["fifa_overall"].notna().mean() * 100)
+        merged = _match_loosely(merged, fifa, columns)
+
     logger.info(
         "FIFA match rate: %.0f%% of %d player-seasons",
         merged["fifa_overall"].notna().mean() * 100, len(merged),
