@@ -208,10 +208,7 @@ def rate_players(
     work["composite_raw"] = composites
 
     # --- 3: shrink toward the positional mean ------------------------------
-    prior = work.groupby(by, observed=True)["composite_raw"].transform("mean")
-    n = work["nineties"].clip(lower=0)
-    weight = n / (n + k)
-    work["composite"] = weight * work["composite_raw"] + (1 - weight) * prior
+    work["composite"] = shrink_toward_mean(work, "composite_raw", by, k)
 
     # --- 4: map onto 0-99 --------------------------------------------------
     # Ranked *within position*, not across all players. Ranking globally lets
@@ -253,6 +250,22 @@ def rate_players(
     return df
 
 
+def shrink_toward_mean(
+    frame: pd.DataFrame, column: str, by: list[str], k: float
+) -> pd.Series:
+    """Empirical-Bayes shrinkage of ``column`` toward its group mean.
+
+    Each value keeps weight ``n / (n + k)`` of itself, where ``n`` is the
+    player's 90-minute appearances; the rest comes from the mean of his
+    ``by`` group. ``k`` is how many nineties of evidence it takes to be
+    trusted halfway.
+    """
+    prior = frame.groupby(by, observed=True)[column].transform("mean")
+    n = frame["nineties"].clip(lower=0)
+    weight = n / (n + k)
+    return weight * frame[column] + (1 - weight) * prior
+
+
 def _blend_with_fifa(work: pd.DataFrame, config: dict[str, Any]) -> pd.Series:
     """Combine the performance rating with EA's overall.
 
@@ -267,8 +280,14 @@ def _blend_with_fifa(work: pd.DataFrame, config: dict[str, Any]) -> pd.Series:
     dominate, so EA's overall is first mapped onto our scale by percentile --
     within position, so a keeper is compared with keepers.
 
-    Players with no EA entry keep their performance rating unchanged rather than
-    being penalised for the gap.
+    Players with no EA entry are not penalised for the gap, but they are shrunk
+    toward their role's mean by ``unmatched_shrinkage_nineties``. They have
+    strictly less evidence behind them, and left alone they were the most
+    extreme ratings in the table: the blend pulls every matched player's
+    percentile toward EA's clustered middle, so an unmatched Las Palmas
+    centre-back with one strong season out-rated nearly everyone. ~16% of
+    rated player-seasons were unmatched, yet they held 11-18 of each season's
+    top fifty.
     """
     weight = float(config.get("fifa_weight", 0.0))
     performance = work["performance_rating"]
@@ -291,6 +310,13 @@ def _blend_with_fifa(work: pd.DataFrame, config: dict[str, Any]) -> pd.Series:
     blended[present] = (
         performance[present] * (1 - weight) + fifa_on_our_scale[present] * weight
     )
+
+    k = float(config.get("unmatched_shrinkage_nineties", 0.0))
+    if k > 0 and (~present).any():
+        # The prior is the mean over the whole role-season, matched players
+        # included: it is the pool the performance percentile was ranked in.
+        shrunk = shrink_toward_mean(work, "performance_rating", [group, "Season"], k)
+        blended[~present] = shrunk[~present]
     logger.info(
         "Blended %d/%d ratings with FIFA at weight %.2f",
         int(present.sum()), len(work), weight,

@@ -168,3 +168,75 @@ def test_accented_latin_names_survive_stripping(name):
 def test_a_purely_foreign_name_does_not_become_whitespace():
     """A name with no Latin part collapses to empty, not to a stray space."""
     assert _strip_foreign_script("香川 真司") == ""
+
+
+def _club_fixture(extra_players: list[dict]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """An edition where each club's EA name can be learned from exact matches.
+
+    Understat and EA spell clubs differently on purpose here, so the test
+    fails if the tiebreaker ever starts comparing club strings directly.
+    """
+    teammates = {
+        "Las Palmas": ("UD Las Palmas", ["ana uno", "ana dos", "ana tres"]),
+        "Osasuna": ("CA Osasuna", ["oso uno", "oso dos", "oso tres"]),
+        "Granada": ("Granada CF", ["gra uno", "gra dos", "gra tres"]),
+    }
+    rows, players = [], []
+    for team, (club, names) in teammates.items():
+        for name in names:
+            rows.append({"fifa_name": name, "fifa_overall": 70.0,
+                         "fifa_club": club, "Season": "1516"})
+            players.append({"Player": name, "Team": team})
+    rows += [
+        {"fifa_name": "david garcia zubiria", "fifa_overall": 75.0,
+         "fifa_club": "CA Osasuna", "Season": "1516"},
+        {"fifa_name": "david garcia santana", "fifa_overall": 72.0,
+         "fifa_club": "UD Las Palmas", "Season": "1516"},
+        {"fifa_name": "hugo miguel almeida costa lopes", "fifa_overall": 71.0,
+         "fifa_club": "Granada CF", "Season": "1516"},
+        {"fifa_name": "rui lopes", "fifa_overall": 65.0,
+         "fifa_club": "CA Osasuna", "Season": "1516"},
+    ]
+    frame = pd.DataFrame(players + extra_players)
+    frame["Season"] = "1516"
+    frame["position_group"] = "D"
+    return frame, _export(rows)
+
+
+def _overall(matched: pd.DataFrame, player: str, team: str) -> float:
+    row = matched[(matched["Player"] == player) & (matched["Team"] == team)]
+    return row["fifa_overall"].iloc[0]
+
+
+def test_club_breaks_an_ambiguous_leading_pair():
+    """Two David Garcías, one at each club: each row takes his own."""
+    players, export = _club_fixture(
+        [{"Player": "david garcia", "Team": "Las Palmas"},
+         {"Player": "david garcia", "Team": "Osasuna"}]
+    )
+    matched = attach_fifa(players, export)
+    assert _overall(matched, "david garcia", "Las Palmas") == 72.0
+    assert _overall(matched, "david garcia", "Osasuna") == 75.0
+
+
+def test_club_breaks_a_shared_surname_only_with_the_given_name():
+    """``"Miguel Lopes"`` finds Hugo Miguel ... Lopes at his club; a stranger does not."""
+    players, export = _club_fixture(
+        [{"Player": "miguel lopes", "Team": "Granada"},
+         {"Player": "pedro lopes", "Team": "Granada"}]
+    )
+    matched = attach_fifa(players, export)
+    assert _overall(matched, "miguel lopes", "Granada") == 71.0
+    assert pd.isna(_overall(matched, "pedro lopes", "Granada"))
+
+
+def test_club_does_not_resolve_when_neither_candidate_is_there():
+    """An ambiguous key at a third club stays unmatched rather than guessing."""
+    players, export = _club_fixture([{"Player": "david garcia", "Team": "Granada"}])
+    assert pd.isna(_overall(attach_fifa(players, export), "david garcia", "Granada"))
+
+
+def test_club_is_not_required_for_an_unambiguous_name():
+    """A player EA lists at his old club still matches: club only breaks ties."""
+    players, export = _club_fixture([{"Player": "hugo lopes", "Team": "Osasuna"}])
+    assert _overall(attach_fifa(players, export), "hugo lopes", "Osasuna") == 71.0
