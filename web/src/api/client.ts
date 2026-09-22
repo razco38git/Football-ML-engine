@@ -50,6 +50,14 @@ export interface Prediction {
   market_prob_draw: number | null;
   market_prob_away: number | null;
 
+  /** Last season's squad ratings, as the model saw them. Null for a promoted side. */
+  strength_home_overall: number | null;
+  strength_home_attack: number | null;
+  strength_home_defence: number | null;
+  strength_away_overall: number | null;
+  strength_away_attack: number | null;
+  strength_away_defence: number | null;
+
   actual_home_goals: number | null;
   actual_away_goals: number | null;
   actual_result: 'H' | 'D' | 'A' | null;
@@ -294,7 +302,11 @@ export interface Accuracy {
   brier: number;
   rps_base_rate: number;
   rps_market: number | null;
-  by_league: Record<string, number>;
+  /** Share won by the most common outcome — always backing the home side. */
+  accuracy_base_rate: number;
+  /** How often the bookmakers' shortest price won, where odds exist. */
+  accuracy_market: number | null;
+  by_league_accuracy: Record<string, number>;
   calibration: {
     bin_lower: number;
     bin_upper: number;

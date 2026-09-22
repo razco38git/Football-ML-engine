@@ -86,6 +86,102 @@ function TeamSide({ team, form, league, align }: {
   );
 }
 
+/**
+ * Squad strength for both sides, shown as its own block.
+ *
+ * Deliberately separate from the SHAP drivers rather than forced into them:
+ * that list is the model's real top-five reasoning, and editing it to always
+ * include strength would misrepresent it. Strength reaches the top five in only
+ * a minority of fixtures because recent form usually dominates — but a reader
+ * still wants to see how the squads compare, so it gets a permanent row here.
+ *
+ * These are last season's ratings, which is what the model was given: current
+ * ratings do not exist until players have enough minutes to be rated.
+ */
+function SquadStrength({ p }: { p: Prediction }) {
+  const rows = [
+    ['Overall', p.strength_home_overall, p.strength_away_overall],
+    ['Attack', p.strength_home_attack, p.strength_away_attack],
+    ['Defence', p.strength_home_defence, p.strength_away_defence],
+  ] as const;
+
+  // A promoted side has no rating in its new league. That is a real gap in the
+  // data, not a failure, and the model sees the same gap.
+  const missing = [
+    p.strength_home_overall == null ? p.home_team : null,
+    p.strength_away_overall == null ? p.away_team : null,
+  ].filter(Boolean);
+
+  // Neither side rated: say so rather than rendering nothing. A silently absent
+  // section reads as a bug, and leaves the reader wondering whether squad
+  // quality was used at all.
+  if (missing.length === 2) {
+    return (
+      <div className="mt-5">
+        <div
+          className="text-xs font-display font-bold uppercase tracking-wider mb-2"
+          style={{ color: 'var(--muted-foreground)' }}
+        >
+          Squad strength · last season
+        </div>
+        <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+          Neither {p.home_team} nor {p.away_team} has a squad rating in this
+          league from last season, so this prediction rests on form alone.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-5">
+      <div
+        className="text-xs font-display font-bold uppercase tracking-wider mb-3"
+        style={{ color: 'var(--muted-foreground)' }}
+      >
+        Squad strength · last season
+      </div>
+
+      {rows.map(([label, home, away]) => {
+        const both = home != null && away != null;
+        return (
+          <div key={label} className="flex items-center gap-3 mb-2">
+            <span
+              className="font-data font-bold text-sm text-right"
+              style={{ width: 40, color: both && home > away ? '#00e676' : 'var(--foreground)' }}
+            >
+              {home?.toFixed(1) ?? '—'}
+            </span>
+            <div className="flex h-1.5 rounded-full overflow-hidden flex-1" style={{ background: 'var(--secondary)' }}>
+              {both && (
+                <>
+                  <div style={{ width: `${(home / (home + away)) * 100}%`, background: '#00e676' }} />
+                  <div style={{ width: `${(away / (home + away)) * 100}%`, background: '#3b82f6' }} />
+                </>
+              )}
+            </div>
+            <span
+              className="font-data font-bold text-sm"
+              style={{ width: 40, color: both && away > home ? '#3b82f6' : 'var(--foreground)' }}
+            >
+              {away?.toFixed(1) ?? '—'}
+            </span>
+            <span className="text-xs" style={{ color: 'var(--muted-foreground)', width: 56 }}>
+              {label}
+            </span>
+          </div>
+        );
+      })}
+
+      {missing.length > 0 && (
+        <div className="text-xs mt-2" style={{ color: 'var(--muted-foreground)' }}>
+          No rating for {missing.join(' or ')} — newly promoted, so there is no
+          squad rating from last season in this league.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MatchCard({ p }: { p: Prediction }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -227,6 +323,8 @@ function MatchCard({ p }: { p: Prediction }) {
               </div>
             </div>
           </div>
+
+          <SquadStrength p={p} />
 
           {/* SHAP drivers: the model's actual reasoning, not a summary of it. */}
           {!!p.drivers_home.length && (

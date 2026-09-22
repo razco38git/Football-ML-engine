@@ -80,6 +80,19 @@ class Prediction(BaseModel):
     market_prob_draw: float | None = None
     market_prob_away: float | None = None
 
+    #: Squad strength as the model saw it: the *previous* season's ratings, the
+    #: same numbers the Team Strength page shows. Exposed separately from the
+    #: SHAP drivers because those list only each side's top five contributions,
+    #: where form usually crowds strength out -- it reached just 83 of 480
+    #: driver slots across one matchweek. ``None`` for a newly promoted side,
+    #: which has no rating in its new league and is left as a genuine gap.
+    strength_home_overall: float | None = None
+    strength_home_attack: float | None = None
+    strength_home_defence: float | None = None
+    strength_away_overall: float | None = None
+    strength_away_attack: float | None = None
+    strength_away_defence: float | None = None
+
     actual_home_goals: int | None = None
     actual_away_goals: int | None = None
     actual_result: str | None = None
@@ -227,7 +240,20 @@ class Accuracy(BaseModel):
     brier: float
     rps_base_rate: float
     rps_market: float | None = None
-    by_league: dict[str, float] = Field(
-        default_factory=dict, description="RPS per league"
+
+    #: Reference points that make `accuracy` readable. A match has three
+    #: outcomes, so 52% is not a coin flip falling badly -- it sits against 33%
+    #: for a random guess, `accuracy_base_rate` for always backing the home
+    #: side, and `accuracy_market` for the bookmakers on the same fixtures.
+    accuracy_base_rate: float = Field(
+        description="Share won by the most common outcome -- always pick home"
+    )
+    accuracy_market: float | None = Field(
+        default=None,
+        description="How often the bookmakers' shortest price won, where odds exist",
+    )
+
+    by_league_accuracy: dict[str, float] = Field(
+        default_factory=dict, description="Accuracy per league"
     )
     calibration: list[CalibrationBin] = Field(default_factory=list)

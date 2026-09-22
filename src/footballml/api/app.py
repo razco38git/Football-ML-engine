@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -54,7 +55,7 @@ from footballml.models.evaluate import (
     evaluate,
     odds_implied_probs,
 )
-from footballml.models.match_model import feature_columns
+from footballml.models.match_model import OUTCOMES, feature_columns
 
 logger = logging.getLogger(__name__)
 
@@ -195,6 +196,15 @@ def _to_predictions(
             prob_over_2_5=round(float(r["prob_over_2_5"]), 4),
             prob_btts=round(float(r["prob_btts"]), 4),
         )
+        # Squad strength exactly as the model saw it, straight off the scored
+        # frame rather than re-read from the CSV, so the page cannot drift from
+        # the features behind the prediction.
+        for side in ("home", "away"):
+            for metric in ("overall", "attack", "defence"):
+                value = r.get(f"{side}_strength_{metric}")
+                if pd.notna(value):
+                    setattr(entry, f"strength_{side}_{metric}", round(float(value), 1))
+
         if pd.notna(r.get("FTR")):
             entry.actual_home_goals = int(r["FTHG"])
             entry.actual_away_goals = int(r["FTAG"])
@@ -405,9 +415,10 @@ def accuracy(league: str | None = Query(None)) -> Accuracy:
         log_loss=round(metrics["log_loss"], 4),
         brier=round(metrics["brier"], 4),
         rps_base_rate=round(evaluate(actual, base_rate_probs(actual, len(rows)))["rps"], 4),
-        by_league={
+        accuracy_base_rate=round(float(actual.value_counts(normalize=True).max()), 4),
+        by_league_accuracy={
             str(lg): round(
-                evaluate(g["actual_result"], g[PROB_COLUMNS].to_numpy())["rps"], 4
+                evaluate(g["actual_result"], g[PROB_COLUMNS].to_numpy())["accuracy"], 4
             )
             for lg, g in rows.groupby("League")
         },
@@ -661,6 +672,21 @@ def _summarise(rows: pd.DataFrame, prob_cols: list[str], actual_col: str) -> Acc
     probs = rows[prob_cols].to_numpy()
     actual = rows[actual_col]
     metrics = evaluate(actual, probs)
+
+    # How often the bookmakers' shortest price won, over whichever rows carry
+    # odds. This is the benchmark worth publishing beside our own accuracy: the
+    # market has team news and money behind it, so it is the realistic ceiling
+    # rather than a straw man.
+    accuracy_market = None
+    if all(c in rows.columns for c in ODDS_COLUMNS):
+        priced = rows[list(ODDS_COLUMNS)].notna().all(axis=1)
+        if priced.any():
+            sub = rows[priced]
+            favourite = np.array(OUTCOMES)[
+                odds_implied_probs(sub, ODDS_COLUMNS).argmax(axis=1)
+            ]
+            accuracy_market = round(float((favourite == sub[actual_col]).mean()), 4)
+
     return Accuracy(
         n=metrics["n"],
         accuracy=round(metrics["accuracy"], 4),
@@ -668,8 +694,12 @@ def _summarise(rows: pd.DataFrame, prob_cols: list[str], actual_col: str) -> Acc
         log_loss=round(metrics["log_loss"], 4),
         brier=round(metrics["brier"], 4),
         rps_base_rate=round(evaluate(actual, base_rate_probs(actual, len(rows)))["rps"], 4),
-        by_league={
-            str(lg): round(evaluate(g[actual_col], g[prob_cols].to_numpy())["rps"], 4)
+        # Always predicting whichever outcome is most common -- in practice a
+        # home win. The floor any real model has to clear.
+        accuracy_base_rate=round(float(actual.value_counts(normalize=True).max()), 4),
+        accuracy_market=accuracy_market,
+        by_league_accuracy={
+            str(lg): round(evaluate(g[actual_col], g[prob_cols].to_numpy())["accuracy"], 4)
             for lg, g in rows.groupby("League")
         },
         calibration=[

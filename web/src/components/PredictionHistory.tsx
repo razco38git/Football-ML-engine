@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api, LEAGUE_NAMES, type MatchResult } from '../api/client';
+import { api, LEAGUE_NAMES, type Accuracy, type MatchResult } from '../api/client';
 import { formatDate, pct, teamColor } from '../api/display';
 import { useAsync } from '../api/hooks';
 
@@ -147,6 +147,77 @@ function Stat({ label, value, sub, color }: { label: string; value: string; sub:
   );
 }
 
+/**
+ * Why ~52% is not a bad number, said on the page rather than in a conversation.
+ *
+ * A football match has three outcomes, so the reference points are 33% for a
+ * guess and the two tiles above: always backing the home side, and the
+ * bookmakers on the same fixtures. The calibration strip makes the second, more
+ * useful point -- picking one winner is hard, but the *probabilities* hold up,
+ * which is what actually matters when reading a prediction.
+ */
+function Explainer({ summary }: { summary: Accuracy }) {
+  // Only the bands with enough matches to mean anything, most confident first.
+  const bands = summary.calibration
+    .filter(b => b.n >= 100)
+    .sort((a, b) => b.mean_predicted - a.mean_predicted)
+    .slice(0, 4);
+
+  return (
+    <div
+      className="rounded-xl p-5 mb-6"
+      style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+    >
+      <div
+        className="text-xs font-display font-bold uppercase tracking-wider mb-3"
+        style={{ color: 'var(--muted-foreground)' }}
+      >
+        What does {pct(summary.accuracy)} mean?
+      </div>
+
+      <p className="text-sm leading-relaxed" style={{ color: 'var(--foreground)' }}>
+        A match has three results, so guessing at random gets{' '}
+        <strong>33%</strong>. Always backing the home side gets{' '}
+        <strong>{pct(summary.accuracy_base_rate)}</strong>
+        {summary.accuracy_market != null && (
+          <>
+            , and the bookmakers&rsquo; favourite wins{' '}
+            <strong>{pct(summary.accuracy_market)}</strong> of these same matches
+          </>
+        )}
+        . Draws are the hard part: about a quarter of matches end level, but a draw
+        is almost never any single most likely result, so those games are nearly
+        impossible to call.
+      </p>
+
+      {bands.length > 0 && (
+        <>
+          <p className="text-sm leading-relaxed mt-3" style={{ color: 'var(--foreground)' }}>
+            Accuracy only asks whether the top pick came in. The more useful
+            question is whether the percentages can be trusted &mdash; and they can:
+          </p>
+          <div className="flex flex-wrap gap-x-6 gap-y-2 mt-3">
+            {bands.map(b => (
+              <div key={b.bin_lower} className="flex items-center gap-2">
+                <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                  says {pct(b.mean_predicted)}
+                </span>
+                <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>&rarr;</span>
+                <span className="font-data font-bold text-sm" style={{ color: '#00e676' }}>
+                  {pct(b.observed_rate)}
+                </span>
+                <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                  ({b.n.toLocaleString()})
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function PredictionHistory() {
   const [source, setSource] = useState<Source>('backtest');
   const [league, setLeague] = useState('All');
@@ -247,16 +318,16 @@ export default function PredictionHistory() {
               color={summary.accuracy >= 0.55 ? '#00e676' : summary.accuracy >= 0.45 ? '#ffea00' : '#f44336'}
             />
             <Stat
-              label="RPS"
-              value={summary.rps.toFixed(4)}
-              sub={`vs ${summary.rps_base_rate.toFixed(4)} base rate — lower is better`}
-              color={summary.rps < summary.rps_base_rate ? '#00e676' : '#f44336'}
+              label="Always pick home"
+              value={pct(summary.accuracy_base_rate)}
+              sub="the simplest possible rule"
+              color="#64748b"
             />
             <Stat
-              label="Log loss"
-              value={summary.log_loss.toFixed(3)}
-              sub="penalises confident mistakes"
-              color="#3b82f6"
+              label="Bookmakers"
+              value={summary.accuracy_market != null ? pct(summary.accuracy_market) : '—'}
+              sub="favourite wins, same matches"
+              color="#f59e0b"
             />
             <Stat
               label="When confident"
@@ -266,7 +337,9 @@ export default function PredictionHistory() {
             />
           </div>
 
-          {Object.keys(summary.by_league).length > 1 && (
+          <Explainer summary={summary} />
+
+          {Object.keys(summary.by_league_accuracy).length > 1 && (
             <div
               className="rounded-xl p-5 mb-6"
               style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
@@ -275,18 +348,18 @@ export default function PredictionHistory() {
                 className="text-xs font-display font-bold uppercase tracking-wider mb-3"
                 style={{ color: 'var(--muted-foreground)' }}
               >
-                RPS by league — lower is better
+                Accuracy by league
               </div>
               <div className="flex flex-wrap gap-x-8 gap-y-2">
-                {Object.entries(summary.by_league)
-                  .sort((a, b) => a[1] - b[1])
-                  .map(([code, rps]) => (
+                {Object.entries(summary.by_league_accuracy)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([code, value]) => (
                     <div key={code} className="flex items-center gap-2">
                       <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
                         {LEAGUE_NAMES[code] ?? code}
                       </span>
                       <span className="font-data font-bold text-sm" style={{ color: 'var(--foreground)' }}>
-                        {rps.toFixed(4)}
+                        {pct(value)}
                       </span>
                     </div>
                   ))}
