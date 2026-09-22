@@ -12,6 +12,7 @@ football match.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 
 import numpy as np
@@ -23,6 +24,8 @@ from footballml.features.rolling import (
     add_team_form,
     prepare_team_match,
 )
+
+logger = logging.getLogger(__name__)
 
 #: Feature stems differenced into ``*_diff`` columns when present on both sides.
 DIFF_STEMS: tuple[str, ...] = (
@@ -273,6 +276,30 @@ def build_upcoming_features(
     Returns:
         One row per fixture with features populated and ``FTHG``/``FTAG`` null.
     """
+    if fixtures.empty:
+        return pd.DataFrame()
+
+    # Drop fixtures the history already contains. football-data's fixture list
+    # keeps publishing a round after it has been played, so once results are
+    # refreshed every "upcoming" fixture can already be in `tmh` -- appending a
+    # placeholder for one then duplicates a real match, and the 1:1 merge in
+    # `build_match_features` fails with a MergeError that points nowhere near
+    # here. Predicting a played match through this path is meaningless anyway;
+    # `/matches` scores those retrospectively.
+    played = tmh[tmh["Venue"] == "Home"][["League", "Date", "Team", "Opponent"]]
+    played = played.rename(columns={"Team": "HomeTeam", "Opponent": "AwayTeam"})
+    played = played.assign(Date=pd.to_datetime(played["Date"]), _played=True)
+
+    key = ["League", "Date", "HomeTeam", "AwayTeam"]
+    fixtures = fixtures.assign(Date=pd.to_datetime(fixtures["Date"]))
+    marked = fixtures.merge(played.drop_duplicates(key), on=key, how="left")
+    already = marked["_played"].notna()
+    if already.any():
+        logger.info(
+            "Skipping %d of %d fixture(s) already played and in the history",
+            int(already.sum()), len(fixtures),
+        )
+        fixtures = fixtures[~already.to_numpy()]
     if fixtures.empty:
         return pd.DataFrame()
 

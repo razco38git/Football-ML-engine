@@ -111,3 +111,38 @@ def test_empty_store_reads_cleanly(path: Path) -> None:
     assert store.load(path).empty
     assert store.settled(path).empty
     assert store.settle(pd.DataFrame(), path) == 0
+
+
+def test_settled_counts_each_fixture_once(tmp_path):
+    """A fixture re-predicted after a retrain must not count twice.
+
+    `append` de-duplicates per model version, so a fixture forecast before
+    kickoff and forecast again after a retrain -- still before kickoff -- is
+    stored twice. Nine La Liga fixtures became an eighteen-match "record".
+    """
+    import pandas as pd
+
+    from footballml import store
+
+    path = tmp_path / "predictions.csv"
+    fixture = pd.DataFrame(
+        [{
+            "League": "SP1", "Date": "2026-09-17", "HomeTeam": "Betis",
+            "AwayTeam": "Getafe", "expected_goals_home": 1.4,
+            "expected_goals_away": 1.0, "prob_home_win": 0.5, "prob_draw": 0.3,
+            "prob_away_win": 0.2, "predicted_outcome": "H",
+            "modal_score_home": 1, "modal_score_away": 1,
+            "prob_over_2_5": 0.4, "prob_btts": 0.5,
+        }]
+    )
+    store.append(fixture, "model-a", path=path)
+    store.append(fixture, "model-b", path=path)
+    assert len(store.load(path)) == 2, "both versions are kept in the store"
+
+    raw = pd.read_csv(path)
+    raw["actual_result"] = "H"
+    raw["actual_home_goals"] = 1
+    raw["actual_away_goals"] = 0
+    raw.to_csv(path, index=False)
+
+    assert len(store.settled(path)) == 1, "the published record counts it once"

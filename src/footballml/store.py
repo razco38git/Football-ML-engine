@@ -135,8 +135,27 @@ def settle(matches: pd.DataFrame, path: Path | None = None) -> int:
 
 
 def settled(path: Path | None = None) -> pd.DataFrame:
-    """Stored predictions that have a known result."""
+    """Stored predictions that have a known result, one row per fixture.
+
+    `append` de-duplicates per model version, so a fixture predicted before
+    kickoff, then re-predicted after a retrain while it was still unplayed, is
+    stored twice. That is right for the store -- each version's own forecast is
+    worth keeping -- but wrong for a published record: nine La Liga fixtures
+    appeared as eighteen, doubling `n` and counting every hit and miss twice.
+
+    The earliest prediction per fixture wins. It is the most conservative claim
+    available: the forecast committed furthest ahead of kickoff, made with the
+    least information.
+    """
     stored = load(path)
     if stored.empty:
         return stored
-    return stored[stored["actual_result"].notna()].reset_index(drop=True)
+
+    rows = stored[stored["actual_result"].notna()]
+    if "predicted_at" in rows.columns:
+        rows = rows.sort_values("predicted_at")
+    key = ["League", "Date", "HomeTeam", "AwayTeam"]
+    present = [c for c in key if c in rows.columns]
+    if present:
+        rows = rows.drop_duplicates(present, keep="first")
+    return rows.reset_index(drop=True)

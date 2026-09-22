@@ -281,3 +281,43 @@ def test_understat_club_names_reach_football_data_fixtures(
     joined = add_team_strength(matches, renamed, previous_season=True)
     assert joined["home_strength_overall"].iloc[0] == 70.0
     assert joined["away_strength_overall"].iloc[0] == 70.0
+
+
+def test_already_played_fixtures_are_skipped(recent_history: pd.DataFrame) -> None:
+    """A fixture already in the history must not be appended as a placeholder.
+
+    football-data keeps publishing a round after it is played, so once results
+    are refreshed every "upcoming" fixture can already exist. Appending one then
+    duplicates a real match and the 1:1 merge inside `build_match_features`
+    fails with a MergeError pointing nowhere near the cause.
+    """
+    from footballml.features.build import build_upcoming_features
+
+    home = recent_history[recent_history["Venue"] == "Home"].iloc[0]
+    fixture = pd.DataFrame(
+        [{
+            "League": home["League"],
+            "Season": str(home["Season"]),
+            "Date": home["Date"],
+            "HomeTeam": home["Team"],
+            "AwayTeam": home["Opponent"],
+        }]
+    )
+    assert build_upcoming_features(recent_history, fixture).empty
+
+
+def test_unplayed_fixtures_still_build(recent_history: pd.DataFrame) -> None:
+    """The skip must not swallow genuine fixtures."""
+    from footballml.features.build import build_upcoming_features
+
+    home, away = recent_history["Team"].drop_duplicates().iloc[:2].tolist()
+    fixture = pd.DataFrame(
+        [{
+            "League": str(recent_history["League"].iloc[0]),
+            "Season": str(recent_history["Season"].max()),
+            "Date": recent_history["Date"].max() + pd.Timedelta(days=14),
+            "HomeTeam": home,
+            "AwayTeam": away,
+        }]
+    )
+    assert len(build_upcoming_features(recent_history, fixture)) == 1
