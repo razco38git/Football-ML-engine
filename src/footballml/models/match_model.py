@@ -155,6 +155,13 @@ class MatchPredictor:
                 "predicted_outcome": np.array(OUTCOMES, dtype=object)[probs.argmax(axis=1)],
                 "modal_score_home": modal[:, 0],
                 "modal_score_away": modal[:, 1],
+                # The modal scoreline's own probability. Without it a 10% score
+                # is read as the forecast and looks like it contradicts a 50%
+                # win probability -- Roma 1-1 beside "Roma Win" -- when the two
+                # answer different questions.
+                "prob_modal_score": matrix[
+                    np.arange(len(modal)), modal[:, 0], modal[:, 1]
+                ],
                 "prob_over_2_5": over_under(matrix, 2.5),
                 "prob_btts": both_teams_score(matrix),
             },

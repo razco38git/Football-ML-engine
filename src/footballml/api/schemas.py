@@ -73,6 +73,10 @@ class Prediction(BaseModel):
     predicted_outcome: str
     modal_score_home: int
     modal_score_away: int
+    #: Probability of that exact scoreline. Typically ~10%, against a 1X2
+    #: probability that sums dozens of scorelines -- the page must not present
+    #: the two as if they were the same claim.
+    prob_modal_score: float | None = None
     prob_over_2_5: float
     prob_btts: float
 

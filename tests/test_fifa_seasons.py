@@ -240,3 +240,70 @@ def test_club_is_not_required_for_an_unambiguous_name():
     """A player EA lists at his old club still matches: club only breaks ties."""
     players, export = _club_fixture([{"Player": "hugo lopes", "Team": "Osasuna"}])
     assert _overall(attach_fifa(players, export), "hugo lopes", "Osasuna") == 71.0
+
+
+def test_unmatched_role_uses_the_season_not_the_career():
+    """A player's role must describe what he played *that season*.
+
+    Moisés Caicedo has no EA entry, a season position of M and a career
+    position of D. Falling back to the career value made him a centre-back
+    rated 90, which propped up Chelsea's defence rating.
+    """
+    export = _export(
+        [{"fifa_name": "someone else", "fifa_overall": 70.0, "Season": "2526"}]
+    )
+    players = pd.DataFrame(
+        {
+            "Player": ["moises caicedo"],
+            "Season": ["2526"],
+            "season_position": ["M"],
+            "position_group": ["D"],
+        }
+    )
+    assert attach_fifa(players, export)["role"].iloc[0] == "MID"
+
+
+def test_career_position_is_still_the_backstop():
+    """With no season position, the career one is better than nothing."""
+    export = _export(
+        [{"fifa_name": "someone else", "fifa_overall": 70.0, "Season": "2526"}]
+    )
+    players = pd.DataFrame(
+        {
+            "Player": ["unknown player"],
+            "Season": ["2526"],
+            "season_position": [None],
+            "position_group": ["F"],
+        }
+    )
+    assert attach_fifa(players, export)["role"].iloc[0] == "FWD"
+
+
+def test_extra_given_and_family_names_are_matched():
+    """EA carries both extra given *and* extra family names for some players.
+
+    "Moises Caicedo" against "Moises Isaac Caicedo Corozo": first-plus-last
+    gives "moises corozo", the leading pair "moises isaac", and the surname
+    tier looks for "corozo" — so he went unmatched and, with no EA rating to
+    temper him, was rated 90 off a misassigned role.
+    """
+    export = _export(
+        [{"fifa_name": "moises isaac caicedo corozo", "fifa_overall": 87.0,
+          "Season": "2526"}]
+    )
+    players = pd.DataFrame(
+        {"Player": ["moises caicedo"], "Season": ["2526"], "position_group": ["M"]}
+    )
+    assert attach_fifa(players, export)["fifa_overall"].iloc[0] == 87.0
+
+
+def test_containment_needs_every_token():
+    """A partial overlap is not a match: "david silva" must not take "david luiz"."""
+    export = _export(
+        [{"fifa_name": "david luiz moreira marinho", "fifa_overall": 82.0,
+          "Season": "2526"}]
+    )
+    players = pd.DataFrame(
+        {"Player": ["david silva"], "Season": ["2526"], "position_group": ["M"]}
+    )
+    assert attach_fifa(players, export)["fifa_overall"].isna().all()

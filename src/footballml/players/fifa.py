@@ -390,6 +390,8 @@ def _match_loosely(
     strong: dict[str, list[pd.Series]] = {}
     leading: dict[str, list[pd.Series]] = {}
     surnames: dict[str, list[pd.Series]] = {}
+    #: Token set per EA entry, for the containment tier.
+    token_sets: list[tuple[frozenset[str], pd.Series]] = []
 
     for _, row in fifa.iterrows():
         for key in keys_for(str(row["fifa_name"])):
@@ -399,6 +401,7 @@ def _match_loosely(
             leading.setdefault(f"{parts[0]} {parts[1]}", []).append(row)
         if parts:
             surnames.setdefault(parts[-1], []).append(row)
+            token_sets.append((frozenset(parts), row))
 
     def at_club(candidates: list[pd.Series], team: object) -> pd.Series | None:
         """The single candidate at the row's club, if there is exactly one."""
@@ -431,6 +434,21 @@ def _match_loosely(
             # A two-token name against an EA entry carrying extra family names.
             # Unique leading pairs only: "jose maria" names several players.
             candidates = leading.get(" ".join(parts), [])
+            if len(candidates) == 1:
+                hit = candidates[0]
+            elif candidates:
+                hit = at_club(candidates, team)
+
+        if hit is None and len(parts) >= 2:
+            # Extra given names *and* extra family names at once, which no
+            # ordered key catches. EA stores Moises Caicedo as "Moises Isaac
+            # Caicedo Corozo": first-plus-last gives "moises corozo", the
+            # leading pair "moises isaac", and the surname tier looks for
+            # "corozo". Every token we have is present though, so fall back to
+            # containment -- guarded, like the tiers above, by being unique or
+            # resolved by club.
+            wanted = frozenset(parts)
+            candidates = [row for tokens, row in token_sets if wanted <= tokens]
             if len(candidates) == 1:
                 hit = candidates[0]
             elif candidates:
@@ -534,5 +552,15 @@ def attach_fifa(players: pd.DataFrame, fifa: pd.DataFrame) -> pd.DataFrame:
 
     # Players with no EA entry keep a coarse role from Understat, so they are
     # still rated rather than dropped.
-    merged["role"] = merged["role"].fillna(merged["position_group"].map(FALLBACK_ROLE))
+    #
+    # `season_position` is tried first and `position_group` only as a backstop.
+    # The latter is a *career* position (see `_career_position` in ingest.py):
+    # right for describing a player, wrong for "what did he play this season".
+    # Moisés Caicedo has no EA entry, a season position of M and a career
+    # position of D, so the career value made him a centre-back rated 90 and
+    # inflated Chelsea's defence rating.
+    fallback = merged["position_group"]
+    if "season_position" in merged.columns:
+        fallback = merged["season_position"].fillna(fallback)
+    merged["role"] = merged["role"].fillna(fallback.map(FALLBACK_ROLE))
     return merged.drop(columns=["_norm"])

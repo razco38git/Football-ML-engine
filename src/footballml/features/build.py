@@ -45,10 +45,22 @@ DIFF_STEMS: tuple[str, ...] = (
     "strength_overall",
     "strength_attack",
     "strength_defence",
+    "strength_goalkeeper",
 )
 
-#: Team-strength columns joined from the player ratings.
-STRENGTH_COLUMNS = ("strength_overall", "strength_attack", "strength_defence")
+#: Squad-strength columns joined onto each match.
+#:
+#: The goalkeeper is carried separately rather than folded into the defence
+#: line, because he is the best single defensive signal we have: across 1,052
+#: completed team-seasons his rating tracks goals conceded at -0.62, against
+#: -0.52 for the whole back line. Blending him into `strength_defence` would
+#: also double-count him, since he already contributes to `strength_overall`.
+STRENGTH_COLUMNS = (
+    "strength_overall",
+    "strength_attack",
+    "strength_defence",
+    "strength_goalkeeper",
+)
 
 #: Columns identifying a match rather than describing it.
 _ID_COLS = ("League", "Season", "Date", "HomeTeam", "AwayTeam")

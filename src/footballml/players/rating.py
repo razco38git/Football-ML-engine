@@ -64,6 +64,18 @@ def percentile_within(
     return ranked if higher_is_better else 1.0 - ranked
 
 
+#: Warnings already emitted, so a message fires once per run rather than once
+#: per (role, season) group -- 66 groups would bury it.
+_WARNED: set[str] = set()
+
+
+def _warn_once(message: str, *args: object) -> None:
+    key = message % args
+    if key not in _WARNED:
+        _WARNED.add(key)
+        logger.warning("%s", key)
+
+
 def _weighted(frame: pd.DataFrame, weights: dict[str, float]) -> pd.Series:
     """Weighted mean of percentile columns, ignoring any that are absent.
 
@@ -87,6 +99,22 @@ def _weighted(frame: pd.DataFrame, weights: dict[str, float]) -> pd.Series:
         for c, w in weights.items()
         if c in frame.columns and w != 0 and frame[c].notna().any()
     }
+
+    # Skipping quietly is how a third of the centre-back defending weight went
+    # missing unnoticed: `recoveries_per90` and `recoveries_padj` were weighted
+    # 1.5 each in the config but never built, so `defending` silently reduced to
+    # interceptions and tackles. Name what was dropped and how much weight went
+    # with it, once per distinct set rather than once per group.
+    dropped = {c: w for c, w in weights.items() if w != 0 and c not in usable}
+    if dropped:
+        share = sum(abs(w) for w in dropped.values()) / sum(
+            abs(w) for w in weights.values() if w != 0
+        )
+        _warn_once(
+            "Ignoring %d configured metric(s) with no data (%.0f%% of the "
+            "weight): %s", len(dropped), 100 * share, ", ".join(sorted(dropped)),
+        )
+
     if not usable:
         return pd.Series(np.nan, index=frame.index)
 

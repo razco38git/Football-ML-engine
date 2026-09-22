@@ -41,6 +41,8 @@ export interface Prediction {
   prob_draw: number;
   prob_away_win: number;
   predicted_outcome: 'H' | 'D' | 'A';
+  /** Probability of that exact scoreline — typically ~10%, unlike the 1X2 split. */
+  prob_modal_score: number | null;
   modal_score_home: number;
   modal_score_away: number;
   prob_over_2_5: number;

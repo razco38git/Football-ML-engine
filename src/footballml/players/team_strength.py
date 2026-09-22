@@ -51,12 +51,14 @@ FORMATION = {"goalkeeper": 1, "defence": 4, "midfield": 3, "attack": 3}
 #: Lines that count toward the overall rating, weighted by how many are on the
 #: pitch.
 #:
-#: Goalkeepers are selected into the eleven and reported, but excluded from the
-#: overall. Their rating rests on save percentage and goals conceded, both of
-#: which depend heavily on the defence in front of them, so folding a keeper
-#: into a team number imports that noise twice. The outfield ten is the more
-#: stable signal.
-OVERALL_LINES = {"defence": 4, "midfield": 3, "attack": 3}
+#: Keepers were originally excluded, on the argument that save percentage and
+#: goals conceded mostly describe the defence in front of them. The data says
+#: otherwise. Across 1,072 team-seasons, the keeper's rating predicts goals
+#: conceded *better* than the entire back line does -- Spearman -0.60 against
+#: -0.49 -- and including him lifts defence-vs-conceded to -0.59 and
+#: overall-vs-points from +0.739 to +0.747. The original reasoning was
+#: plausible and wrong, so the keeper counts as the eleventh player.
+OVERALL_LINES = {"goalkeeper": 1, "defence": 4, "midfield": 3, "attack": 3}
 
 #: Roles are filled in this order when a line is short, so a team missing a
 #: recognised full-back borrows a centre-back rather than leaving a hole.
@@ -99,11 +101,23 @@ def select_eleven(
     return eleven
 
 
+#: Rated players a team-season needs before it gets a rating at all.
+#:
+#: Ratings require a minutes threshold, so early in a season almost nobody
+#: qualifies. Five matchweeks into 2026/27 a fresh build produced 72 team
+#: ratings from a *median of two* rated players -- numbers that would be
+#: published on the site and later fed to the model as a previous-season
+#: feature. Eleven is the obvious floor: fewer than a team's worth of rated
+#: players is not a team rating.
+MIN_RATED_PLAYERS = 11
+
+
 def team_strength(
     rated: pd.DataFrame,
     method: str = "eleven",
     best_n: int = 14,
     formation: dict[str, int] | None = None,
+    min_players: int = MIN_RATED_PLAYERS,
 ) -> pd.DataFrame:
     """Team rating per team and season.
 
@@ -171,6 +185,16 @@ def team_strength(
         }
     )
     wide["method"] = method
+
+    thin = wide["n_players"] < min_players
+    if thin.any():
+        seasons = sorted(wide.loc[thin, "Season"].astype(str).unique())
+        logger.info(
+            "Dropping %d team-season(s) with fewer than %d rated players "
+            "(seasons %s) -- too early in the season to rate a squad",
+            int(thin.sum()), min_players, ", ".join(seasons),
+        )
+        wide = wide[~thin]
 
     logger.info("Computed %s strength for %d team-seasons", method, len(wide))
     return wide.sort_values(["Season", "strength_overall"], ascending=[False, False])

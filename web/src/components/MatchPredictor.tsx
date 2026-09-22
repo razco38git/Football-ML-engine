@@ -233,12 +233,19 @@ function MatchCard({ p }: { p: Prediction }) {
           <TeamSide team={p.home_team} form={p.form_home} league={p.league} align="left" />
 
           <div className="flex flex-col items-center gap-2">
+            {/*
+              Coloured by the scoreline itself, not by `predicted_outcome`.
+              They answer different questions and often disagree: Roma v Inter
+              is a 50% Roma win whose single most likely exact score is 1-1,
+              and painting that 1-1 with the home-win colour made the card look
+              self-contradictory.
+            */}
             <div className="flex items-center gap-1">
               <span
                 className="overall-badge"
                 style={{
-                  background: p.predicted_outcome === 'H' ? '#00e676' : 'var(--secondary)',
-                  color: p.predicted_outcome === 'H' ? '#000' : 'var(--foreground)',
+                  background: p.modal_score_home > p.modal_score_away ? '#00e676' : 'var(--secondary)',
+                  color: p.modal_score_home > p.modal_score_away ? '#000' : 'var(--foreground)',
                   width: 52, height: 52, fontSize: 22, borderRadius: 10,
                 }}
               >
@@ -248,13 +255,17 @@ function MatchCard({ p }: { p: Prediction }) {
               <span
                 className="overall-badge"
                 style={{
-                  background: p.predicted_outcome === 'A' ? '#3b82f6' : 'var(--secondary)',
-                  color: p.predicted_outcome === 'A' ? '#000' : 'var(--foreground)',
+                  background: p.modal_score_away > p.modal_score_home ? '#3b82f6' : 'var(--secondary)',
+                  color: p.modal_score_away > p.modal_score_home ? '#000' : 'var(--foreground)',
                   width: 52, height: 52, fontSize: 22, borderRadius: 10,
                 }}
               >
                 {p.modal_score_away}
               </span>
+            </div>
+            <div className="text-xs text-center" style={{ color: 'var(--muted-foreground)' }}>
+              likeliest exact score
+              {p.prob_modal_score != null && ` · ${pct(p.prob_modal_score)}`}
             </div>
             <div
               className="text-xs font-display font-bold px-2 py-0.5 rounded-full tracking-wide text-center"

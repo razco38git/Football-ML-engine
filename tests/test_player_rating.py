@@ -249,3 +249,25 @@ def test_unmatched_players_are_shrunk_but_matched_ones_are_not() -> None:
     assert raw.loc[missing, "rating"].equals(
         raw.loc[missing, "performance_rating"].round().astype("Int64")
     )
+
+
+def test_absent_metrics_are_reported_not_silently_skipped(caplog):
+    """A configured metric with no data must say so.
+
+    `recoveries_per90` and `recoveries_padj` were weighted 1.5 each in the
+    centre-back defending score but never built, so a third of that weight
+    vanished without a word. Skipping is correct; skipping quietly is not.
+    """
+    import logging
+
+    import pandas as pd
+
+    from footballml.players import rating
+
+    rating._WARNED.clear()
+    frame = pd.DataFrame({"present_metric": [0.2, 0.8]})
+    with caplog.at_level(logging.WARNING, logger=rating.logger.name):
+        rating._weighted(frame, {"present_metric": 1.0, "absent_metric": 3.0})
+
+    assert "absent_metric" in caplog.text
+    assert "75%" in caplog.text, "the share of lost weight should be reported"

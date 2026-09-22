@@ -193,6 +193,11 @@ def _to_predictions(
             predicted_outcome=r["predicted_outcome"],
             modal_score_home=int(r["modal_score_home"]),
             modal_score_away=int(r["modal_score_away"]),
+            prob_modal_score=(
+                round(float(r["prob_modal_score"]), 4)
+                if pd.notna(r.get("prob_modal_score"))
+                else None
+            ),
             prob_over_2_5=round(float(r["prob_over_2_5"]), 4),
             prob_btts=round(float(r["prob_btts"]), 4),
         )
@@ -479,6 +484,27 @@ def _to_player(row: pd.Series) -> PlayerRating:
     )
 
 
+#: A season needs this share of a typical season's rated players before it is
+#: shown by default.
+#:
+#: Ratings need a minutes threshold, so a season in progress fills up slowly.
+#: Five matchweeks into 2026/27 only 181 players qualified against ~1,980 in a
+#: full season -- and because the default was simply the latest season with any
+#: ratings, the page silently switched to those 181 and searching for anyone
+#: else returned nothing. The same reasoning as `MIN_RATED_PLAYERS` for teams.
+MIN_SEASON_SHARE = 0.5
+
+
+def _default_season(rows: pd.DataFrame) -> str:
+    """Newest season with enough rated players to represent a league."""
+    counts = rows.groupby("Season").size()
+    if counts.empty:
+        return ""
+    full = counts.max() * MIN_SEASON_SHARE
+    eligible = counts[counts >= full]
+    return str((eligible if not eligible.empty else counts).index.max())
+
+
 @app.get("/players", response_model=PlayerPage)
 def players(
     league: str | None = Query(None, description="Division code, e.g. E0"),
@@ -498,9 +524,7 @@ def players(
         )
 
     rows = state.players[state.players["rated"]]
-    # Default to the most recent season with ratings rather than mixing seasons,
-    # which would otherwise let an old peak outrank current form.
-    rows = rows[rows["Season"] == (season or rows["Season"].max())]
+    rows = rows[rows["Season"] == (season or _default_season(rows))]
 
     if league:
         rows = rows[rows["League"] == league]

@@ -149,8 +149,6 @@ positions:
         interceptions_padj: 1.0
         tackles_won_per90: 1.0
         tackles_won_padj: 1.0
-        recoveries_per90: 0.5
-        recoveries_padj: 0.5
     sub_rating_weights:
       creation: 0.28
       involvement: 0.27
@@ -169,8 +167,6 @@ positions:
         interceptions_padj: 1.25
         tackles_won_per90: 1.25
         tackles_won_padj: 1.25
-        recoveries_per90: 0.5
-        recoveries_padj: 0.5
         fouls_per90: -0.5
       creation:
         crosses_per90: 2.0
@@ -202,8 +198,6 @@ positions:
         interceptions_padj: 1.5
         tackles_won_per90: 1.25
         tackles_won_padj: 1.25
-        recoveries_per90: 0.75
-        recoveries_padj: 0.75
         fouls_per90: -0.5
       involvement:
         xg_buildup_share: 1.5
