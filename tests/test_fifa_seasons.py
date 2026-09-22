@@ -307,3 +307,134 @@ def test_containment_needs_every_token():
         {"Player": ["david silva"], "Season": ["2526"], "position_group": ["M"]}
     )
     assert attach_fifa(players, export)["fifa_overall"].isna().all()
+
+
+def test_nicknames_match_through_the_familiar_name():
+    """EA's legal name can share no token at all with the common one.
+
+    Vitinha is "Vitor Machado Ferreira", Casemiro "Carlos Henrique Venancio
+    Casimiro". No key built from the legal name can ever reach them, so the
+    export's short name is indexed alongside it.
+    """
+    export = _export(
+        [{"fifa_name": "vitor machado ferreira", "fifa_alt_name": "vitinha",
+          "fifa_overall": 89.0, "Season": "2526"}]
+    )
+    players = pd.DataFrame(
+        {"Player": ["vitinha"], "Season": ["2526"], "position_group": ["M"]}
+    )
+    assert attach_fifa(players, export)["fifa_overall"].iloc[0] == 89.0
+
+
+def test_two_names_for_one_player_do_not_read_as_two_candidates():
+    """Indexing both names must not defeat the uniqueness guards.
+
+    "Fabian Ruiz Pena" and "Fabian Ruiz" both end in "ruiz" and both contain
+    {fabian, ruiz}; counted twice, the surname and containment tiers would see
+    an ambiguity that does not exist and refuse a correct match.
+    """
+    export = _export(
+        [{"fifa_name": "fabian ruiz pena", "fifa_alt_name": "fabian ruiz",
+          "fifa_overall": 85.0, "Season": "2526"}]
+    )
+    players = pd.DataFrame(
+        {"Player": ["fabian ruiz"], "Season": ["2526"], "position_group": ["M"]}
+    )
+    assert attach_fifa(players, export)["fifa_overall"].iloc[0] == 85.0
+
+
+def test_genuine_ambiguity_is_still_refused_with_alt_names():
+    """Two different players sharing a surname must still resolve to neither."""
+    export = _export(
+        [
+            {"fifa_name": "carlos silva santos", "fifa_alt_name": "carlinhos",
+             "fifa_overall": 80.0, "Season": "2526"},
+            {"fifa_name": "pedro silva costa", "fifa_alt_name": "pedrinho",
+             "fifa_overall": 78.0, "Season": "2526"},
+        ]
+    )
+    players = pd.DataFrame(
+        {"Player": ["silva"], "Season": ["2526"], "position_group": ["M"]}
+    )
+    assert attach_fifa(players, export)["fifa_overall"].isna().all()
+
+
+def test_hyphenated_surnames_split_into_tokens():
+    """Understat spells Mbappé "Mbappe-Lottin"; EA writes "Mbappé Lottin".
+
+    Deleting the hyphen welds it into "mbappelottin", which matches nothing.
+    """
+    from footballml.players.fbref import normalise_name
+
+    assert normalise_name("Kylian Mbappe-Lottin") == "kylian mbappe lottin"
+    # Apostrophes are still stripped rather than split: one name, not two.
+    assert normalise_name("N'Golo Kante") == "ngolo kante"
+
+
+def _with_clubs(ea_rows: list[dict], players: list[dict]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """A fixture where every club's EA name is learnable from exact matches.
+
+    `at_club` deliberately never compares club strings -- it learns what EA
+    calls each of our teams from players that matched by name -- so a club-aware
+    test needs at least `CLUB_EVIDENCE_MIN` exact matches per club.
+    """
+    clubs = {"Aston Villa": "Aston Villa", "Kilmarnock": "Kilmarnock FC",
+             "Bournemouth": "AFC Bournemouth", "Barcelona": "FC Barcelona"}
+    rows, squad = list(ea_rows), list(players)
+    for team, club in clubs.items():
+        for i in range(3):
+            name = f"{team.lower().replace(' ', '')} filler {i}"
+            rows.append({"fifa_name": name, "fifa_overall": 70.0,
+                         "fifa_club": club, "Season": "2526"})
+            squad.append({"Player": name, "Team": team})
+    frame = pd.DataFrame(squad)
+    frame["Season"] = "2526"
+    frame["position_group"] = "M"
+    return frame, _export(rows)
+
+
+def test_a_diminutive_matches_on_initial_and_surname():
+    """"Ollie Watkins" against EA's "Oliver George Arthur Watkins"."""
+    players, export = _with_clubs(
+        [
+            {"fifa_name": "oliver george arthur watkins", "fifa_club": "Aston Villa",
+             "fifa_overall": 84.0, "Season": "2526"},
+            {"fifa_name": "marley joseph watkins", "fifa_club": "Kilmarnock FC",
+             "fifa_overall": 65.0, "Season": "2526"},
+        ],
+        [{"Player": "ollie watkins", "Team": "Aston Villa"},
+         {"Player": "marley watkins", "Team": "Kilmarnock"}],
+    )
+    matched = attach_fifa(players, export)
+    assert _overall(matched, "ollie watkins", "Aston Villa") == 84.0
+    assert _overall(matched, "marley watkins", "Kilmarnock") == 65.0
+
+
+def test_transliterated_given_names_share_an_initial():
+    """"Djordje Petrovic" against "Đorđe Petrović" -- both initials give d."""
+    players, export = _with_clubs(
+        [{"fifa_name": "đorđe petrović", "fifa_club": "AFC Bournemouth",
+          "fifa_overall": 80.0, "Season": "2526"},
+         {"fifa_name": "rasmus niklasson petrovic", "fifa_club": "GAIS",
+          "fifa_overall": 63.0, "Season": "2526"}],
+        [{"Player": "djordje petrovic", "Team": "Bournemouth"}],
+    )
+    assert _overall(attach_fifa(players, export), "djordje petrovic", "Bournemouth") == 80.0
+
+
+def test_initial_and_surname_alone_never_decide_it():
+    """The club is required, because the key itself is weak evidence.
+
+    EA files Barcelona's Alex Balde as "Alejandro Balde Martinez" -- the last
+    token is the maternal surname -- so the only entry keyed "a balde" was
+    Aliou Balde of St. Gallen. Taken unopposed that swapped an 83-rated
+    starter for a 66-rated stranger, dropping him to 54.
+    """
+    players, export = _with_clubs(
+        [{"fifa_name": "aliou badara balde", "fifa_club": "FC St.Gallen 1879",
+          "fifa_overall": 66.0, "Season": "2526"},
+         {"fifa_name": "mama samba balde", "fifa_club": "Stade Brestois 29",
+          "fifa_overall": 73.0, "Season": "2526"}],
+        [{"Player": "alex balde", "Team": "Barcelona"}],
+    )
+    assert pd.isna(_overall(attach_fifa(players, export), "alex balde", "Barcelona"))

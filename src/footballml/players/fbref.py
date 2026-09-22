@@ -83,6 +83,11 @@ def normalise_name(name: str) -> str:
     """
     if not isinstance(name, str):
         return ""
+    # Hyphens separate names; deleting them welds two apart into one token.
+    # Understat spells Mbappé "Kylian Mbappe-Lottin", which became the single
+    # token "mbappelottin" and could never reach EA's "Kylian Mbappé Lottin".
+    # Apostrophes are left to be stripped: "N'Golo" is one name, not two.
+    name = name.replace("-", " ").replace("‐", " ").replace("–", " ")
     transliterated = name.translate(TRANSLITERATIONS)
     decomposed = unicodedata.normalize("NFKD", transliterated)
     ascii_only = "".join(c for c in decomposed if not unicodedata.combining(c))

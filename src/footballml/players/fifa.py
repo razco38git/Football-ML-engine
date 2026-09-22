@@ -44,6 +44,12 @@ COLUMN_CANDIDATES: dict[str, tuple[str, ...]] = {
         "long_name", "common_name", "name", "player_name",
         "Name", "Player", "PLAYER", "short_name",
     ),
+    # The form a player is actually known by, where the export carries one
+    # alongside the legal name. EA lists Vitinha as "Vitor Machado Ferreira"
+    # and Casemiro as "Carlos Henrique Venancio Casimiro" -- no shared token
+    # with the name every other source uses, so this is the only way to match
+    # them at all.
+    "alt_name": ("alt_name", "short_name", "common_name", "display_name"),
     "first_name": ("first_name", "firstname", "given_name"),
     "last_name": ("last_name", "lastname", "surname", "family_name"),
     "overall": ("overall", "overall_rating", "Overall", "OVR", "ovr", "rating"),
@@ -222,6 +228,14 @@ def _normalise_export(df: pd.DataFrame, source: str) -> pd.DataFrame | None:
                 else pd.to_numeric(values, errors="coerce")
             )
 
+    alt_col = _find_column(df, "alt_name")
+    if alt_col is not None:
+        alt = df[alt_col].astype("string").str.strip().map(
+            lambda v: _strip_foreign_script(v) if isinstance(v, str) else v
+        )
+        # Only worth carrying when it differs from the legal name.
+        out["fifa_alt_name"] = alt.where(alt.fillna("") != out["fifa_name"])
+
     out["role"] = out.get("fifa_positions", pd.Series(dtype="object")).map(primary_role)
     out["_norm"] = out["fifa_name"].map(normalise_name)
     out = out.dropna(subset=["fifa_overall"])
@@ -390,18 +404,57 @@ def _match_loosely(
     strong: dict[str, list[pd.Series]] = {}
     leading: dict[str, list[pd.Series]] = {}
     surnames: dict[str, list[pd.Series]] = {}
+    #: First initial plus surname -- "o watkins". EA's alternate name is often
+    #: exactly this shape ("O. Watkins"), and it is the only key that bridges a
+    #: diminutive to a legal name: ours says "Ollie", EA says "Oliver George
+    #: Arthur Watkins". It also absorbs accent differences for free, since
+    #: "Djordje" and "Đorđe" both normalise to "d".
+    initials: dict[str, list[pd.Series]] = {}
     #: Token set per EA entry, for the containment tier.
     token_sets: list[tuple[frozenset[str], pd.Series]] = []
 
+    # A row must appear at most once per key. Indexing two names for the same
+    # player can otherwise put him in a bucket twice -- "Fabian Ruiz Pena" and
+    # "Fabian Ruiz" both end in "ruiz" -- which reads as two candidates and
+    # defeats the uniqueness guards the tiers below rely on.
+    seen: dict[str, dict[str, set[object]]] = {
+        "strong": {}, "leading": {}, "surnames": {}, "initials": {},
+    }
+
+    def add(
+        bucket: dict[str, list[pd.Series]], which: str, key: str, row: pd.Series
+    ) -> None:
+        marked = seen[which].setdefault(key, set())
+        if row.name in marked:
+            return
+        marked.add(row.name)
+        bucket.setdefault(key, []).append(row)
+
+    has_alt = "fifa_alt_name" in fifa.columns
     for _, row in fifa.iterrows():
-        for key in keys_for(str(row["fifa_name"])):
-            strong.setdefault(key, []).append(row)
-        parts = normalise_name(str(row["fifa_name"])).split()
-        if len(parts) > 2:
-            leading.setdefault(f"{parts[0]} {parts[1]}", []).append(row)
-        if parts:
-            surnames.setdefault(parts[-1], []).append(row)
-            token_sets.append((frozenset(parts), row))
+        # Index the legal name *and* the familiar one. Without the second,
+        # "Vitinha" can never reach "Vitor Machado Ferreira": they share no
+        # token, so every key tier below is looking for something that is not
+        # there. 63 of 2025/26's 176 unmatched players were single-word names.
+        variants = [str(row["fifa_name"])]
+        if has_alt and isinstance(row.get("fifa_alt_name"), str):
+            variants.append(row["fifa_alt_name"])
+
+        tokens_added: set[frozenset[str]] = set()
+        for variant in variants:
+            for key in keys_for(variant):
+                add(strong, "strong", key, row)
+            parts = normalise_name(variant).split()
+            if len(parts) > 2:
+                add(leading, "leading", f"{parts[0]} {parts[1]}", row)
+            if parts:
+                add(surnames, "surnames", parts[-1], row)
+                if len(parts) > 1 and parts[0]:
+                    add(initials, "initials", f"{parts[0][0]} {parts[-1]}", row)
+                token_set = frozenset(parts)
+                if token_set not in tokens_added:
+                    tokens_added.add(token_set)
+                    token_sets.append((token_set, row))
 
     def at_club(candidates: list[pd.Series], team: object) -> pd.Series | None:
         """The single candidate at the row's club, if there is exactly one."""
@@ -447,12 +500,36 @@ def _match_loosely(
             # "corozo". Every token we have is present though, so fall back to
             # containment -- guarded, like the tiers above, by being unique or
             # resolved by club.
+            # Collapse by identity first: one player indexed under both his
+            # legal and familiar name ("Fabian Ruiz Pena" and "Fabian Ruiz")
+            # contains the query twice and would otherwise look ambiguous.
             wanted = frozenset(parts)
-            candidates = [row for tokens, row in token_sets if wanted <= tokens]
+            by_row = {
+                row.name: row for tokens, row in token_sets if wanted <= tokens
+            }
+            candidates = list(by_row.values())
             if len(candidates) == 1:
                 hit = candidates[0]
             elif candidates:
                 hit = at_club(candidates, team)
+
+        if hit is None and len(parts) > 1 and parts[0]:
+            # Diminutives and accent differences: "Ollie Watkins" against
+            # "Oliver George Arthur Watkins", "Djordje" against "Đorđe". Safe
+            # where a club-only fallback is not, because the initial still
+            # separates two different men who share a surname and a dressing
+            # room: Pedro Lopes is "p lopes", Hugo Miguel Lopes "h lopes".
+            #
+            # The club is *required* here, not just a tiebreak. An initial and
+            # a surname are weak evidence on their own, and being the only
+            # candidate proves nothing when the right man is filed under a
+            # different surname entirely: EA stores Barcelona's Alex Balde as
+            # "Alejandro Balde Martinez", whose last token is the maternal
+            # surname, so the only player keyed "a balde" was Aliou Balde of
+            # St. Gallen. Taken unopposed, that swapped an 83-rated starter for
+            # a 66-rated stranger and dropped him to 54.
+            candidates = initials.get(f"{parts[0][0]} {parts[-1]}", [])
+            hit = at_club(candidates, team) if candidates else None
 
         if hit is None and parts:
             # Unique surnames only: anything shared is too risky to guess at,
@@ -467,6 +544,13 @@ def _match_loosely(
                     if given in normalise_name(str(c["fifa_name"])).split()
                 ]
                 hit = at_club(named, team) if named else None
+                # Deliberately not relaxed to "unique at the club" when the
+                # given name does not match. That would match Ollie Watkins to
+                # "Oliver George Arthur Watkins" -- but it would equally match
+                # Pedro Lopes to Hugo Miguel Lopes, a different man at the same
+                # club, and the two cases are indistinguishable by club alone.
+                # Diminutives (Ollie/Oliver, Mat/Mathew) therefore stay
+                # unmatched: ~5 players, against silently wrong ratings.
 
         if hit is not None:
             for col in columns:
