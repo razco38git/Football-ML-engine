@@ -38,6 +38,8 @@ from footballml.api.schemas import (
     PredictRequest,
     ProjectedTeam,
     SeasonProjection,
+    SimilarPlayer,
+    SimilarPlayers,
     TeamForm,
     TeamStrength,
 )
@@ -58,6 +60,12 @@ from footballml.models.evaluate import (
     odds_implied_probs,
 )
 from footballml.models.match_model import OUTCOMES, feature_columns
+from footballml.players.similarity import (
+    SUB_RATINGS,
+    attribute_set,
+    similar_players,
+    values_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -654,6 +662,72 @@ def player_history(name: str) -> list[PlayerRating]:
 
     rows = rows.sort_values("Season", ascending=False)
     return [_to_player(r) for _, r in rows.iterrows()]
+
+
+@app.get("/players/{name}/similar", response_model=SimilarPlayers)
+def player_similarity(
+    name: str,
+    season: str | None = Query(None, description="Defaults to the player's latest"),
+    limit: int = Query(10, ge=1, le=50),
+    same_role: bool = Query(True, description="False widens the search, EA axis only"),
+) -> SimilarPlayers:
+    """Players who most resemble this one, on EA's attributes and on ours.
+
+    The two scores answer different questions and are returned separately. EA's
+    attributes share a scale across outfield positions, so they survive a
+    cross-position search; our sub-ratings are percentiles *within* a position,
+    so widening the search drops that axis rather than comparing ranks drawn
+    from different populations.
+    """
+    if state.players.empty:
+        raise HTTPException(404, "No player ratings loaded")
+
+    rated = state.players[state.players["rated"]]
+
+    # Default to the same season the player database shows, not simply the
+    # player's newest. A season five matchweeks old has a handful of qualifying
+    # players, so anchoring there would compare a 450-minute Alisson against a
+    # near-empty pool while a team-mate absent from it got a full season.
+    if season is None:
+        default = _default_season(rated)
+        if (rated["Player"].str.lower() == name.lower()).any():
+            has_default = rated[
+                (rated["Player"].str.lower() == name.lower())
+                & (rated["Season"].astype(str) == default)
+            ]
+            season = default if not has_default.empty else None
+
+    try:
+        subject, matches = similar_players(rated, name, season, limit, same_role)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+    return SimilarPlayers(
+        player=_to_player(subject),
+        attribute_names=list(attribute_set(str(subject["role"]))),
+        player_attributes=values_for(
+            subject, [f"fifa_{a}" for a in attribute_set(str(subject["role"]))]
+        ),
+        player_sub_ratings=values_for(subject, list(SUB_RATINGS)),
+        same_role=same_role,
+        results=[
+            SimilarPlayer(
+                player=m.player,
+                team=m.team,
+                league=m.league,
+                season=m.season,
+                position=m.role,
+                rating=m.rating,
+                minutes=m.minutes,
+                fifa_similarity=m.fifa_similarity,
+                percentile_similarity=m.percentile_similarity,
+                combined=m.combined,
+                attributes=m.attributes,
+                sub_ratings=m.sub_ratings,
+            )
+            for m in matches
+        ],
+    )
 
 
 @app.get("/teams", response_model=list[TeamStrength])

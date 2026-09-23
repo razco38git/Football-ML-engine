@@ -66,6 +66,14 @@ COLUMN_CANDIDATES: dict[str, tuple[str, ...]] = {
     "dribbling": ("dribbling", "Dribbling", "DRI"),
     "defending": ("defending", "Defending", "DEF"),
     "physical": ("physic", "physical", "Physicality", "PHY"),
+    # Keepers have no pace or shooting; EA rates them on these instead. Without
+    # them a goalkeeper carries no attributes at all and cannot be compared
+    # with anyone, which is why the similarity page needs them.
+    "gk_diving": ("gk_diving", "goalkeeping_diving", "GK Diving"),
+    "gk_handling": ("gk_handling", "goalkeeping_handling", "GK Handling"),
+    "gk_kicking": ("gk_kicking", "goalkeeping_kicking", "GK Kicking"),
+    "gk_positioning": ("gk_positioning", "goalkeeping_positioning", "GK Positioning"),
+    "gk_reflexes": ("gk_reflexes", "goalkeeping_reflexes", "GK Reflexes"),
 }
 
 #: EA position codes to the five outfield roles, plus goalkeeper.
@@ -219,7 +227,9 @@ def _normalise_export(df: pd.DataFrame, source: str) -> pd.DataFrame | None:
         }
     )
     for field in ("club", "positions", "age", "pace", "shooting", "passing",
-                  "dribbling", "defending", "physical"):
+                  "dribbling", "defending", "physical",
+                  "gk_diving", "gk_handling", "gk_kicking", "gk_positioning",
+                  "gk_reflexes"):
         column = _find_column(df, field)
         if column is not None:
             values = df[column]

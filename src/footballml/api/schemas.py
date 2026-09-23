@@ -296,3 +296,48 @@ class SeasonProjection(BaseModel):
     remaining: int
     played: int
     teams: list[ProjectedTeam]
+
+
+class SimilarPlayer(BaseModel):
+    """One player judged similar, with the numbers that produced the judgement.
+
+    Two scores, deliberately kept apart. ``fifa_similarity`` compares EA's
+    attributes, which share one scale across outfield positions;
+    ``percentile_similarity`` compares our own sub-ratings, which are ranks
+    *within* a position and so are ``None`` whenever the comparison crosses one.
+    Either can be ``None`` -- 8.6% of rated players have no EA entry, and a zero
+    there would read as "nothing alike" rather than "not measured".
+
+    50 means "no more alike than two random players in this position"; the scale
+    is pinned to the median distance in the pool, not to the theoretical range.
+    """
+
+    player: str
+    team: str
+    league: str
+    season: str
+    position: str
+    rating: int | None = None
+    minutes: int
+
+    fifa_similarity: float | None = None
+    percentile_similarity: float | None = None
+    combined: float | None = None
+
+    #: The attribute values behind the score, so the page can show *why*.
+    attributes: dict[str, float] = Field(default_factory=dict)
+    sub_ratings: dict[str, float] = Field(default_factory=dict)
+
+
+class SimilarPlayers(BaseModel):
+    """A similarity search: who was asked about, and who came back."""
+
+    player: PlayerRating
+    #: EA attribute names used for this player -- the six, or the keeper five.
+    attribute_names: list[str]
+    #: The subject's own values, so a radar can overlay him against a candidate.
+    #: Empty when he has no EA entry, which the page must say rather than draw.
+    player_attributes: dict[str, float] = Field(default_factory=dict)
+    player_sub_ratings: dict[str, float] = Field(default_factory=dict)
+    same_role: bool
+    results: list[SimilarPlayer]

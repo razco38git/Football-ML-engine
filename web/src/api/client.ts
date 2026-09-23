@@ -142,6 +142,9 @@ export const api = {
   /** Every rated season for one player, newest first. */
   playerHistory: (name: string) => fetchPlayerHistory(name),
 
+  /** Players who most resemble this one. See `SimilarPlayers` for the two axes. */
+  similar: (name: string, options: SimilarQuery = {}) => fetchSimilar(name, options),
+
   /** Team ratings built from player ratings. */
   teams: (league?: string, limit = 100) => fetchTeams(league, limit),
 
@@ -248,6 +251,61 @@ export function fetchPlayers(query: PlayerQuery = {}): Promise<PlayerPage> {
 /** Every rated season for one player, newest first. */
 export function fetchPlayerHistory(name: string): Promise<PlayerRating[]> {
   return get<PlayerRating[]>(`/players/${encodeURIComponent(name)}`);
+}
+
+export interface SimilarQuery {
+  season?: string;
+  limit?: number;
+  /** False widens the search to other positions, dropping the percentile axis. */
+  same_role?: boolean;
+}
+
+export interface SimilarPlayer {
+  player: string;
+  team: string;
+  league: string;
+  season: string;
+  position: string;
+  rating: number | null;
+  minutes: number;
+
+  /**
+   * Both scores are 0-100, and 50 means "no more alike than two random players
+   * in this position" -- the scale is pinned to the median distance in the pool,
+   * not to the theoretical range.
+   *
+   * Either can be null, and null is not zero. `fifa_similarity` is null when a
+   * player has no EA entry (8.6% of them); `percentile_similarity` is null
+   * whenever the comparison crosses positions, because our sub-ratings are
+   * ranks within a position and a centre-back's 80 is not a winger's 80.
+   */
+  fifa_similarity: number | null;
+  percentile_similarity: number | null;
+  combined: number | null;
+
+  attributes: Record<string, number>;
+  sub_ratings: Record<string, number>;
+}
+
+export interface SimilarPlayers {
+  player: PlayerRating;
+  /** The six outfield attributes, or the keeper's five. */
+  attribute_names: string[];
+  player_attributes: Record<string, number>;
+  player_sub_ratings: Record<string, number>;
+  same_role: boolean;
+  results: SimilarPlayer[];
+}
+
+/** Players who most resemble this one, on EA's attributes and on our own. */
+export function fetchSimilar(name: string, options: SimilarQuery = {}): Promise<SimilarPlayers> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(options)) {
+    if (value !== undefined && value !== null && value !== '') {
+      params.set(key, String(value));
+    }
+  }
+  return get<SimilarPlayers>(`/players/${encodeURIComponent(name)}/similar?${params}`);
 }
 
 export interface TeamStrength {
