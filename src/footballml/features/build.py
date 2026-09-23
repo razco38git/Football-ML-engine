@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 
 from footballml.entities import load_aliases
+from footballml.features.elo import add_elo
 from footballml.features.rolling import (
     add_rest_features,
     add_team_form,
@@ -54,6 +55,7 @@ _FIXED_STEMS: tuple[str, ...] = (
     "strength_attack",
     "strength_defence",
     "strength_goalkeeper",
+    "elo",
 )
 
 #: Rolling windows, in matches.
@@ -214,6 +216,10 @@ def build_team_features(
 ) -> pd.DataFrame:
     """Run the full long-shape feature build: prepare, roll, venue-split, rest."""
     df = prepare_team_match(tmh)
+    # Elo before the rolling features, so it is just another team-level column
+    # the pivot picks up. It answers what the windows cannot: how good a side is
+    # over years rather than over its last five or nineteen matches.
+    df = add_elo(df)
     for window in windows:
         df = add_team_form(df, window=window, venue_split=False)
         df = add_team_form(df, window=window, venue_split=True)

@@ -7,11 +7,16 @@ import { useAsync } from '../api/hooks';
  * Where each league is heading, from simulating every remaining fixture.
  *
  * The projection is deliberately presented with its uncertainty attached. Run
- * against 2025/26 truncated to five matchweeks, this approach put teams within
- * 8-11 points of their real final total and named the eventual champion in two
- * leagues of five — decent shape, poor precision. Showing a bare column of
- * points would imply a forecast the simulation does not support, so every row
- * carries its 10th-90th percentile range.
+ * against 2025/26 truncated to five matchweeks, scored by a model trained only
+ * on earlier seasons, it lands a mean 6 points from each team's real final
+ * total (3 in Spain, 9 in England), correlates 0.82 on rank, and names the
+ * eventual champion in four leagues of five. Good shape, coarse precision —
+ * showing a bare column of points would imply a forecast the simulation does
+ * not support, so every row carries its 10th-90th percentile range.
+ *
+ * (An earlier version of this note claimed 8-11 points and two champions of
+ * five. That was measured before the projection was fixed: it had been scoring
+ * every remaining fixture with each team's form wiped out to NaN.)
  */
 
 function Bar({ value, color }: { value: number; color: string }) {
@@ -126,9 +131,11 @@ export default function SeasonProjection() {
         style={{ background: 'rgba(255,145,0,0.07)', border: '1px solid rgba(255,145,0,0.25)', color: 'var(--foreground)' }}
       >
         <strong style={{ color: '#ff9100' }}>How much to trust this.</strong>{' '}
-        Tested on last season truncated to five matchweeks, this method landed
-        within <strong>8–11 points</strong> of each team&rsquo;s real final total and
-        named the eventual champion in <strong>two leagues out of five</strong>. It also
+        Tested on last season truncated to five matchweeks — the same stage as now,
+        and scored by a model that had not seen that season — this method landed a
+        mean <strong>6 points</strong> from each team&rsquo;s real final total
+        (3 in La Liga, 9 in the Premier League) and named the eventual champion in{' '}
+        <strong>four leagues out of five</strong>, missing only England. It still
         assumes every side&rsquo;s current form holds until May, which nobody&rsquo;s does.
         Read the range, not the single number.
       </div>
