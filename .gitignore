@@ -27,3 +27,6 @@ models/
 # OS
 .DS_Store
 Thumbs.db
+
+# Weekly refresh logs
+logs/

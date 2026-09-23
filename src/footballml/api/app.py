@@ -100,9 +100,17 @@ class State:
 state = State()
 
 
-@asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    """Load the model and history once, at startup."""
+def _load_state() -> dict[str, int]:
+    """Read every CSV and the model artifact into `state`.
+
+    Shared by startup and `POST /admin/reload`. The weekly job rewrites these
+    files underneath a running server, and without a way to re-read them the
+    site would serve last week's ratings until someone restarted it by hand --
+    which is exactly the staleness the job exists to prevent.
+
+    Returns what was loaded, so a reload can report it rather than claiming
+    success silently.
+    """
     state.model, state.metadata = registry.load()
     logger.info("Loaded model %s", state.metadata.version)
 
@@ -143,7 +151,25 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         state.backtest["Date"] = pd.to_datetime(state.backtest["Date"])
         logger.info("Loaded %d backtest predictions", len(state.backtest))
 
+    # Scored fixtures are cached for a few minutes; after a reload that cache
+    # describes the previous model, so drop it.
+    state._upcoming = None
+    state._upcoming_at = None
+
     logger.info("Loaded %d matches, %d teams", len(state.features), len(state.form_index))
+    return {
+        "matches": len(state.features),
+        "teams": len(state.form_index),
+        "players": len(state.players),
+        "team_seasons": len(state.teams),
+        "backtest_predictions": len(state.backtest),
+    }
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """Load the model and history once, at startup."""
+    _load_state()
     yield
 
 
@@ -235,6 +261,26 @@ def _to_predictions(
                 )
         out.append(entry)
     return out
+
+
+@app.post("/admin/reload")
+def reload_state() -> dict[str, object]:
+    """Re-read the data files and model artifact without restarting.
+
+    Called by `pipelines.weekly` after it refreshes results, ratings and the
+    model. Without it the weekly job would update the files while the running
+    server kept serving the previous week's, which is the staleness the job
+    exists to remove.
+
+    Not authenticated, deliberately: uvicorn binds 127.0.0.1, so this is
+    reachable only from this machine. It reads local files and mutates nothing
+    on disk. If the API is ever exposed beyond localhost, this needs a guard --
+    the permissive CORS policy above does *not* make it remotely reachable, but
+    a future bind to 0.0.0.0 would.
+    """
+    loaded = _load_state()
+    logger.info("Reloaded on request: %s", loaded)
+    return {"reloaded": True, "model_version": state.metadata.version, **loaded}
 
 
 @app.get("/health", response_model=Health)
