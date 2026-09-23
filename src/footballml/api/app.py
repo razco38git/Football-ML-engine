@@ -36,6 +36,8 @@ from footballml.api.schemas import (
     PlayerRating,
     Prediction,
     PredictRequest,
+    ProjectedTeam,
+    SeasonProjection,
     TeamForm,
     TeamStrength,
 )
@@ -84,6 +86,7 @@ class State:
     #: the same file presented for display. Every feature build must pass it, or
     #: the artifact's expected columns cannot be produced.
     strength: pd.DataFrame = field(default_factory=pd.DataFrame)
+    projection: pd.DataFrame = field(default_factory=pd.DataFrame)
     # Scored predictions, not raw fixtures. Rebuilding features over the full
     # history costs ~6.5s, which is far too slow to repeat per request when the
     # answer only changes when the fixture list does.
@@ -144,6 +147,12 @@ def _load_state() -> dict[str, int]:
         state.teams = pd.read_csv(teams_path)
         state.teams["Season"] = state.teams["Season"].astype(str)
         logger.info("Loaded %d team-seasons", len(state.teams))
+
+    projection_path = PROCESSED_DIR / "season_projection.csv"
+    if projection_path.exists():
+        state.projection = pd.read_csv(projection_path)
+        state.projection["Season"] = state.projection["Season"].astype(str)
+        logger.info("Loaded projections for %d teams", len(state.projection))
 
     backtest_path = PROCESSED_DIR / "backtest_predictions.csv"
     if backtest_path.exists():
@@ -261,6 +270,49 @@ def _to_predictions(
                 )
         out.append(entry)
     return out
+
+
+@app.get("/projections", response_model=SeasonProjection)
+def projections(league: str = Query(..., description="Division code, e.g. E0")) -> SeasonProjection:
+    """Projected final table, from simulating every remaining fixture.
+
+    Precomputed by `pipelines.project_season` in the weekly job rather than on
+    request: the simulation runs thousands of seasons across ~1,500 fixtures,
+    and repeating that per visitor would be wasteful for a number that only
+    changes when results do.
+    """
+    if state.projection.empty:
+        raise HTTPException(
+            404,
+            "No projections yet. Run `python -m pipelines.project_season`.",
+        )
+    rows = state.projection[state.projection["League"] == league]
+    if rows.empty:
+        raise HTTPException(404, f"No projection for {league}")
+
+    rows = rows.sort_values("projected_points", ascending=False)
+    return SeasonProjection(
+        league=league,
+        season=str(rows["Season"].iloc[0]),
+        remaining=int(rows["remaining"].iloc[0]),
+        played=int(rows["played"].sum() // 2),
+        teams=[
+            ProjectedTeam(
+                team=r["Team"],
+                played=int(r["played"]),
+                points=int(r["points"]),
+                goal_difference=int(r["goal_difference"]),
+                projected_points=round(float(r["projected_points"]), 1),
+                points_low=int(r["points_low"]),
+                points_high=int(r["points_high"]),
+                projected_position=round(float(r["projected_position"]), 1),
+                title_pct=round(float(r["title_pct"]), 4),
+                top_four_pct=round(float(r["top_four_pct"]), 4),
+                relegation_pct=round(float(r["relegation_pct"]), 4),
+            )
+            for _, r in rows.iterrows()
+        ],
+    )
 
 
 @app.post("/admin/reload")

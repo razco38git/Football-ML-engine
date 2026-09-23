@@ -261,3 +261,38 @@ class Accuracy(BaseModel):
         default_factory=dict, description="Accuracy per league"
     )
     calibration: list[CalibrationBin] = Field(default_factory=list)
+
+
+class ProjectedTeam(BaseModel):
+    """One team's projected finish, from simulating the rest of the season.
+
+    ``projected_points`` is the mean across simulated seasons; ``points_low``
+    and ``points_high`` are the 10th and 90th percentiles. The band is the
+    honest part -- five matchweeks in it is routinely twenty points wide, and a
+    reader shown only the mean would take it for a forecast.
+    """
+
+    team: str
+    played: int
+    points: int
+    goal_difference: int
+
+    projected_points: float
+    points_low: int
+    points_high: int
+    projected_position: float
+
+    title_pct: float
+    top_four_pct: float
+    relegation_pct: float
+
+
+class SeasonProjection(BaseModel):
+    """A league's projected table plus how much of it is still guesswork."""
+
+    league: str
+    season: str
+    #: Matches still to play. The whole basis for reading the table sceptically.
+    remaining: int
+    played: int
+    teams: list[ProjectedTeam]

@@ -22,7 +22,9 @@ Order is not arbitrary:
 4. ``score_upcoming`` settles predictions whose matches were played, then
    forecasts the coming round using ``registry.load()``, so it must come after
    step 3 to use the model just trained.
-5. ``reload`` tells a running API to re-read all of it.
+5. ``project_season`` simulates every remaining fixture into a projected table,
+   also on the freshly trained model.
+6. ``reload`` tells a running API to re-read all of it.
 
 Each step is timed and logged to ``logs/weekly-<date>.log`` as well as stdout,
 because a scheduled run nobody watched still has to be readable afterwards.
@@ -69,6 +71,7 @@ STEPS: tuple[Step, ...] = (
     ),
     Step("train", (), "retrain on the new matches"),
     Step("score_upcoming", (), "settle played predictions, forecast the next round"),
+    Step("project_season", (), "simulate the rest of the season for each league"),
 )
 
 #: Not a pipeline module -- handled in-process, see `reload_api`.

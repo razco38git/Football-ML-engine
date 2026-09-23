@@ -152,6 +152,9 @@ export const api = {
   history: (source: 'live' | 'backtest', league?: string, limit = 50) =>
     fetchHistory(source, league, limit),
 
+  /** Projected final table for one league. */
+  projection: (league: string) => fetchProjection(league),
+
   /** Any pairing, scored live using each side's form as of today. */
   predict: async (home_team: string, away_team: string, explain = true) => {
     const response = await fetch(`${BASE_URL}/predict`, {
@@ -334,4 +337,35 @@ export function fetchHistory(
   const params = new URLSearchParams({ source, limit: String(limit) });
   if (league && league !== 'All') params.set('league', league);
   return get<MatchResultPage>(`/accuracy/history?${params}`);
+}
+
+export interface ProjectedTeam {
+  team: string;
+  played: number;
+  points: number;
+  goal_difference: number;
+
+  projected_points: number;
+  /** 10th and 90th percentile across simulated seasons — the honest spread. */
+  points_low: number;
+  points_high: number;
+  projected_position: number;
+
+  title_pct: number;
+  top_four_pct: number;
+  relegation_pct: number;
+}
+
+export interface SeasonProjection {
+  league: string;
+  season: string;
+  /** Matches still to play — the basis for reading the table sceptically. */
+  remaining: number;
+  played: number;
+  teams: ProjectedTeam[];
+}
+
+/** Projected final table, from simulating every remaining fixture. */
+export function fetchProjection(league: string): Promise<SeasonProjection> {
+  return get<SeasonProjection>(`/projections?league=${encodeURIComponent(league)}`);
 }

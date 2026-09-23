@@ -4,14 +4,16 @@ import PlayerDatabase from './components/PlayerDatabase';
 import PlayerSimilarity from './components/PlayerSimilarity';
 import TeamStrength from './components/TeamStrength';
 import PredictionHistory from './components/PredictionHistory';
+import SeasonProjection from './components/SeasonProjection';
 
-type Tab = 'predictor' | 'players' | 'similarity' | 'teams' | 'history';
+type Tab = 'predictor' | 'players' | 'similarity' | 'teams' | 'projection' | 'history';
 
 const tabs: { id: Tab; label: string; icon: string; badge?: string }[] = [
   { id: 'predictor', label: 'Match Predictor', icon: '⚡' },
   { id: 'players', label: 'Player Ratings', icon: '👤', badge: 'EA FC' },
   { id: 'similarity', label: 'Player Similarity', icon: '🔍' },
   { id: 'teams', label: 'Team Strength', icon: '🏆' },
+  { id: 'projection', label: 'Projected Tables', icon: '🔮' },
   { id: 'history', label: 'Prediction Accuracy', icon: '📊' },
 ];
 
@@ -92,6 +94,7 @@ export default function App() {
         {activeTab === 'players' && <PlayerDatabase />}
         {activeTab === 'similarity' && <PlayerSimilarity />}
         {activeTab === 'teams' && <TeamStrength />}
+        {activeTab === 'projection' && <SeasonProjection />}
         {activeTab === 'history' && <PredictionHistory />}
       </main>
 
