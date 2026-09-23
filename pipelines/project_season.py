@@ -35,7 +35,7 @@ from footballml.data import (  # noqa: E402
     load_team_match_history,
     load_team_strength,
 )
-from footballml.features.build import build_upcoming_features  # noqa: E402
+from footballml.features.build import build_frozen_form_features  # noqa: E402
 from footballml.models.dixon_coles import score_matrix  # noqa: E402
 from footballml.projection import (  # noqa: E402
     current_table,
@@ -82,12 +82,12 @@ def project(
     if fixtures.empty:
         matrices = None
     else:
-        # Dated beyond the last result so the feature builder treats them as
-        # unplayed and each side picks up its current form.
-        dated = fixtures.assign(
-            Date=pd.Timestamp(tmh["Date"].max()) + pd.Timedelta(days=7)
-        )
-        scored = build_upcoming_features(tmh, dated, strength=strength)
+        # Not `build_upcoming_features` on the whole list: a team appears in ~33
+        # remaining fixtures, and dating them alike makes each placeholder roll
+        # its form over the others rather than over real matches. That silently
+        # emptied 31 of 232 features and halved how far apart the model placed
+        # teams -- the reason these tables read as too close to call.
+        scored = build_frozen_form_features(tmh, fixtures, strength=strength)
         if len(scored) != len(fixtures):
             logger.warning(
                 "%s: features built for %d of %d fixtures; the rest are teams "

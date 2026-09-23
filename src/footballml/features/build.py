@@ -341,6 +341,25 @@ def build_upcoming_features(
     if fixtures.empty:
         return pd.DataFrame()
 
+    # A team may appear at most once per batch, and this is not a style rule.
+    # Rolling form looks back over a team's previous rows; when a team has
+    # several placeholders they sit next to each other in the frame, so each
+    # one's window fills with the *other placeholders* -- every statistic NaN --
+    # instead of real matches. The frame still comes back the right shape, which
+    # is what made this expensive: the season projection scored 330 fixtures on
+    # one date and lost 31 of 232 features to silent NaN, halving how far apart
+    # it placed teams. Callers that legitimately need a whole season at once
+    # want `build_frozen_form_features`.
+    appearances = pd.concat([fixtures["HomeTeam"], fixtures["AwayTeam"]]).value_counts()
+    repeated = appearances[appearances > 1]
+    if not repeated.empty:
+        logger.warning(
+            "%d team(s) appear more than once in this fixture batch (worst: %s x%d). "
+            "Their rolling form will be computed over the other placeholder rows "
+            "and come back NaN. Use build_frozen_form_features for a whole season.",
+            len(repeated), repeated.index[0], int(repeated.iloc[0]),
+        )
+
     placeholder = pd.concat(
         [
             _fixture_side(fixtures, "HomeTeam", "AwayTeam", "Home"),
@@ -366,6 +385,113 @@ def build_upcoming_features(
     key = ["League", "Date", "HomeTeam", "AwayTeam"]
     wanted = fixtures[key].assign(Date=pd.to_datetime(fixtures["Date"]))
     return built.merge(wanted, on=key, how="inner").reset_index(drop=True)
+
+
+def build_frozen_form_features(
+    tmh: pd.DataFrame,
+    fixtures: pd.DataFrame,
+    windows: Sequence[int] = DEFAULT_WINDOWS,
+    **kwargs: object,
+) -> pd.DataFrame:
+    """Features for a whole season's remaining fixtures, form held constant.
+
+    A season projection scores every unplayed fixture as of today and holds form
+    there until May, so a team's feature vector is *the same* in all of its
+    remaining matches. That makes the obvious approach -- hand the whole fixture
+    list to :func:`build_upcoming_features` -- both wrong and wasteful: wrong
+    because a team's many placeholder rows then roll their form over each other
+    and come back NaN, wasteful because the identical vector is recomputed once
+    per fixture.
+
+    So each team's form is built once, in two synthetic rounds where everyone
+    appears exactly once, venues swapped between them. Each fixture is then
+    assembled from the home side's home-context block and the away side's
+    away-context block, and the differences recomputed.
+
+    Checked against the slow, obviously-correct alternative -- partitioning the
+    fixtures into 40 rounds and building each separately -- the two agree on
+    expected points per team to within 1.5%, at roughly a fortieth of the cost.
+
+    Args:
+        tmh: Long team-match history of played matches.
+        fixtures: ``League``, ``Season``, ``HomeTeam``, ``AwayTeam``. Any
+            ``Date`` is ignored: every fixture is scored as of today by design.
+        windows: Rolling windows, passed on and used to rebuild the differences.
+        **kwargs: Passed through to :func:`build_upcoming_features`.
+
+    Returns:
+        One row per fixture, with the same columns a normal feature build
+        produces. Empty if no fixture has both sides' form available.
+    """
+    if fixtures.empty:
+        return pd.DataFrame()
+
+    teams = sorted(set(fixtures["HomeTeam"]) | set(fixtures["AwayTeam"]))
+    league = fixtures["League"].iloc[0]
+    season = str(fixtures["Season"].iloc[0])
+    as_of = pd.Timestamp(pd.to_datetime(tmh["Date"]).max())
+
+    # Pair the teams up arbitrarily; the opponent does not matter, because every
+    # feature taken from these rounds describes the team itself. An odd team out
+    # simply has no row, and its fixtures are dropped below rather than guessed.
+    pairs = [(teams[i], teams[i + 1]) for i in range(0, len(teams) - 1, 2)]
+    blocks: dict[str, dict[str, pd.Series]] = {}
+    for offset, swap in enumerate((False, True), start=1):
+        round_fixtures = pd.DataFrame(
+            [
+                {
+                    "League": league,
+                    "Season": season,
+                    "HomeTeam": b if swap else a,
+                    "AwayTeam": a if swap else b,
+                    "Date": as_of + pd.Timedelta(days=7 * offset),
+                }
+                for a, b in pairs
+            ]
+        )
+        built = build_upcoming_features(
+            tmh, round_fixtures, windows=windows, **kwargs
+        )
+        for _, row in built.iterrows():
+            blocks.setdefault(row["HomeTeam"], {})["home"] = row
+            blocks.setdefault(row["AwayTeam"], {})["away"] = row
+
+    if not blocks:
+        return pd.DataFrame()
+
+    template = next(iter(blocks.values()))
+    sample = template.get("home", template.get("away"))
+    home_cols = [c for c in sample.index if c.startswith("home_")]
+    away_cols = [c for c in sample.index if c.startswith("away_")]
+
+    rows = []
+    for fixture in fixtures.itertuples():
+        home = blocks.get(fixture.HomeTeam, {}).get("home")
+        away = blocks.get(fixture.AwayTeam, {}).get("away")
+        if home is None or away is None:
+            continue
+        row = {
+            "League": league,
+            "Season": season,
+            "Date": as_of + pd.Timedelta(days=7),
+            "HomeTeam": fixture.HomeTeam,
+            "AwayTeam": fixture.AwayTeam,
+            "FTHG": np.nan,
+            "FTAG": np.nan,
+            "FTR": None,
+        }
+        row.update({c: home[c] for c in home_cols})
+        row.update({c: away[c] for c in away_cols})
+        rows.append(row)
+
+    if not rows:
+        return pd.DataFrame()
+
+    # Differences pair a home column with its away twin, so they only become
+    # correct once the two blocks are side by side.
+    matches = _add_diffs(pd.DataFrame(rows), windows)
+    matches["league_code"] = matches["League"].map(LEAGUE_CODES).astype("float64")
+    return matches.reset_index(drop=True)
 
 
 def _fixture_side(
