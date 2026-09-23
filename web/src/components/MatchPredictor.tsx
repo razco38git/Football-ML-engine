@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api, LEAGUE_NAMES, type Prediction, type TeamForm } from '../api/client';
-import { confidence, formatDate, mean, pct, shortName, teamColor } from '../api/display';
+import { confidence, formatDate, mean, pct, shortName, teamColor, verdict } from '../api/display';
 import { useAsync } from '../api/hooks';
 
 function FormBadge({ result }: { result: string }) {
@@ -185,14 +185,8 @@ function SquadStrength({ p }: { p: Prediction }) {
 function MatchCard({ p }: { p: Prediction }) {
   const [expanded, setExpanded] = useState(false);
 
-  const outcomeLabel =
-    p.predicted_outcome === 'H' ? `${p.home_team} Win`
-    : p.predicted_outcome === 'A' ? `${p.away_team} Win`
-    : 'Draw';
-
-  const outcomeColor =
-    p.predicted_outcome === 'H' ? '#00e676' : p.predicted_outcome === 'A' ? '#3b82f6' : '#ffea00';
-
+  // `verdict` decides whether naming a winner is honest here; see display.ts.
+  const { label: outcomeLabel, color: outcomeColor, decisive } = verdict(p);
   const conf = confidence(p);
   const settled = p.actual_result !== null;
   const correct = settled && p.actual_result === p.predicted_outcome;
@@ -277,12 +271,23 @@ function MatchCard({ p }: { p: Prediction }) {
               <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
                 xG: {p.expected_goals_home.toFixed(2)} – {p.expected_goals_away.toFixed(2)}
               </div>
-              <div
-                className="text-xs font-display font-bold mt-1"
-                style={{ color: conf >= 60 ? '#00e676' : conf >= 45 ? '#ffea00' : '#ff9100' }}
-              >
-                {conf}% confidence
-              </div>
+              {/*
+                "38% confidence" reads as confidence in a named winner. Where
+                there is no favourite there is no winner to be confident about,
+                so show what the model actually thinks: all three numbers.
+              */}
+              {decisive ? (
+                <div
+                  className="text-xs font-display font-bold mt-1"
+                  style={{ color: conf >= 60 ? '#00e676' : conf >= 45 ? '#ffea00' : '#ff9100' }}
+                >
+                  {conf}% confidence
+                </div>
+              ) : (
+                <div className="text-xs font-data mt-1" style={{ color: '#94a3b8' }}>
+                  {pct(p.prob_home_win)} / {pct(p.prob_draw)} / {pct(p.prob_away_win)}
+                </div>
+              )}
             </div>
           </div>
 

@@ -56,3 +56,47 @@ export function formatDate(iso: string): string {
 export function confidence(p: { prob_home_win: number; prob_draw: number; prob_away_win: number }): number {
   return Math.round(Math.max(p.prob_home_win, p.prob_draw, p.prob_away_win) * 100);
 }
+
+/**
+ * Below this, naming a winner claims more than the model knows.
+ *
+ * Measured over 20,013 walk-forward predictions: in the 18% of matches where
+ * no outcome reaches 40%, the named pick came in only 40% of the time, and the
+ * *draw* was the single most common actual result in 29% of them.
+ */
+export const NO_FAVOURITE_BELOW = 0.4;
+
+/**
+ * How to describe a prediction, given that picking the largest of three
+ * probabilities is a lossy summary.
+ *
+ * "Home win" aggregates 1-0, 2-0, 2-1, 3-1 and so on, while a draw only gets
+ * 0-0, 1-1, 2-2 — so a draw is almost never the *largest* of the three even
+ * when it is very likely. Across those same 20,013 predictions the label said
+ * home 67% / away 33% / draw 0.2%, against actual results of 44 / 31 / 25. The
+ * probabilities themselves are well calibrated (draw predicted 25.5%, occurred
+ * 25.1%); only this one-word summary of them is skewed.
+ *
+ * So when nothing clears `NO_FAVOURITE_BELOW`, say so rather than naming a
+ * winner the model is not backing.
+ */
+export function verdict(p: {
+  prob_home_win: number;
+  prob_draw: number;
+  prob_away_win: number;
+  predicted_outcome: string;
+  home_team: string;
+  away_team: string;
+}): { label: string; color: string; decisive: boolean } {
+  const top = Math.max(p.prob_home_win, p.prob_draw, p.prob_away_win);
+  if (top < NO_FAVOURITE_BELOW) {
+    return { label: 'Too close to call', color: '#94a3b8', decisive: false };
+  }
+  if (p.predicted_outcome === 'H') {
+    return { label: `${p.home_team} Win`, color: '#00e676', decisive: true };
+  }
+  if (p.predicted_outcome === 'A') {
+    return { label: `${p.away_team} Win`, color: '#3b82f6', decisive: true };
+  }
+  return { label: 'Draw', color: '#ffea00', decisive: true };
+}
