@@ -27,29 +27,67 @@ from footballml.features.rolling import (
 
 logger = logging.getLogger(__name__)
 
-#: Feature stems differenced into ``*_diff`` columns when present on both sides.
-DIFF_STEMS: tuple[str, ...] = (
-    "points_last_5",
-    "points_last_5_venue",
-    "goal_diff_last_5",
-    "goal_diff_last_5_venue",
-    "goals_for_last_5",
-    "goals_against_last_5",
-    "shots_on_target_for_last_5",
-    "shot_accuracy_last_5",
-    "xg_for_last_5",
-    "xg_against_last_5",
-    "xg_diff_last_5",
-    "xg_diff_last_5_venue",
-    "xg_overperformance_last_5",
-    "npxg_diff_last_5",
-    "ppda_last_5",
+#: Form stems differenced per window. ``_venue`` variants are split out because
+#: only some metrics are computed home/away as well as overall.
+_WINDOWED_STEMS: tuple[str, ...] = (
+    "points_last_{w}",
+    "points_last_{w}_venue",
+    "goal_diff_last_{w}",
+    "goal_diff_last_{w}_venue",
+    "goals_for_last_{w}",
+    "goals_against_last_{w}",
+    "shots_on_target_for_last_{w}",
+    "shot_accuracy_last_{w}",
+    "xg_for_last_{w}",
+    "xg_against_last_{w}",
+    "xg_diff_last_{w}",
+    "xg_diff_last_{w}_venue",
+    "xg_overperformance_last_{w}",
+    "npxg_diff_last_{w}",
+    "ppda_last_{w}",
+)
+
+#: Stems that do not depend on a rolling window.
+_FIXED_STEMS: tuple[str, ...] = (
     "days_since_last_match",
     "strength_overall",
     "strength_attack",
     "strength_defence",
     "strength_goalkeeper",
 )
+
+#: Rolling windows, in matches.
+#:
+#: Five alone made the model timid. It could not tell a genuinely elite side
+#: from one that had won three of five, so it shrank every prediction toward
+#: 50%: where the market said 80%+, it said 78% and the home team won 87%. Over
+#: a season that compounds -- simulated tables spread 9.7 points against a real
+#: 17.4, with the champion on 72 where reality averages 89.
+#:
+#: 19 is half a season: long enough to express persistent quality, short enough
+#: to move when a team genuinely changes. Windows roll over a team's matches in
+#: date order and so carry across the summer, which is deliberate -- a side's
+#: level is fairly stable year to year, and without it August predictions would
+#: have no history at all. The model is free to weight the long window down.
+DEFAULT_WINDOWS: tuple[int, ...] = (5, 19)
+
+
+def diff_stems(windows: Sequence[int] = DEFAULT_WINDOWS) -> tuple[str, ...]:
+    """Stems to difference, for these rolling windows.
+
+    Generated rather than hardcoded: a new window otherwise produces
+    ``home_points_last_19`` with no ``points_last_19_diff`` beside it, and the
+    relative strength of the two sides is what actually decides a match.
+    """
+    windowed = [
+        stem.format(w=w) for w in windows for stem in _WINDOWED_STEMS
+    ]
+    return tuple(windowed) + _FIXED_STEMS
+
+
+#: Differenced stems for the default windows, kept for callers that want the
+#: module-level constant.
+DIFF_STEMS: tuple[str, ...] = diff_stems()
 
 #: Squad-strength columns joined onto each match.
 #:
@@ -171,7 +209,7 @@ def _next_season(label: str) -> str:
 
 def build_team_features(
     tmh: pd.DataFrame,
-    windows: Sequence[int] = (5,),
+    windows: Sequence[int] = DEFAULT_WINDOWS,
     congestion_days: int = 14,
 ) -> pd.DataFrame:
     """Run the full long-shape feature build: prepare, roll, venue-split, rest."""
@@ -184,7 +222,7 @@ def build_team_features(
 
 def build_match_features(
     tmh: pd.DataFrame,
-    windows: Sequence[int] = (5,),
+    windows: Sequence[int] = DEFAULT_WINDOWS,
     congestion_days: int = 14,
     strength: pd.DataFrame | None = None,
     previous_season_strength: bool = True,
@@ -251,7 +289,7 @@ def build_match_features(
             matches, strength, previous_season=previous_season_strength
         )
 
-    matches = _add_diffs(matches)
+    matches = _add_diffs(matches, windows)
     matches["league_code"] = matches["League"].map(LEAGUE_CODES).astype("float64")
     return matches.sort_values(["Date", "League", "HomeTeam"]).reset_index(drop=True)
 
@@ -362,11 +400,13 @@ def _feature_columns(long_df: pd.DataFrame, original: pd.DataFrame) -> list[str]
     return [c for c in long_df.columns if c not in original_cols]
 
 
-def _add_diffs(matches: pd.DataFrame) -> pd.DataFrame:
+def _add_diffs(
+    matches: pd.DataFrame, windows: Sequence[int] = DEFAULT_WINDOWS
+) -> pd.DataFrame:
     """Add ``{stem}_diff`` columns for every stem present on both sides."""
     diffs = {
         f"{stem}_diff": matches[f"home_{stem}"] - matches[f"away_{stem}"]
-        for stem in DIFF_STEMS
+        for stem in diff_stems(windows)
         if f"home_{stem}" in matches.columns and f"away_{stem}" in matches.columns
     }
     return matches.assign(**diffs)
