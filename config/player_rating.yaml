@@ -162,11 +162,11 @@ positions:
       # Full-backs are separated from centre-backs because they are judged on
       # both jobs. Merging them is what previously let overlapping full-backs
       # out-rate every genuine centre-back.
+      #
+      # Possession-adjusted only -- see the note on CB below.
       defending:
-        interceptions_per90: 1.25
-        interceptions_padj: 1.25
-        tackles_won_per90: 1.25
-        tackles_won_padj: 1.25
+        interceptions_padj: 2.5
+        tackles_won_padj: 2.5
         fouls_per90: -0.5
       creation:
         crosses_per90: 2.0
@@ -193,11 +193,33 @@ positions:
       # Defending dominates, as it should for the role. Before FBref supplied
       # interceptions and tackles this group was judged on attacking output
       # alone, which was indefensible.
+      #
+      # Possession-adjusted only. The raw per-90 counts reward a defender for
+      # playing on a team that has to defend a lot: Brentford sit deep, so
+      # Nathan Collins scored 36 for defending while Damsgaard, a winger who
+      # tracks back, scored 95. Dividing by the team's own defensive volume at
+      # least asks "of the defending this side had to do, how much was his?".
+      #
+      # Measured over 1,052 completed team-seasons, against the NEXT season's
+      # goals conceded -- the only test that matters, since strength is joined
+      # from the previous season:
+      #
+      #   possession-adjusted only   -0.489   <- this
+      #   raw + adjusted (before)    -0.483
+      #   EA rating alone            -0.478
+      #
+      # A small gain, and close to the ceiling: knowing a team's *actual*
+      # previous conceding predicts only -0.555, and the whole-squad `overall`
+      # rating already reaches -0.519. A defence-specific number is therefore
+      # largely redundant, which is why the match model ranks
+      # `strength_defence` 93rd of 125 features. Do not expect re-weighting to
+      # rescue it -- an earlier sweep of the FB defending weight from 0.38 to
+      # 0.80 made things worse at every step. The metrics are the limit:
+      # tackles and interceptions measure activity, and nothing in the free
+      # data measures positioning or preventing a chance.
       defending:
-        interceptions_per90: 1.5
-        interceptions_padj: 1.5
-        tackles_won_per90: 1.25
-        tackles_won_padj: 1.25
+        interceptions_padj: 3.0
+        tackles_won_padj: 2.5
         fouls_per90: -0.5
       involvement:
         xg_buildup_share: 1.5

@@ -52,12 +52,20 @@ FORMATION = {"goalkeeper": 1, "defence": 4, "midfield": 3, "attack": 3}
 #: pitch.
 #:
 #: Keepers were originally excluded, on the argument that save percentage and
-#: goals conceded mostly describe the defence in front of them. The data says
-#: otherwise. Across 1,072 team-seasons, the keeper's rating predicts goals
-#: conceded *better* than the entire back line does -- Spearman -0.60 against
-#: -0.49 -- and including him lifts defence-vs-conceded to -0.59 and
-#: overall-vs-points from +0.739 to +0.747. The original reasoning was
-#: plausible and wrong, so the keeper counts as the eleventh player.
+#: goals conceded mostly describe the defence in front of them.
+#:
+#: They are included now, but the margin is narrow and the first justification
+#: written here was wrong. It cited -0.62 for the keeper against -0.49 for the
+#: back line, both measured against the keeper's *own* season -- which flatters
+#: him, because save percentage is partly a consequence of the goals that
+#: season rather than a stable trait. Re-measured the way the model actually
+#: uses strength, joined from the previous season, the keeper predicts next
+#: season's goals conceded at -0.474: slightly *worse* than the back line's
+#: -0.483.
+#:
+#: What still supports including him is the overall: with the keeper it
+#: predicts next season's points at +0.694, against +0.690 for the outfield
+#: ten. A real edge, but a hair rather than the gulf originally claimed.
 OVERALL_LINES = {"goalkeeper": 1, "defence": 4, "midfield": 3, "attack": 3}
 
 #: Roles are filled in this order when a line is short, so a team missing a
