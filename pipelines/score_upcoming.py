@@ -2,12 +2,21 @@
 
 The job that builds the track record. Intended to run on a schedule:
 
-1. Predict every published upcoming fixture and store it, stamped with the model
-   version and the moment it was made.
+1. Predict every fixture scheduled within the next ``--horizon-days`` and store
+   it, stamped with the model version and the moment it was made.
 2. Attach results to any stored prediction whose match has since been played.
 
 Step 1 must happen *before* kickoff for the record to mean anything, which is
 why this runs on a timer rather than on demand.
+
+Fixtures come from :mod:`footballml.ingest.schedule` -- the whole season's
+schedule -- rather than football-data's rolling file of "upcoming" matches.
+That file is a snapshot, and on a Monday it usually still holds the round just
+played, so this job would fetch it, correctly skip every already-played
+fixture, store nothing, and exit zero. The result was a live record of
+eighteen predictions that were all Spanish: coverage depended on whether the
+feed happened to be ahead of the job for a given league. football-data is still
+read, but only for the bookmaker odds the accuracy page benchmarks against.
 
 Run with::
 
@@ -34,6 +43,11 @@ from footballml.data import (  # noqa: E402
 )
 from footballml.features.build import build_match_features, build_upcoming_features  # noqa: E402
 from footballml.ingest.matchhistory import LEAGUES, fetch_fixtures  # noqa: E402
+from footballml.ingest.schedule import (  # noqa: E402
+    DEFAULT_HORIZON_DAYS,
+    fetch_schedule,
+    window_fixtures,
+)
 
 OUTPUT_COLUMNS = [
     "League", "Date", "HomeTeam", "AwayTeam",
@@ -43,10 +57,77 @@ OUTPUT_COLUMNS = [
 ]
 
 
+def _collect_fixtures(
+    leagues: list[str] | None, horizon_days: int, log: logging.Logger
+) -> pd.DataFrame:
+    """Fixtures to predict, with bookmaker odds attached where published.
+
+    The schedule decides *which* fixtures exist -- it carries the whole season,
+    so coverage no longer depends on what football-data's rolling file happens
+    to hold on the morning the job runs. football-data is still consulted, but
+    only for the odds, which are the one thing FBref does not provide and which
+    the accuracy page uses as its benchmark.
+
+    Falls back to football-data alone if the schedule is unavailable, so an
+    outage at one source degrades coverage instead of stopping the record.
+    """
+    schedule = fetch_schedule(leagues)
+    if schedule.empty:
+        # The schedule source itself gave us nothing, which is a problem rather
+        # than an answer. football-data's rolling file is the fallback.
+        log.warning("No schedule available; falling back to the published fixture file")
+        return fetch_fixtures(leagues)
+
+    fixtures = window_fixtures(schedule, horizon_days=horizon_days)
+    if fixtures.empty:
+        # Nothing is scheduled. Deliberately *not* falling back: the published
+        # file routinely holds the round that has just been played, and treating
+        # that as "upcoming" is what produced a track record of eighteen
+        # predictions from a single league.
+        pending = schedule[~schedule["played"]]
+        if pending.empty:
+            log.info("Nothing left to predict; every fixture has been played")
+        else:
+            nxt = pending["Date"].min()
+            log.info(
+                "Nothing to predict: next fixture is %s, %d day(s) past the "
+                "%d-day horizon (an international break, most likely)",
+                nxt.date(),
+                (nxt - pd.Timestamp.today().normalize()).days - horizon_days,
+                horizon_days,
+            )
+        return fixtures
+
+    try:
+        published = fetch_fixtures(leagues)
+    except Exception as exc:  # noqa: BLE001 - odds are optional, fixtures are not
+        log.warning("Could not fetch odds (%s); predicting without them", exc)
+        return fixtures
+
+    odds_cols = [c for c in ODDS_COLUMNS if c in published.columns]
+    if published.empty or not odds_cols:
+        log.info("No odds published for these fixtures")
+        return fixtures
+
+    key = ["League", "Date", "HomeTeam", "AwayTeam"]
+    merged = fixtures.merge(
+        published[[*key, *odds_cols]].assign(Date=pd.to_datetime(published["Date"])),
+        on=key,
+        how="left",
+    )
+    with_odds = int(merged[odds_cols[0]].notna().sum())
+    log.info("%d of %d fixture(s) have odds", with_odds, len(merged))
+    return merged
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--leagues", nargs="+", choices=sorted(LEAGUES))
     parser.add_argument("--settle-only", action="store_true")
+    parser.add_argument(
+        "--horizon-days", type=int, default=DEFAULT_HORIZON_DAYS,
+        help="How far ahead to predict. See ingest.schedule for why this exists.",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -66,9 +147,10 @@ def main() -> None:
     model, metadata = registry.load()
     log.info("Using model %s", metadata.version)
 
-    fixtures = fetch_fixtures(args.leagues)
+    # `_collect_fixtures` has already said why this is empty -- it is the only
+    # place that can tell "nothing scheduled" from "no schedule".
+    fixtures = _collect_fixtures(args.leagues, args.horizon_days, log)
     if fixtures.empty:
-        log.info("No upcoming fixtures published")
         return
 
     # Without strength here the artifact's feature list cannot be satisfied, and

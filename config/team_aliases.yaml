@@ -12,7 +12,40 @@
 # of the match dataset. A missing alias silently drops rows from a join, so
 # resolution is strict and raises on unknown names.
 
-fbref: {}
+fbref:
+  Alavés: Alaves
+  Almería: Almeria
+  Athletic Club: Ath Bilbao
+  Atlético Madrid: Ath Madrid
+  Celta Vigo: Celta
+  Clermont Foot: Clermont
+  Coventry City: Coventry
+  Cádiz: Cadiz
+  Darmstadt 98: Darmstadt
+  Dep. A Coruña: La Coruna
+  Espanyol: Espanol
+  Frankfurt: Ein Frankfurt
+  Gladbach: M'gladbach
+  Hamburger SV: Hamburg
+  Hellas Verona: Verona
+  Hull City: Hull
+  Ipswich Town: Ipswich
+  Köln: FC Koln
+  Leeds United: Leeds
+  Leganés: Leganes
+  Leicester City: Leicester
+  Luton Town: Luton
+  Mainz 05: Mainz
+  Manchester City: Man City
+  Manchester Utd: Man United
+  Málaga: Malaga
+  Nottingham: Nott'm Forest
+  Paderborn 07: Paderborn
+  Racing Sant: Santander
+  Rayo Vallecano: Vallecano
+  Real Betis: Betis
+  Real Sociedad: Sociedad
+  Saint-Étienne: St Etienne
 sofifa: {}
 understat:
   AC Milan: Milan

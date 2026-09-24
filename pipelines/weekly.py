@@ -109,28 +109,49 @@ def run_step(step: Step) -> float:
     # `sys.executable`, not "python": under Task Scheduler the PATH is not the
     # one an interactive shell gets, and a bare "python" would either miss the
     # virtualenv or not exist at all.
+    # One merged stream rather than two. A pipeline's own logging goes to
+    # stderr, its prints to stdout, and its dependencies choose for themselves;
+    # keeping them apart meant guessing which one carried the sentence that
+    # said what actually happened.
     completed = subprocess.run(
         [sys.executable, "-m", f"pipelines.{step.name}", *step.args],
         cwd=ROOT,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
         encoding="utf-8",
         errors="replace",
         check=False,
     )
     elapsed = time.monotonic() - started
+    output = completed.stdout or ""
 
-    for line in (completed.stdout or "").splitlines():
+    for line in output.splitlines():
         logger.debug("    %s", line)
     if completed.returncode != 0:
-        for line in (completed.stderr or "").splitlines()[-25:]:
+        for line in output.splitlines()[-25:]:
             logger.error("    %s", line)
-        raise subprocess.CalledProcessError(
-            completed.returncode, step.name, completed.stdout, completed.stderr
-        )
+        raise subprocess.CalledProcessError(completed.returncode, step.name, output)
+
+    # Discarding a successful step's output is how a run that did nothing reads
+    # exactly like a run that did everything -- the failure this whole module
+    # exists to prevent. The tail is enough to say what happened: "stored 48
+    # predictions", or "next fixture is 9 October".
+    for line in _summary_lines(output):
+        logger.info("    %s", line)
 
     logger.info("    done in %s", _duration(elapsed))
     return elapsed
+
+
+#: Lines of a successful step's log to carry up into the weekly log.
+SUMMARY_LINES = 8
+
+
+def _summary_lines(output: str | None) -> list[str]:
+    """The tail of a step's own log, as a readable summary of what it did."""
+    lines = [line.strip() for line in (output or "").splitlines() if line.strip()]
+    return lines[-SUMMARY_LINES:]
 
 
 def reload_api(url: str = API_URL, timeout: float = 120.0) -> bool:

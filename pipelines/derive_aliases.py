@@ -13,10 +13,14 @@ A name is only accepted when the evidence is unambiguous: it must appear in
 several matched fixtures and agree in nearly all of them. Anything weaker is
 reported for a human to resolve rather than written out.
 
+Two sources need resolving against football-data's canonical names:
+``understat`` (player statistics) and ``fbref`` (the forward fixture schedule).
+Both are derived the same way, because both publish results we can match on.
+
 Run with::
 
     python -m pipelines.derive_aliases
-    python -m pipelines.derive_aliases --write
+    python -m pipelines.derive_aliases --source fbref --write
 """
 
 from __future__ import annotations
@@ -59,70 +63,111 @@ MIN_EVIDENCE = 4
 MIN_AGREEMENT = 0.9
 
 
-def derive(
-    leagues: list[str], seasons: list[str]
-) -> tuple[dict[str, str], list[str]]:
-    """Return ``(aliases, warnings)`` mapping Understat names to MatchHistory names."""
+#: The key that identifies one fixture in both sources.
+_KEY = ["league", "season", "_date", "_hg", "_ag"]
+
+#: FBref writes scores with an en-dash ("4–2"), not a hyphen. Splitting on "-"
+#: matches nothing and silently drops every fixture, which reads as "no results
+#: found" rather than as a parsing bug, so accept any dash-like character.
+_SCORE = r"(\d+)\s*[-‐‑‒–—―]\s*(\d+)"
+
+
+def _read_understat(leagues: list[str], seasons: list[str]) -> pd.DataFrame:
+    """Understat results, keyed for matching."""
     import soccerdata as sd
 
+    us = (
+        sd.Understat(leagues=[UNDERSTAT_LEAGUES[c] for c in leagues], seasons=seasons)
+        .read_team_match_stats()
+        .reset_index()
+    )
+    inverse = {v: k for k, v in UNDERSTAT_LEAGUES.items()}
+    return us.assign(
+        league=us["league"].map(inverse),
+        season=us["season"].astype(str),
+        _date=pd.to_datetime(us["date"]).dt.normalize(),
+        _hg=us["home_goals"],
+        _ag=us["away_goals"],
+    )[[*_KEY, "home_team", "away_team"]]
+
+
+def _read_fbref(leagues: list[str], seasons: list[str]) -> pd.DataFrame:
+    """FBref's season schedule, keyed for matching.
+
+    Only played fixtures carry a score, and only played fixtures can be matched
+    -- which is the point: the unplayed ones are what we want the aliases *for*.
+    """
+    import soccerdata as sd
+
+    sched = (
+        sd.FBref(leagues=[UNDERSTAT_LEAGUES[c] for c in leagues], seasons=seasons)
+        .read_schedule()
+        .reset_index()
+    )
+    inverse = {v: k for k, v in UNDERSTAT_LEAGUES.items()}
+
+    # Scores come as "4–2" with an en-dash, not a hyphen. Splitting on "-" finds
+    # nothing and silently drops every fixture, so match any dash character.
+    goals = sched["score"].astype(str).str.extract(_SCORE)
+    return sched.assign(
+        league=sched["league"].map(inverse),
+        season=sched["season"].astype(str),
+        _date=pd.to_datetime(sched["date"], errors="coerce").dt.normalize(),
+        _hg=pd.to_numeric(goals[0], errors="coerce"),
+        _ag=pd.to_numeric(goals[1], errors="coerce"),
+    ).dropna(subset=["_hg", "_ag", "_date"])[[*_KEY, "home_team", "away_team"]]
+
+
+READERS = {"understat": _read_understat, "fbref": _read_fbref}
+
+
+def derive(
+    source: str, leagues: list[str], seasons: list[str]
+) -> tuple[dict[str, str], list[str]]:
+    """Return ``(aliases, warnings)`` mapping ``source`` names to canonical ones."""
     # Read football-data.co.uk through our own reader, not soccerdata's: theirs
     # picks encoding by season number and silently loses whole seasons whose
     # files were re-saved with a BOM upstream.
     matches = to_matches(fetch_match_history(leagues, seasons))
-    us = (
-        sd.Understat(
-            leagues=[UNDERSTAT_LEAGUES[c] for c in leagues], seasons=seasons
-        )
-        .read_team_match_stats()
-        .reset_index()
-    )
+    mh = matches.assign(
+        league=matches["League"],
+        season=matches["Season"],
+        _date=matches["Date"],
+        _hg=matches["FTHG"],
+        _ag=matches["FTAG"],
+        home_team=matches["HomeTeam"],
+        away_team=matches["AwayTeam"],
+    )[[*_KEY, "home_team", "away_team"]]
 
-    inverse = {v: k for k, v in UNDERSTAT_LEAGUES.items()}
-    mh = matches.assign(league=matches["League"], season=matches["Season"], _date=matches["Date"])
-    us = us.assign(
-        league=us["league"].map(inverse),
-        season=us["season"].astype(str),
-        _date=pd.to_datetime(us["date"]).dt.normalize(),
-    )
-
-    key = ["league", "season", "_date", "_hg", "_ag"]
-    mh_k = mh.assign(
-        _hg=mh["FTHG"],
-        _ag=mh["FTAG"],
-        home_team=mh["HomeTeam"],
-        away_team=mh["AwayTeam"],
-    )[[*key, "home_team", "away_team"]]
-    us_k = us.assign(_hg=us["home_goals"], _ag=us["away_goals"])[
-        [*key, "home_team", "away_team"]
-    ]
+    other = READERS[source](leagues, seasons)
 
     # Drop fixture keys that are not unique within their league-season, so a
     # coincidental scoreline collision can never produce a false pairing.
-    mh_k = mh_k.drop_duplicates(subset=key, keep=False)
-    us_k = us_k.drop_duplicates(subset=key, keep=False)
+    mh = mh.drop_duplicates(subset=_KEY, keep=False)
+    other = other.drop_duplicates(subset=_KEY, keep=False)
 
-    paired = mh_k.merge(us_k, on=key, suffixes=("_mh", "_us"))
+    paired = mh.merge(other, on=_KEY, suffixes=("_mh", "_other"))
 
     votes: dict[str, Counter] = defaultdict(Counter)
     for side in ("home", "away"):
-        for us_name, mh_name in zip(
-            paired[f"{side}_team_us"], paired[f"{side}_team_mh"], strict=True
+        for name, canonical in zip(
+            paired[f"{side}_team_other"], paired[f"{side}_team_mh"], strict=True
         ):
-            votes[us_name][mh_name] += 1
+            votes[name][canonical] += 1
 
     aliases: dict[str, str] = {}
     warnings: list[str] = []
-    for us_name, counter in sorted(votes.items()):
+    for name, counter in sorted(votes.items()):
         best, count = counter.most_common(1)[0]
         total = sum(counter.values())
         if total < MIN_EVIDENCE:
-            warnings.append(f"{us_name!r}: only {total} matched fixtures, skipped")
+            warnings.append(f"{name!r}: only {total} matched fixtures, skipped")
             continue
         if count / total < MIN_AGREEMENT:
-            warnings.append(f"{us_name!r}: ambiguous, candidates {dict(counter)}")
+            warnings.append(f"{name!r}: ambiguous, candidates {dict(counter)}")
             continue
-        if us_name != best:
-            aliases[us_name] = best
+        if name != best:
+            aliases[name] = best
 
     return aliases, warnings
 
@@ -130,6 +175,10 @@ def derive(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--write", action="store_true", help="Update the alias config.")
+    parser.add_argument(
+        "--source", default="understat", choices=sorted(READERS),
+        help="Which source's names to resolve against football-data's.",
+    )
     parser.add_argument("--start-season", default="1415")
     parser.add_argument("--end-season", default=None)
     args = parser.parse_args()
@@ -138,7 +187,7 @@ def main() -> None:
     log = logging.getLogger("derive_aliases")
 
     seasons = season_labels(args.start_season, args.end_season)
-    aliases, warnings = derive(sorted(UNDERSTAT_LEAGUES), seasons)
+    aliases, warnings = derive(args.source, sorted(UNDERSTAT_LEAGUES), seasons)
 
     print(f"\n=== {len(aliases)} aliases derived ===")
     for k, v in aliases.items():
@@ -151,12 +200,28 @@ def main() -> None:
 
     if args.write:
         config = yaml.safe_load(ALIAS_CONFIG.read_text(encoding="utf-8")) or {}
-        config["understat"] = dict(sorted(aliases.items()))
+        existing = config.get(args.source) or {}
+
+        # Merge rather than replace. A newly promoted club has only a handful of
+        # played matches, so it falls under MIN_EVIDENCE and cannot be derived
+        # until it has a season behind it -- but its fixtures still need
+        # resolving *now*. Replacing would silently delete the hand-written
+        # entry that covers the gap, and a missing alias drops rows from a join.
+        kept = {k: v for k, v in existing.items() if k not in aliases}
+        if kept:
+            log.info(
+                "Keeping %d existing %s alias(es) not re-derived this run: %s",
+                len(kept), args.source, ", ".join(sorted(kept)),
+            )
+        config[args.source] = dict(sorted({**existing, **aliases}.items()))
+
         ALIAS_CONFIG.write_text(
             HEADER + yaml.safe_dump(config, sort_keys=True, allow_unicode=True),
             encoding="utf-8",
         )
-        log.info("Wrote %d aliases to %s", len(aliases), ALIAS_CONFIG)
+        log.info(
+            "Wrote %d %s aliases to %s", len(config[args.source]), args.source, ALIAS_CONFIG
+        )
     else:
         print("\n(dry run -- pass --write to update the config)")
 
