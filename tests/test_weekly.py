@@ -8,8 +8,9 @@ these assert, not the pipelines themselves, which have their own tests.
 
 from __future__ import annotations
 
+import io
 import subprocess
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 
 import pytest
 
@@ -59,6 +60,30 @@ def test_a_stopped_api_is_not_a_failure(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("sys.argv", ["weekly"])
 
     assert weekly.main() == 0
+    assert weekly.reload_api() is True, "not running is not the same as refusing"
+
+
+def test_a_refused_reload_fails_the_run(monkeypatch, tmp_path) -> None:
+    """An API that is alive and says no leaves the site on the old model.
+
+    That is a partial refresh -- every file on disk is this week's, the site is
+    serving last week's -- and reporting success would hide it. It happens when
+    the server has been running since before the feature code changed, so it
+    cannot build what the model just trained expects.
+    """
+    monkeypatch.setattr(weekly, "run_step", lambda step: 0.0)
+    monkeypatch.setattr(weekly, "LOG_DIR", tmp_path)
+
+    def refuse(*_args, **_kwargs):
+        raise HTTPError(
+            "http://127.0.0.1:8000/admin/reload", 409, "Conflict", {},
+            io.BytesIO(b'{"reason": "model needs features this process cannot build"}'),
+        )
+
+    monkeypatch.setattr(weekly, "urlopen", refuse)
+    monkeypatch.setattr("sys.argv", ["weekly"])
+
+    assert weekly.main() == 1
     assert weekly.reload_api() is False
 
 

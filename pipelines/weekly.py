@@ -40,7 +40,7 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -159,6 +159,11 @@ def reload_api(url: str = API_URL, timeout: float = 120.0) -> bool:
 
     A stopped API is not a failure -- the files are on disk and the next start
     picks them up. Only a running-but-broken one is worth shouting about.
+
+    Returns:
+        True if the site picked up the new data, or is not running. False when
+        it is running and *refused*, which means the site is still serving the
+        previous model and somebody has to act.
     """
     logger.info("--> %s (tell the site to pick up the new data)", RELOAD)
     try:
@@ -167,9 +172,25 @@ def reload_api(url: str = API_URL, timeout: float = 120.0) -> bool:
         ) as response:
             logger.info("    API reloaded: %s", response.read().decode("utf-8")[:200])
         return True
+    except HTTPError as exc:
+        # The API is alive and said no. Almost always: it has been running since
+        # before the feature code changed, so it cannot build what the model we
+        # just trained expects. Retraining again will not help -- it needs a
+        # restart. Silence here would leave the site on a stale model while the
+        # run reported success, which is the failure this whole job exists to
+        # prevent.
+        body = exc.read().decode("utf-8", errors="replace")[:400]
+        logger.error(
+            "    API refused the reload (HTTP %d): %s", exc.code, body,
+        )
+        logger.error(
+            "    The site is still serving the previous model. Restart the API "
+            "so it runs the current feature code, then rerun `--only reload`.",
+        )
+        return False
     except URLError as exc:
         logger.warning("    API not reachable (%s) -- it will load on next start", exc.reason)
-        return False
+        return True
 
 
 def _duration(seconds: float) -> str:
@@ -217,7 +238,13 @@ def main() -> int:
         ran.append(step.name)
 
     if RELOAD in wanted:
-        reload_api(args.api_url)
+        if not reload_api(args.api_url):
+            logger.error(
+                "Stopping: every file was refreshed, but the running site is "
+                "still serving the old model. That is exactly the mix of old "
+                "and new this job refuses to leave behind."
+            )
+            return 1
         ran.append(RELOAD)
 
     logger.info(

@@ -111,7 +111,23 @@ class State:
 state = State()
 
 
-def _load_state() -> dict[str, int]:
+class IncompatibleModelError(RuntimeError):
+    """A newly trained model needs features this process cannot build.
+
+    Raised only on reload, where there is a working model to keep. See
+    `_load_state` for why that distinction matters.
+    """
+
+    def __init__(self, version: str, missing: list[str]) -> None:
+        self.version = version
+        self.missing = missing
+        super().__init__(
+            f"model {version} expects {len(missing)} feature(s) this process "
+            f"cannot build, e.g. {missing[:3]}"
+        )
+
+
+def _load_state(startup: bool = False) -> dict[str, int]:
     """Read every CSV and the model artifact into `state`.
 
     Shared by startup and `POST /admin/reload`. The weekly job rewrites these
@@ -119,26 +135,54 @@ def _load_state() -> dict[str, int]:
     site would serve last week's ratings until someone restarted it by hand --
     which is exactly the staleness the job exists to prevent.
 
-    Returns what was loaded, so a reload can report it rather than claiming
-    success silently.
+    Args:
+        startup: True when there is no previously-loaded state to fall back to.
+
+    Returns:
+        What was loaded, so a reload can report it rather than claiming success
+        silently.
+
+    Raises:
+        IncompatibleModelError: On reload, when the artifact needs features this
+            process cannot build. The running state is left untouched.
     """
-    state.model, state.metadata = registry.load()
-    logger.info("Loaded model %s", state.metadata.version)
+    # Into locals first. `reload` swaps in a model trained by another process,
+    # and that process may be running newer feature code than this one: on
+    # 2026-09-24 a server started the previous day loaded a model built with
+    # Elo, could not produce `home_elo`, and every /matches call died on a
+    # KeyError. Publishing only after the pair is proven consistent means a bad
+    # artifact costs a refused reload instead of a broken site.
+    model, metadata = registry.load()
+    logger.info("Loaded model %s", metadata.version)
 
     path = PROCESSED_DIR / "team_match_history_all.csv"
-    state.tmh = load_team_match_history(path)
-    state.strength = load_team_strength()
-    state.features = build_match_features(state.tmh, strength=state.strength)
+    tmh = load_team_match_history(path)
+    strength = load_team_strength()
+    features = build_match_features(tmh, strength=strength)
 
-    # Fail loudly at startup rather than on the first request: an artifact
-    # trained with columns this process cannot build would 500 every prediction.
-    missing = [c for c in state.metadata.feature_names if c not in state.features.columns]
+    missing = [c for c in metadata.feature_names if c not in features.columns]
+    if missing and not startup:
+        # Keep serving what works. The fix is a restart, not a retrain -- the
+        # artifact is fine, this process is the stale half.
+        logger.error(
+            "Refusing to load model %s: it expects %d feature(s) this process "
+            "cannot build, e.g. %s. Still serving %s. This usually means the "
+            "feature code changed since the server started -- restart it.",
+            metadata.version, len(missing), missing[:3],
+            state.metadata.version if state.metadata else "nothing",
+        )
+        raise IncompatibleModelError(metadata.version, missing)
     if missing:
+        # At startup there is nothing to fall back to, so serve what works and
+        # say loudly what does not. Half a site beats none.
         logger.error(
             "Model %s expects %d feature(s) the API cannot build, e.g. %s -- "
-            "retrain with `python -m pipelines.train`",
-            state.metadata.version, len(missing), missing[:3],
+            "predictions will fail; retrain with `python -m pipelines.train`",
+            metadata.version, len(missing), missing[:3],
         )
+
+    state.model, state.metadata = model, metadata
+    state.tmh, state.strength, state.features = tmh, strength, features
     state.columns = feature_columns(state.features)
     state.form_index = build_index(state.tmh)
 
@@ -186,7 +230,7 @@ def _load_state() -> dict[str, int]:
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Load the model and history once, at startup."""
-    _load_state()
+    _load_state(startup=True)
     yield
 
 
@@ -338,7 +382,24 @@ def reload_state() -> dict[str, object]:
     the permissive CORS policy above does *not* make it remotely reachable, but
     a future bind to 0.0.0.0 would.
     """
-    loaded = _load_state()
+    try:
+        loaded = _load_state()
+    except IncompatibleModelError as exc:
+        # 409, not 500: nothing is broken, the request simply cannot be honoured
+        # by a process running older feature code than the artifact it was asked
+        # to load. The previous model is still being served.
+        raise HTTPException(
+            409,
+            {
+                "reloaded": False,
+                "reason": "model needs features this process cannot build",
+                "model_version": exc.version,
+                "serving": state.metadata.version if state.metadata else None,
+                "missing_features": exc.missing[:10],
+                "fix": "restart the API so it runs the current feature code",
+            },
+        ) from exc
+
     logger.info("Reloaded on request: %s", loaded)
     return {"reloaded": True, "model_version": state.metadata.version, **loaded}
 
