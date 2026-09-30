@@ -34,6 +34,7 @@ from footballml.models.dixon_coles import (
     outcome_probs,
     over_under,
     score_matrix,
+    top_scores,
 )
 
 #: Conservative defaults for a few thousand training rows. Deliberately *not*
@@ -54,6 +55,13 @@ DEFAULT_GBM_PARAMS: dict[str, Any] = {
 logger = logging.getLogger(__name__)
 
 OUTCOMES = ("H", "D", "A")
+
+#: How many scorelines `predict_frame` reports.
+#:
+#: Three is enough to show the shape without turning the card into a table: the
+#: leader typically clears the runner-up by about a percentage point, which is
+#: the fact a single number hides.
+TOP_SCORES = 3
 
 
 @dataclass
@@ -144,6 +152,11 @@ class MatchPredictor:
         matrix = score_matrix(mu_h, mu_a, rho=self.rho_, max_goals=self.max_goals)
         probs = outcome_probs(matrix)
         modal = most_likely_score(matrix)
+        # Three, not one: see `top_scores` for why a single score misrepresents
+        # this distribution. `modal` stays as it is -- the stored prediction
+        # record and score_upcoming both write it, and rewriting what a past
+        # prediction said is not on the table.
+        scores, score_probs = top_scores(matrix, n=TOP_SCORES)
 
         return pd.DataFrame(
             {
@@ -162,6 +175,15 @@ class MatchPredictor:
                 "prob_modal_score": matrix[
                     np.arange(len(modal)), modal[:, 0], modal[:, 1]
                 ],
+                **{
+                    f"score_{k}_{part}": values
+                    for k in range(TOP_SCORES)
+                    for part, values in (
+                        ("home", scores[:, k, 0]),
+                        ("away", scores[:, k, 1]),
+                        ("prob", score_probs[:, k]),
+                    )
+                },
                 "prob_over_2_5": over_under(matrix, 2.5),
                 "prob_btts": both_teams_score(matrix),
             },

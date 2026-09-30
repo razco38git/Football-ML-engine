@@ -29,6 +29,7 @@ from footballml.api.schemas import (
     CalibrationBin,
     Driver,
     Health,
+    LikelyScore,
     MatchResult,
     MatchResultPage,
     ModelInfo,
@@ -59,7 +60,7 @@ from footballml.models.evaluate import (
     evaluate,
     odds_implied_probs,
 )
-from footballml.models.match_model import OUTCOMES, feature_columns
+from footballml.models.match_model import OUTCOMES, TOP_SCORES, feature_columns
 from footballml.players.similarity import (
     SUB_RATINGS,
     attribute_set,
@@ -261,6 +262,24 @@ def _form(team: str, before: pd.Timestamp) -> TeamForm:
     return TeamForm(**vars(recent_form(state.form_index, team, before)))
 
 
+def _likely_scores(row: pd.Series) -> list[LikelyScore]:
+    """The top scorelines off a scored row, if it carries them.
+
+    Stored predictions written before these columns existed simply have none,
+    and an empty list is the honest answer -- back-filling them from today's
+    model would put numbers the prediction never made into the record.
+    """
+    out: list[LikelyScore] = []
+    for k in range(TOP_SCORES):
+        home, away, prob = (row.get(f"score_{k}_{part}") for part in ("home", "away", "prob"))
+        if pd.isna(home) or pd.isna(away) or pd.isna(prob):
+            continue
+        out.append(
+            LikelyScore(home=int(home), away=int(away), probability=round(float(prob), 4))
+        )
+    return out
+
+
 def _to_predictions(
     frame: pd.DataFrame, drivers: list[dict] | None = None, with_form: bool = True
 ) -> list[Prediction]:
@@ -285,6 +304,7 @@ def _to_predictions(
                 if pd.notna(r.get("prob_modal_score"))
                 else None
             ),
+            likely_scores=_likely_scores(r),
             prob_over_2_5=round(float(r["prob_over_2_5"]), 4),
             prob_btts=round(float(r["prob_btts"]), 4),
         )

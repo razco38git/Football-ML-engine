@@ -261,6 +261,30 @@ function MatchCard({ p }: { p: Prediction }) {
               likeliest exact score
               {p.prob_modal_score != null && ` · ${pct(p.prob_modal_score)}`}
             </div>
+
+            {/*
+              The runners-up, which are the point. The leader clears them by
+              about a percentage point, so showing one score alone invites the
+              reader to treat a ~10% event as the forecast — and since a draw's
+              mass sits on the diagonal while a win is spread across many
+              scorelines, that leader is a draw in 63% of matches even when a
+              side is a clear favourite. Seeing 1-1 11% · 2-1 10% · 2-0 9%
+              settles the apparent contradiction without changing a number.
+            */}
+            {p.likely_scores?.length > 1 && (
+              <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                {p.likely_scores.slice(1).map(s => (
+                  <span
+                    key={`${s.home}-${s.away}`}
+                    className="px-1.5 py-0.5 rounded font-data"
+                    style={{ background: 'var(--secondary)', border: '1px solid var(--border)' }}
+                    title={`${s.home}-${s.away} in ${pct(s.probability)} of simulations`}
+                  >
+                    {s.home}-{s.away} <span style={{ opacity: 0.7 }}>{pct(s.probability)}</span>
+                  </span>
+                ))}
+              </div>
+            )}
             <div
               className="text-xs font-display font-bold px-2 py-0.5 rounded-full tracking-wide text-center"
               style={{ background: outcomeColor + '22', color: outcomeColor, border: `1px solid ${outcomeColor}44` }}

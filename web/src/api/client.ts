@@ -29,6 +29,12 @@ export interface Driver {
   contribution: number;
 }
 
+export interface LikelyScore {
+  home: number;
+  away: number;
+  probability: number;
+}
+
 export interface Prediction {
   league: string;
   date: string;
@@ -45,6 +51,14 @@ export interface Prediction {
   prob_modal_score: number | null;
   modal_score_home: number;
   modal_score_away: number;
+  /**
+   * The likeliest few scorelines, likeliest first; the first is the modal one
+   * above. Shown as a group because one score on its own reads as the forecast
+   * and appears to contradict the outcome — an outcome sums a whole triangle of
+   * scorelines while a draw's mass sits on the diagonal, so the leader is a
+   * draw in 63% of matches. Empty for predictions stored before this existed.
+   */
+  likely_scores: LikelyScore[];
   prob_over_2_5: number;
   prob_btts: number;
 

@@ -59,6 +59,14 @@ class TeamForm(BaseModel):
     venues: list[str] = Field(default_factory=list)
 
 
+class LikelyScore(BaseModel):
+    """One candidate scoreline and how likely the model thinks it is."""
+
+    home: int
+    away: int
+    probability: float
+
+
 class Prediction(BaseModel):
     league: str
     date: date
@@ -77,6 +85,12 @@ class Prediction(BaseModel):
     #: probability that sums dozens of scorelines -- the page must not present
     #: the two as if they were the same claim.
     prob_modal_score: float | None = None
+    #: The likeliest few scorelines, likeliest first, the first being the modal
+    #: one above. One score on its own reads as the forecast and appears to
+    #: contradict the outcome -- "1-1" beside "Home win 57%" -- because an
+    #: outcome sums a whole triangle of scorelines while a draw's mass sits on
+    #: the diagonal. Empty for predictions stored before this existed.
+    likely_scores: list[LikelyScore] = Field(default_factory=list)
     prob_over_2_5: float
     prob_btts: float
 

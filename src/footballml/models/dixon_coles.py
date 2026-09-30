@@ -110,6 +110,43 @@ def most_likely_score(matrix: np.ndarray) -> np.ndarray:
     return np.column_stack(np.unravel_index(flat, (size, size)))
 
 
+def top_scores(matrix: np.ndarray, n: int = 3) -> tuple[np.ndarray, np.ndarray]:
+    """The ``n`` likeliest scorelines per match, likeliest first.
+
+    One scoreline on its own is a misleading summary of this distribution, and
+    the reason is structural rather than a quirk of any fixture. An outcome
+    probability sums a whole triangle of the matrix -- a home win collects 1-0,
+    2-0, 2-1, 3-1 and the rest -- while a draw's mass piles into the few cells on
+    the diagonal. So 1-1 is the single likeliest score in 63% of matches even
+    though the home side is usually the likeliest *winner*, and a card showing
+    only "1-1" beside "Home win 57%" reads as a contradiction it is not.
+
+    Showing three makes the shape visible: the leader rarely clears the runner-up
+    by more than a point or two.
+
+    Args:
+        matrix: ``(n_matches, size, size)`` scoreline probabilities.
+        n: How many scorelines to return.
+
+    Returns:
+        ``(scores, probs)`` where ``scores`` is ``(n_matches, n, 2)`` of
+        ``[home, away]`` and ``probs`` is ``(n_matches, n)``. The first entry of
+        each row is exactly :func:`most_likely_score`.
+    """
+    count, size, _ = matrix.shape
+    n = min(n, size * size)
+    flat = matrix.reshape(count, -1)
+
+    # argpartition finds the n largest without sorting all 121 cells, then only
+    # those n are sorted. Ordering matters -- the display leads with the best.
+    top = np.argpartition(-flat, n - 1, axis=1)[:, :n]
+    rows = np.arange(count)[:, None]
+    top = np.take_along_axis(top, np.argsort(-flat[rows, top], axis=1), axis=1)
+
+    home, away = np.unravel_index(top, (size, size))
+    return np.stack([home, away], axis=-1), flat[rows, top]
+
+
 def over_under(matrix: np.ndarray, line: float = 2.5) -> np.ndarray:
     """P(total goals above ``line``). Use a half-goal line to avoid pushes."""
     size = matrix.shape[1]
