@@ -15,14 +15,34 @@ Four steps, each of which can be inspected on its own:
 4. **Scale.** The shrunk composite's percentile maps onto 0-99 through the
    anchors in the config.
 
+A fifth step sits outside those four: the scaled performance rating is blended
+with EA's overall, half and half, by ``_blend_with_fifa``. ``rating`` is that
+blend; ``performance_rating`` is the number this module computes on its own, and
+both are carried so a reader can see which half is doing the work.
+
 Everything debatable is a number in the YAML, not a decision buried in code.
 
 .. note::
-    Two limitations are structural to the data rather than the method, and are
-    surfaced rather than papered over. Goalkeepers are not rated at all -- the
-    source has no saves or post-shot xG. And defenders are rated on attacking
-    involvement, because tackles and interceptions are not available either, so
-    an attacking full-back will out-rate a superb stay-at-home centre-back.
+    **What this can and cannot see.** Goalkeepers *are* rated, on save
+    percentage, goals against, clean sheets and penalties saved -- 72% of a
+    keeper's composite is shot-stopping. Outfield defending is real too:
+    possession-adjusted interceptions and tackles carry 62% of a centre-back's
+    composite and reach 92% of them, via FBref.
+
+    What is genuinely missing is anything needing event-level data -- every
+    touch with its location and outcome. So there is no xThreat, no VAEP, no
+    carries or progressive actions, no duels, no post-shot xG, and no
+    open-play/set-piece split. Those are not gaps in the method but in the
+    sources: Understat and FBref publish season aggregates, and no weighting of
+    aggregates reconstructs them.
+
+    The consequence worth knowing: defending is measured by *volume* of
+    defensive actions, not by their quality or by chances prevented. A
+    centre-back who positions well and rarely needs to tackle rates below one
+    who tackles constantly. Measured against next-season goals conceded, the
+    defence line reaches -0.48 where squad overall reaches -0.52 -- the defence
+    number is the weaker of the two, and the match model has learned to
+    discount it.
 """
 
 from __future__ import annotations
