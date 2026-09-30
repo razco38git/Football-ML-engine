@@ -75,22 +75,43 @@ function TeamSide({ team, form, league, align }: {
       </div>
 
       {/*
-        Says "last N" because it sits beside the fixture's own xG forecast and
-        was read as one. Barcelona came into Sevilla averaging 4.32 xG over five
-        matches against four bottom-eight defences; the forecast was 2.10, and
-        the gap looked like an error rather than the regression it is. The count
-        comes from the data rather than a hardcoded 5, so it stays true if the
+        Both halves of the form, because one alone misleads in opposite
+        directions. Says "last N" for the same reason: this sits beside the
+        fixture's own xG forecast and was read as one. Barcelona came into
+        Sevilla averaging 4.32 xG over five matches against four bottom-eight
+        defences and the forecast was 2.10, which looked like an error rather
+        than the regression it is.
+
+        Labelled xG and xGA, not colour alone: green-for-created and
+        red-for-conceded would be invisible to a red-green colourblind reader,
+        and these two numbers are meaningless the wrong way round. The colours
+        stay as reinforcement. Each label is kept with its number by
+        `whitespace-nowrap`, or a phone wraps "xGA" onto one line and 1.71 onto
+        the next, which reads as the wrong number against the wrong word. The
+        count comes from the data, not a hardcoded 5, so it stays true if the
         form window ever changes.
       */}
       <div className={`flex gap-3 text-xs ${right ? 'flex-row-reverse' : ''}`} style={{ color: 'var(--muted-foreground)' }}>
         {!!form?.xg_for.length && (
-          <span>
-            Avg xG (last {form.xg_for.length}):{' '}
-            <span className="font-data font-bold text-white">{mean(form.xg_for).toFixed(2)}</span>
+          <span title={`Average xG created and conceded over the last ${form.xg_for.length} matches`}>
+            <span className="whitespace-nowrap">
+              xG <span className="font-data font-bold" style={{ color: '#00e676' }}>
+                {mean(form.xg_for).toFixed(2)}
+              </span>
+            </span>
+            <span style={{ opacity: 0.5 }}> · </span>
+            <span className="whitespace-nowrap">
+              xGA <span className="font-data font-bold" style={{ color: '#f44336' }}>
+                {mean(form.xg_against).toFixed(2)}
+              </span>
+              <span style={{ opacity: 0.6 }}> (last {form.xg_for.length})</span>
+            </span>
           </span>
         )}
         {!!form?.shots_on_target.length && (
-          <span>SOT: <span className="font-data font-bold text-white">{mean(form.shots_on_target).toFixed(1)}</span></span>
+          <span title={`Average shots on target over the last ${form.shots_on_target.length} matches`}>
+            SOT: <span className="font-data font-bold text-white">{mean(form.shots_on_target).toFixed(1)}</span>
+          </span>
         )}
       </div>
     </div>
