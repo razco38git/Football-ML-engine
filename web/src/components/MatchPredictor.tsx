@@ -50,15 +50,15 @@ function TeamSide({ team, form, league, align }: {
   const right = align === 'right';
   const color = teamColor(team);
   return (
-    <div className={`flex flex-col gap-2 ${right ? 'items-end' : ''}`}>
-      <div className={`flex items-center gap-2 ${right ? 'flex-row-reverse' : ''}`}>
+    <div className={`flex flex-col gap-2 ${right ? 'sm:items-end' : ''}`}>
+      <div className={`flex items-center gap-2 ${right ? 'sm:flex-row-reverse' : ''}`}>
         <div
           className="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-bold font-display flex-shrink-0"
           style={{ background: color + '22', border: `1px solid ${color}44`, color }}
         >
           {shortName(team)}
         </div>
-        <div className={right ? 'text-right' : ''}>
+        <div className={right ? 'sm:text-right' : ''}>
           <div className="font-display font-bold text-lg leading-tight" style={{ color: 'var(--foreground)' }}>
             {team}
           </div>
@@ -68,7 +68,7 @@ function TeamSide({ team, form, league, align }: {
         </div>
       </div>
 
-      <div className={`flex gap-1 ${right ? 'flex-row-reverse' : ''}`}>
+      <div className={`flex gap-1 ${right ? 'sm:flex-row-reverse' : ''}`}>
         {form?.results.length
           ? form.results.map((r, i) => <FormBadge key={i} result={r} />)
           : <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>no prior matches</span>}
@@ -91,7 +91,7 @@ function TeamSide({ team, form, league, align }: {
         count comes from the data, not a hardcoded 5, so it stays true if the
         form window ever changes.
       */}
-      <div className={`flex gap-3 text-xs ${right ? 'flex-row-reverse' : ''}`} style={{ color: 'var(--muted-foreground)' }}>
+      <div className={`flex flex-wrap gap-3 text-xs ${right ? 'sm:flex-row-reverse' : ''}`} style={{ color: 'var(--muted-foreground)' }}>
         {!!form?.xg_for.length && (
           <span title={`Average xG created and conceded over the last ${form.xg_for.length} matches`}>
             <span className="whitespace-nowrap">
@@ -255,7 +255,12 @@ function MatchCard({ p }: { p: Prediction }) {
       </div>
 
       <div className="p-5">
-        <div className="grid items-center gap-4" style={{ gridTemplateColumns: '1fr auto 1fr' }}>
+        {/*
+          Three columns on a desktop, stacked on a phone. At 375px the fixed
+          `1fr auto 1fr` pushed the away side off the right edge of the card --
+          its badge and form pills were simply unreachable.
+        */}
+        <div className="grid items-center gap-4 grid-cols-1 sm:grid-cols-[1fr_auto_1fr]">
           <TeamSide team={p.home_team} form={p.form_home} league={p.league} align="left" />
 
           <div className="flex flex-col items-center gap-2">
