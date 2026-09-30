@@ -663,6 +663,8 @@ def _to_player(row: pd.Series) -> PlayerRating:
         unrated_reason=(
             None if pd.isna(row.get("unrated_reason")) else str(row["unrated_reason"])
         ),
+        fifa_overall=num("fifa_overall", int),
+        performance_rating=num("performance_rating", int),
         **{f"sub_{name}": num(f"sub_{name}", int) for name in _PLAYER_SUBS},
         **{
             stat: num(stat, int if stat in {"goals", "assists"} else float)
@@ -679,6 +681,23 @@ def _to_player(row: pd.Series) -> PlayerRating:
 #: full season -- and because the default was simply the latest season with any
 #: ratings, the page silently switched to those 181 and searching for anyone
 #: else returned nothing. The same reasoning as `MIN_RATED_PLAYERS` for teams.
+#: Columns the player table may be sorted by.
+#:
+#: An allowlist rather than "any column that exists": the sort silently did
+#: nothing for an unrecognised name, so a typo or a renamed column returned
+#: whatever order the file happened to be in, looking every bit as deliberate
+#: as a real sort.
+#:
+#: The sub-ratings are here even though they are position-dependent -- a
+#: forward has no `sub_defending` -- because sorting by one is meaningful once
+#: the caller has filtered to a position, which is exactly what the page does.
+SORTABLE: frozenset[str] = frozenset({
+    "rating", "minutes", "fifa_overall", "performance_rating",
+    "position_group", "role", "Player", "Team", "League", "Season",
+    "goals", "assists", "np_xg", "xa",
+    *(f"sub_{name}" for name in _PLAYER_SUBS),
+})
+
 MIN_SEASON_SHARE = 0.5
 
 
@@ -722,6 +741,13 @@ def players(
     if min_rating:
         rows = rows[rows["rating"] >= min_rating]
 
+    if sort not in SORTABLE:
+        raise HTTPException(
+            400,
+            f"Cannot sort by {sort!r}. A silently ignored sort returns rows in "
+            f"an arbitrary order that looks deliberate. Sortable: "
+            f"{', '.join(sorted(SORTABLE))}",
+        )
     if sort in rows.columns:
         rows = rows.sort_values(sort, ascending=not descending, na_position="last")
 

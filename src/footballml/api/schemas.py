@@ -140,6 +140,15 @@ class PlayerRating(BaseModel):
     rated: bool
     unrated_reason: str | None = None
 
+    #: The two halves behind `rating`, so a reader can see which one is doing
+    #: the work. They are blended 50/50 (see config/player_rating.yaml), and
+    #: they disagree often: a player can hold a high EA overall on reputation
+    #: while this season's output says otherwise, or vice versa.
+    #: `fifa_overall` is EA's own 0-99 number, absent for the ~8% with no EA
+    #: entry; `performance_rating` is ours, from per-90 output alone.
+    fifa_overall: int | None = None
+    performance_rating: int | None = None
+
     #: Populated per position group; a forward has no defending sub-rating.
     sub_finishing: int | None = None
     sub_creation: int | None = None

@@ -235,6 +235,24 @@ export default function PlayerDatabase() {
     [league, position, minRating, search, sort, descending],
   );
 
+  // Empty while "All positions" is selected, which is what makes the attribute
+  // headers unsortable there.
+  const selectedAttributes = position === 'All' ? [] : (ATTRIBUTES[position] ?? []);
+
+  // Changing position can strand the sort on an attribute the new position does
+  // not have -- forwards have no `sub_defending` -- which would quietly rank
+  // everyone by a column of dashes. Fall back to the overall rating.
+  const changePosition = (next: string) => {
+    setPosition(next);
+    if (sort.startsWith('sub_')) {
+      const allowed = next === 'All' ? [] : (ATTRIBUTES[next] ?? []);
+      if (!allowed.some(a => a.key === sort)) {
+        setSort('rating');
+        setDescending(true);
+      }
+    }
+  };
+
   const toggleSort = (col: string) => {
     if (sort === col) setDescending(d => !d);
     else {
@@ -287,7 +305,7 @@ export default function PlayerDatabase() {
         </select>
         <select
           value={position}
-          onChange={e => setPosition(e.target.value)}
+          onChange={e => changePosition(e.target.value)}
           className="px-3 py-2 rounded-lg text-sm"
           style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
         >
@@ -348,16 +366,31 @@ export default function PlayerDatabase() {
                   </th>
                   <SortHeader col="position_group" label="Pos" />
                   <SortHeader col="rating" label="OVR" />
+                  <SortHeader col="fifa_overall" label="EA" />
+                  <SortHeader col="performance_rating" label="Perf" />
                   <SortHeader col="minutes" label="Min" />
-                  {SLOTS.map(i => (
-                    <th
-                      key={i}
-                      className="px-2 py-2 text-xs font-display font-bold uppercase tracking-wider"
-                      style={{ color: 'var(--muted-foreground)' }}
-                    >
-                      {`Attr ${i + 1}`}
-                    </th>
-                  ))}
+                  {/*
+                    Sortable only once a position is chosen. These columns are
+                    position-dependent -- slot 1 is DEF for a centre-back and
+                    FIN for a forward -- so sorting one across a mixed table
+                    would rank a defender's tackling against a striker's
+                    finishing and present it as a single ranking.
+                  */}
+                  {SLOTS.map(i => {
+                    const attribute = selectedAttributes[i];
+                    return attribute ? (
+                      <SortHeader key={i} col={attribute.key} label={attribute.short} />
+                    ) : (
+                      <th
+                        key={i}
+                        className="px-2 py-2 text-xs font-display font-bold uppercase tracking-wider"
+                        style={{ color: 'var(--muted-foreground)' }}
+                        title="Pick a position to sort by this attribute — it means something different for each one"
+                      >
+                        {`Attr ${i + 1}`}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
@@ -398,6 +431,18 @@ export default function PlayerDatabase() {
                       </td>
                       <td className="px-2 py-2 text-center">
                         <RatingBadge value={p.rating} />
+                      </td>
+                      {/*
+                        Muted, not badged. These are the inputs to OVR, not
+                        peers of it, and three equally loud numbers in a row
+                        would leave a reader unsure which one the site means.
+                        A dash where EA has no entry, which is ~8% of players.
+                      */}
+                      <td className="px-2 py-2 text-center text-xs font-data" style={{ color: 'var(--muted-foreground)' }}>
+                        {p.fifa_overall ?? '—'}
+                      </td>
+                      <td className="px-2 py-2 text-center text-xs font-data" style={{ color: 'var(--muted-foreground)' }}>
+                        {p.performance_rating ?? '—'}
                       </td>
                       <td className="px-2 py-2 text-center text-xs font-data" style={{ color: 'var(--muted-foreground)' }}>
                         {p.minutes.toLocaleString()}

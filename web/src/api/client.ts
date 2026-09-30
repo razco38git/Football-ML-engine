@@ -213,6 +213,14 @@ export interface PlayerRating {
   rated: boolean;
   unrated_reason: string | null;
 
+  /**
+   * The two halves behind `rating`, blended 50/50. They disagree often — a
+   * player can hold a high EA overall on reputation while this season's output
+   * says otherwise. `fifa_overall` is null for the ~8% with no EA entry.
+   */
+  fifa_overall: number | null;
+  performance_rating: number | null;
+
   sub_finishing: number | null;
   sub_creation: number | null;
   sub_involvement: number | null;
