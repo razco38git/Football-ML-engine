@@ -74,9 +74,20 @@ function TeamSide({ team, form, league, align }: {
           : <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>no prior matches</span>}
       </div>
 
+      {/*
+        Says "last N" because it sits beside the fixture's own xG forecast and
+        was read as one. Barcelona came into Sevilla averaging 4.32 xG over five
+        matches against four bottom-eight defences; the forecast was 2.10, and
+        the gap looked like an error rather than the regression it is. The count
+        comes from the data rather than a hardcoded 5, so it stays true if the
+        form window ever changes.
+      */}
       <div className={`flex gap-3 text-xs ${right ? 'flex-row-reverse' : ''}`} style={{ color: 'var(--muted-foreground)' }}>
         {!!form?.xg_for.length && (
-          <span>Avg xG: <span className="font-data font-bold text-white">{mean(form.xg_for).toFixed(2)}</span></span>
+          <span>
+            Avg xG (last {form.xg_for.length}):{' '}
+            <span className="font-data font-bold text-white">{mean(form.xg_for).toFixed(2)}</span>
+          </span>
         )}
         {!!form?.shots_on_target.length && (
           <span>SOT: <span className="font-data font-bold text-white">{mean(form.shots_on_target).toFixed(1)}</span></span>
