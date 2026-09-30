@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { api, LEAGUE_NAMES, type PlayerRating } from '../api/client';
-import { teamColor } from '../api/display';
+import { getRatingBg, getRatingTextColor, teamColor } from '../api/display';
 import { useAsync } from '../api/hooks';
-import { getRatingBg, getRatingTextColor } from '../data/footballData';
 
 const POSITIONS: Record<string, string> = {
   GK: 'Goalkeeper',

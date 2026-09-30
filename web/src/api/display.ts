@@ -100,3 +100,26 @@ export function verdict(p: {
   }
   return { label: 'Draw', color: '#ffea00', decisive: true };
 }
+
+/**
+ * Band colours for a 0-99 rating, and readable text over them.
+ *
+ * Moved here from the mock-data module, which the site stopped using once
+ * every tab ran on the API but which survived 868 lines longer than it needed
+ * to because these two functions lived inside it.
+ *
+ * The bands are the EA FC convention the Player Ratings page is styled on:
+ * green for elite, through lime and amber, to red. Text flips to white only on
+ * the darkest band, where black would be unreadable.
+ */
+export function getRatingBg(r: number): string {
+  if (r >= 85) return '#00e676';
+  if (r >= 70) return '#76ff03';
+  if (r >= 60) return '#ffea00';
+  if (r >= 50) return '#ff9100';
+  return '#f44336';
+}
+
+export function getRatingTextColor(r: number): string {
+  return r >= 50 ? '#000' : '#fff';
+}

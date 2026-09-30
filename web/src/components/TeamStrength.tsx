@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { api, LEAGUE_NAMES, type PlayerRating, type TeamStrength } from '../api/client';
-import { teamColor } from '../api/display';
+import { getRatingBg, getRatingTextColor, teamColor } from '../api/display';
 import { useAsync } from '../api/hooks';
-import { getRatingBg, getRatingTextColor } from '../data/footballData';
 
 const LINES: { key: keyof TeamStrength; label: string }[] = [
   { key: 'strength_goalkeeper', label: 'GK' },
