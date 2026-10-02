@@ -389,7 +389,11 @@ def _with_clubs(ea_rows: list[dict], players: list[dict]) -> tuple[pd.DataFrame,
             squad.append({"Player": name, "Team": team})
     frame = pd.DataFrame(squad)
     frame["Season"] = "2526"
-    frame["position_group"] = "M"
+    # Only where a case has not said otherwise: the position-contradiction
+    # tests turn on this column, so it cannot be overwritten for everyone.
+    if "position_group" not in frame.columns:
+        frame["position_group"] = "M"
+    frame["position_group"] = frame["position_group"].fillna("M")
     return frame, _export(rows)
 
 
@@ -581,3 +585,159 @@ def test_nothing_already_matched_is_disturbed():
     )
     before = attach_fifa(players, export)
     assert before["fifa_overall"].notna().sum() == len(before)
+
+
+# --- a match to the wrong man usually disagrees about the position ---------
+#
+# Name keys cannot tell two people apart when they share a name, and the
+# damage is not limited to the rating: `role` comes from the EA entry too, so a
+# wrong match moves the player between lines of `team_strength`. Aston Villa's
+# Emiliano Martínez spent two seasons and 6,500 minutes as a midfielder,
+# leaving the club with no goalkeeper line at all.
+
+
+def test_a_goalkeeper_is_never_matched_to_an_outfielder():
+    """Both directions, and the single boundary nobody crosses.
+
+    "Emiliano Martínez" is a goalkeeper at Aston Villa and an outfielder at
+    Club Nacional, and the surname tier took the wrong one unopposed.
+    """
+    players, export = _with_clubs(
+        [{"fifa_name": "emiliano martinez toranza", "fifa_club": "Club Nacional",
+          "fifa_overall": 68.0, "role": "MID", "Season": "2526"}],
+        [{"Player": "emiliano martinez", "Team": "Aston Villa", "position_group": "GK"}],
+    )
+    matched = attach_fifa(players, export)
+    assert pd.isna(_overall(matched, "emiliano martinez", "Aston Villa"))
+
+
+def test_the_right_man_is_found_once_the_wrong_one_is_ruled_out():
+    """Filtering before the tiers count candidates, not after one picks.
+
+    With the Uruguayan removed the bucket holds exactly one plausible entry,
+    so the uniqueness guard resolves instead of refusing.
+    """
+    players, export = _with_clubs(
+        [{"fifa_name": "emiliano martinez toranza", "fifa_club": "Club Nacional",
+          "fifa_overall": 68.0, "role": "MID", "Season": "2526"},
+         {"fifa_name": "damian emiliano martinez", "fifa_club": "Aston Villa",
+          "fifa_overall": 84.0, "role": "GK", "Season": "2526"}],
+        [{"Player": "emiliano martinez", "Team": "Aston Villa", "position_group": "GK"}],
+    )
+    matched = attach_fifa(players, export)
+    assert _overall(matched, "emiliano martinez", "Aston Villa") == 84.0
+
+
+def test_an_exact_name_match_is_checked_too():
+    """Two different men can share a normalised name.
+
+    Atalanta's midfielder Éderson and Manchester City's keeper Ederson both
+    reduce to "ederson", and the exact merge runs before any tier that could
+    have second thoughts.
+    """
+    players, export = _with_clubs(
+        [{"fifa_name": "ederson", "fifa_club": "Manchester City",
+          "fifa_overall": 88.0, "role": "GK", "Season": "2526"}],
+        [{"Player": "ederson", "Team": "Barcelona", "position_group": "M"}],
+    )
+    matched = attach_fifa(players, export)
+    assert pd.isna(_overall(matched, "ederson", "Barcelona"))
+
+
+def test_a_forward_is_not_a_centre_back():
+    """Espanyol's Sergio García carried Sergio Ramos' rating for three
+    seasons -- 87, 90 and 91 -- on a shared surname."""
+    players, export = _with_clubs(
+        [{"fifa_name": "sergio ramos garcia", "fifa_club": "Real Madrid CF",
+          "fifa_overall": 91.0, "role": "CB", "Season": "2526"}],
+        [{"Player": "sergio garcia", "Team": "Barcelona", "position_group": "F"}],
+    )
+    matched = attach_fifa(players, export)
+    assert pd.isna(_overall(matched, "sergio garcia", "Barcelona"))
+
+
+def test_a_wing_back_filed_as_a_defender_still_matches():
+    """The boundaries are narrow on purpose. Understat calls wing-backs "D"
+    and EA calls them LM or RW -- 1,073 player-seasons, nearly all correct --
+    so that disagreement must not be read as two different people."""
+    players, export = _with_clubs(
+        [{"fifa_name": "marc cucurella saseta", "fifa_club": "FC Barcelona",
+          "fifa_overall": 81.0, "role": "AMW", "Season": "2526"}],
+        [{"Player": "marc cucurella", "Team": "Barcelona", "position_group": "D"}],
+    )
+    matched = attach_fifa(players, export)
+    assert _overall(matched, "marc cucurella", "Barcelona") == 81.0
+
+
+def test_a_withdrawn_forward_still_matches_a_midfielder():
+    """Forward-to-midfield is deliberately not a contradiction: false nines
+    and withdrawn forwards cross it constantly."""
+    players, export = _with_clubs(
+        [{"fifa_name": "lionel andres messi cuccittini", "fifa_club": "FC Barcelona",
+          "fifa_overall": 93.0, "role": "MID", "Season": "2526"}],
+        [{"Player": "lionel messi", "Team": "Barcelona", "position_group": "F"}],
+    )
+    matched = attach_fifa(players, export)
+    assert _overall(matched, "lionel messi", "Barcelona") == 93.0
+
+
+def test_a_sole_surname_holder_is_not_proof_on_its_own():
+    """Understat writes Kylian Mbappe as "Mbappe-Lottin" and EA's 2024/25
+    export does not, so the only entry keyed "lottin" was Albert-Nicolas
+    Lottin of CD Castellon. Taken unopposed, a 91-rated striker became a
+    65-rated defensive midfielder."""
+    players, export = _with_clubs(
+        [{"fifa_name": "albert nicolas lottin", "fifa_club": "CD Castellon",
+          "fifa_overall": 65.0, "role": "FWD", "Season": "2526"}],
+        [{"Player": "kylian mbappe-lottin", "Team": "Barcelona", "position_group": "F"}],
+    )
+    matched = attach_fifa(players, export)
+    assert pd.isna(_overall(matched, "kylian mbappe-lottin", "Barcelona"))
+
+
+def test_a_bare_surname_at_another_club_still_matches():
+    """The guard must not take the ordinary case with it. EA stores plenty of
+    Spanish players as a surname alone -- "Alena", "Reguilon", "Terrats" --
+    where no given name can ever agree, and those are exactly the players
+    most likely to have moved, so the club cannot rescue them either. EA's
+    name being a strict subset of ours is enough.
+    """
+    players, export = _with_clubs(
+        [{"fifa_name": "alena", "fifa_club": "Getafe CF",
+          "fifa_overall": 73.0, "role": "MID", "Season": "2526"}],
+        [{"Player": "carles alena", "Team": "Barcelona", "position_group": "M"}],
+    )
+    matched = attach_fifa(players, export)
+    assert _overall(matched, "carles alena", "Barcelona") == 73.0
+
+
+def test_every_role_is_accounted_for_in_the_compatibility_table():
+    """A role missing from the table rejects wholesale, not narrowly.
+
+    Splitting `DM` out of `MID` and forgetting to list it here made every
+    CDM-primary entry in the database contradict every player: the match rate
+    fell from 92% to 87% in a single run, and the only symptom was a number in
+    a log line. The two tables have to be checked against each other, not
+    maintained in parallel by hand.
+    """
+    from footballml.players.fifa import COMPATIBLE_ROLES, ROLE_BY_POSITION
+
+    roles = set(ROLE_BY_POSITION.values())
+    for group, allowed in COMPATIBLE_ROLES.items():
+        assert allowed <= roles, f"{group} allows a role that does not exist"
+    outfield = roles - {"GK"}
+    covered = set().union(*(a for g, a in COMPATIBLE_ROLES.items() if g != "GK"))
+    assert covered == outfield, (
+        f"outfield roles never allowed anywhere: {outfield - covered}"
+    )
+
+
+def test_the_goalkeeper_boundary_is_the_only_total_one():
+    """Everything else must be crossable from somewhere, or it is a blanket
+    rejection wearing the costume of a rule."""
+    from footballml.players.fifa import COMPATIBLE_ROLES
+
+    assert COMPATIBLE_ROLES["GK"] == {"GK"}
+    for group, allowed in COMPATIBLE_ROLES.items():
+        if group != "GK":
+            assert "GK" not in allowed, f"{group} should never reach a goalkeeper"

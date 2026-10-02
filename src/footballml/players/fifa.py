@@ -87,7 +87,21 @@ ROLE_BY_POSITION = {
     "CB": "CB",
     "LCB": "CB", "RCB": "CB",
     "LB": "FB", "RB": "FB", "LWB": "FB", "RWB": "FB",
-    "CDM": "MID", "CM": "MID", "LDM": "MID", "RDM": "MID", "LCM": "MID", "RCM": "MID",
+    # A holder and a number eight are as different as a centre-back and a
+    # full-back, and splitting those two is the precedent. Pooled, 2,028
+    # CDM-primary player-seasons were ranked for chance creation against 3,081
+    # CM-primary ones and lost: they averaged 65.3 against 70.5 and held 18%
+    # of each season's top fifty while being 40% of the pool. Given their own
+    # pool -- same weights, only a fair comparison -- the gap closes to 68.5
+    # against 68.6 and their share of the top fifty reaches 38%. Busquets
+    # gains 2-5 a season, Casemiro 1-7, Rodri 8 in 2020/21.
+    #
+    # The *weights* were tried too and are deliberately unchanged. Shifting
+    # them toward defending and build-up made the midfield line predict next
+    # season's points worse, 0.646 to 0.634, so the pool was the problem and
+    # the weights were not.
+    "CDM": "DM", "LDM": "DM", "RDM": "DM",
+    "CM": "MID", "LCM": "MID", "RCM": "MID",
     "CAM": "AMW", "LM": "AMW", "RM": "AMW", "LW": "AMW", "RW": "AMW",
     "ST": "FWD", "CF": "FWD", "LS": "FWD", "RS": "FWD", "LF": "FWD", "RF": "FWD",
 }
@@ -97,6 +111,7 @@ ROLE_LABELS = {
     "GK": "Goalkeeper",
     "CB": "Centre back",
     "FB": "Full back",
+    "DM": "Defensive midfielder",
     "MID": "Midfielder",
     "AMW": "Attacking midfielder / winger",
     "FWD": "Forward",
@@ -104,6 +119,51 @@ ROLE_LABELS = {
 
 #: Understat's coarse groups, used when a player has no EA entry.
 FALLBACK_ROLE = {"GK": "GK", "D": "CB", "M": "MID", "F": "FWD"}
+
+#: EA roles each Understat group may plausibly carry. A match outside this is
+#: taken as evidence of the wrong *person*, not of a versatile one.
+#:
+#: Deliberately generous, because the two sources disagree about position all
+#: the time and almost none of it means anything. Understat files wing-backs
+#: as "D" where EA says LM or RW -- 1,073 player-seasons, nearly all correct --
+#: and calls plenty of forwards "D" or midfielders "F". Only two boundaries
+#: survive as real:
+#:
+#: **Goalkeeper, in both directions.** Nobody is both, and it is the most
+#: damaging mismatch there is: it takes a club's keeper line away and inflates
+#: an outfield one. Aston Villa's Emiliano Martínez was matched to Emiliano
+#: Martínez Toranza of Club Nacional and spent two seasons, 6,500 minutes, as
+#: a *midfielder*. Atalanta's Éderson took Manchester City's Ederson.
+#:
+#: **Forward against centre back.** 24 player-seasons, every one a different
+#: man: Espanyol's Sergio García held Sergio Ramos' 87, 90 and 91 across three
+#: seasons, and Anthony Martial was filed as Johan Martial of Troyes.
+#:
+#: Forward-to-midfield is *not* here and must not be added: false nines and
+#: withdrawn forwards cross it constantly.
+#: Every outfield role must appear in every outfield group except where a
+#: boundary above says otherwise. Leaving one out rejects wholesale rather than
+#: narrowly: splitting `DM` out of `MID` and forgetting to list it here dropped
+#: the FIFA match rate from 92% to 87% in one run, because every CDM-primary
+#: entry in the database suddenly contradicted every player.
+_OUTFIELD = {"CB", "FB", "DM", "MID", "AMW", "FWD"}
+COMPATIBLE_ROLES = {
+    "GK": {"GK"},
+    "D": _OUTFIELD,
+    "M": _OUTFIELD,
+    "F": _OUTFIELD - {"CB"},
+}
+
+
+def contradicts_position(group: object, role: object) -> bool:
+    """Whether an EA entry's role rules it out as this player.
+
+    Unknown on either side is not a contradiction -- it is an absence.
+    """
+    if not isinstance(group, str) or not isinstance(role, str):
+        return False
+    allowed = COMPATIBLE_ROLES.get(group)
+    return allowed is not None and role not in allowed
 
 
 class FifaDataMissingError(FileNotFoundError):
@@ -466,6 +526,24 @@ def _match_loosely(
                     tokens_added.add(token_set)
                     token_sets.append((token_set, row))
 
+    def _tokens_of(row: pd.Series) -> set[str]:
+        """Every token of both names EA carries for a player.
+
+        The index is built from the legal name *and* the familiar one, so the
+        confirmation has to read both or it rejects the very rows the familiar
+        name put in the bucket. EA files Girona's Alex Granell as "Alejandro
+        Granell Nogue" with "Alex Granell" alongside: the surname key comes
+        from the second, and checking only the first threw him out -- along
+        with Javi Puado, Fede San Emeterio, Tosin Adarabioyo and Bote Baku,
+        all correct matches losing to a diminutive.
+        """
+        tokens: set[str] = set()
+        for column in ("fifa_name", "fifa_alt_name"):
+            value = row.get(column)
+            if isinstance(value, str):
+                tokens.update(normalise_name(value).split())
+        return tokens
+
     def at_club(candidates: list[pd.Series], team: object) -> pd.Series | None:
         """The single candidate at the row's club, if there is exactly one."""
         club = club_names.get(str(team))
@@ -475,18 +553,30 @@ def _match_loosely(
         return here[0] if len(here) == 1 else None
 
     has_team = "Team" in merged.columns
+    has_group = "position_group" in merged.columns
     for idx in merged.index[unmatched]:
         name = str(merged.at[idx, "Player"])
         team = merged.at[idx, "Team"] if has_team else None
         parts = normalise_name(name).split()
         hit = None
 
+        # Entries this player cannot be are removed before any tier sees them,
+        # not after one picks: a bucket holding the right man and a keeper is
+        # ambiguous only until the keeper is dropped, and the uniqueness guards
+        # below should get to count the candidates that are actually possible.
+        group = merged.at[idx, "position_group"] if has_group else None
+
+        def possible(rows: list[pd.Series], group: object = group) -> list[pd.Series]:
+            return [r for r in rows if not contradicts_position(group, r.get("role"))]
+
         # Strong keys may map to several players. Prefer the one at his club;
         # otherwise keep the highest-rated, which is overwhelmingly the one a
         # top-five-league dataset means.
         for key in keys_for(name):
             if key in strong:
-                candidates = strong[key]
+                candidates = possible(strong[key])
+                if not candidates:
+                    continue
                 hit = candidates[0]
                 if len(candidates) > 1:
                     local = at_club(candidates, team)
@@ -496,7 +586,7 @@ def _match_loosely(
         if hit is None:
             # A two-token name against an EA entry carrying extra family names.
             # Unique leading pairs only: "jose maria" names several players.
-            candidates = leading.get(" ".join(parts), [])
+            candidates = possible(leading.get(" ".join(parts), []))
             if len(candidates) == 1:
                 hit = candidates[0]
             elif candidates:
@@ -517,7 +607,7 @@ def _match_loosely(
             by_row = {
                 row.name: row for tokens, row in token_sets if wanted <= tokens
             }
-            candidates = list(by_row.values())
+            candidates = possible(list(by_row.values()))
             if len(candidates) == 1:
                 hit = candidates[0]
             elif candidates:
@@ -538,21 +628,47 @@ def _match_loosely(
             # surname, so the only player keyed "a balde" was Aliou Balde of
             # St. Gallen. Taken unopposed, that swapped an 83-rated starter for
             # a 66-rated stranger and dropped him to 54.
-            candidates = initials.get(f"{parts[0][0]} {parts[-1]}", [])
+            candidates = possible(initials.get(f"{parts[0][0]} {parts[-1]}", []))
             hit = at_club(candidates, team) if candidates else None
 
         if hit is None and parts:
             # Unique surnames only: anything shared is too risky to guess at,
             # unless the club and given name both confirm it.
-            candidates = surnames.get(parts[-1], [])
+            candidates = possible(surnames.get(parts[-1], []))
+            given = parts[0]
+            named = [c for c in candidates if given in _tokens_of(c)]
             if len(candidates) == 1:
-                hit = candidates[0]
+                # Sole holder of the surname, which proves nothing on its own:
+                # the right man is often filed under a different surname
+                # entirely. Understat writes Kylian Mbappe as "Mbappe-Lottin",
+                # EA's 2024/25 export does not, and the only entry keyed
+                # "lottin" was Albert-Nicolas Lottin of CD Castellon. Taken
+                # unopposed, a 91-rated striker became a 65-rated defensive
+                # midfielder -- which also moved him out of Real Madrid's
+                # attack line and into its midfield.
+                #
+                # The given name or the club has to confirm it; either alone
+                # is enough. "San Jose" reaches "Mikel San Jose Dominguez" on
+                # the name, and a legal name sharing no given name with ours
+                # still lands when the club agrees.
+                #
+                # A third confirmation is needed because EA often stores
+                # nothing but the surname -- "Alena", "Reguilon", "Terrats",
+                # "Granell" -- and a given name that is not there can never
+                # agree with ours. Those players are also the ones most likely
+                # to have moved, so the club cannot rescue them either. Where
+                # EA's name is a strict *subset* of ours it is taken: it adds
+                # no claim we cannot already see. "Alena" within "Carles
+                # Alena" is accepted; "Ridle Baku" against "Bote Baku",
+                # "Edgar Guerra" against "Javier Guerra" and "Albert-Nicolas
+                # Lottin" against "Kylian Mbappe-Lottin" all introduce a given
+                # name of their own and are refused.
+                contained = _tokens_of(candidates[0]) <= set(parts)
+                confirmed = (
+                    bool(named) or contained or at_club(candidates, team) is not None
+                )
+                hit = candidates[0] if confirmed else None
             elif candidates:
-                given = parts[0]
-                named = [
-                    c for c in candidates
-                    if given in normalise_name(str(c["fifa_name"])).split()
-                ]
                 hit = at_club(named, team) if named else None
                 # Deliberately not relaxed to "unique at the club" when the
                 # given name does not match. That would match Ollie Watkins to
@@ -687,6 +803,13 @@ def _match_across_editions(
         if len(here) != 1:
             continue
         hit = here[0]
+        # The same check the tiers apply. This tier fires on a name EA used in
+        # a *different* edition, which is the weakest evidence in the module,
+        # so it must not be the one route that skips it.
+        if contradicts_position(merged.at[idx, "position_group"]
+                                if "position_group" in merged.columns else None,
+                                hit.get("role")):
+            continue
 
         for column in columns:
             merged.at[idx, column] = hit[column]
@@ -735,7 +858,39 @@ def _attach_per_season(
         piece = group.reset_index(drop=True).merge(
             edition[["_norm", *columns]], on="_norm", how="left"
         )
-        piece = _match_loosely(piece, edition, columns)
+
+        # The exact pass needs the same check as the loose tiers, because two
+        # different men genuinely share a normalised name: Atalanta's midfielder
+        # Éderson and Manchester City's keeper Ederson both reduce to
+        # "ederson", and the merge handed the midfielder an 88-rated
+        # goalkeeper. Cleared here rather than filtered, so the tiers below get
+        # a chance to find the right man instead.
+        if "position_group" in piece.columns and "role" in piece.columns:
+            wrong = [
+                contradicts_position(g, r)
+                for g, r in zip(piece["position_group"], piece["role"], strict=True)
+            ]
+            if any(wrong):
+                piece.loc[wrong, columns] = pd.NA
+                logger.info(
+                    "  %s: %d exact name match(es) cleared, the EA entry plays "
+                    "a position the player cannot", season, sum(wrong),
+                )
+        # Twice, deliberately. `_match_loosely` learns what EA calls each club
+        # from the matches made so far, and on the first call that is the
+        # exact-name pass alone -- the pass Spanish squads fail, because EA
+        # stores their legal names with extra family names. Measured across
+        # the editions, 7 to 11 clubs a season had no resolvable EA name, and
+        # they were Girona, Espanyol, Villarreal, Athletic Club, Real
+        # Valladolid. So the club check was blind for a third of La Liga,
+        # which is exactly where the weakest keys lean on it hardest.
+        #
+        # The second call rebuilds that map from everything the first matched
+        # and retries only the rows still empty. The name-only tiers return
+        # the same answer twice and cost a few seconds; the two club-dependent
+        # tiers get a map worth consulting.
+        for _ in range(2):
+            piece = _match_loosely(piece, edition, columns)
         logger.info(
             "  %s: %.0f%% of %d player-seasons matched",
             season, piece["fifa_overall"].notna().mean() * 100, len(piece),
