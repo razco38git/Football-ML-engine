@@ -569,6 +569,137 @@ def _match_loosely(
     return merged
 
 
+def _match_across_editions(
+    merged: pd.DataFrame, fifa: pd.DataFrame, columns: list[str]
+) -> pd.DataFrame:
+    """Carry a confirmed match sideways into editions that renamed the player.
+
+    EA does not spell a player the same way twice. The 2025/26 export stores
+    legal names with the familiar one alongside -- ``"Vinicius José Paixão de
+    Oliveira Junior"`` / ``"Vini Jr."`` -- while 2024/25 and 2026/27 store only
+    ``"Vini Jr."``. Every tier in :func:`_match_loosely` works on the tokens of
+    one name against the tokens of another, and ``"Vini Jr."`` shares none with
+    Understat's ``"Vinícius Júnior"``: no key reaches it, so the best player at
+    Real Madrid carried no EA rating in two of the three seasons. ``"Fermín"``
+    against ``"Fermín López"`` fails for the opposite reason -- EA's name is a
+    strict *subset*, and containment only looks for supersets.
+
+    Both are solvable without guessing, because the match already exists in
+    another season. A player who matched anywhere gives us the EA names he goes
+    by; those names are then looked for in the editions where he did not match.
+    This is evidence rather than string similarity, which is the same standard
+    the tiers above hold to.
+
+    Two guards keep it honest, and both are needed. A name variant claimed by
+    more than one performance-source player is discarded -- it identifies
+    neither. And the club is **required**, not merely a tiebreak, which is the
+    opposite of the rule everywhere else in this module.
+
+    The reason is that the performance source's name is the only identity a
+    player has here, and two men can share one. Understat calls both Luis
+    Alberto Suárez Díaz and Luis Javier Suárez Charris "Luis Suárez", so the
+    Colombian's EA name is in the Uruguayan's variant set and vice versa.
+    Taken on the name alone this tier gave Atlético's 2020/21 Suárez the
+    Colombian's 75. It also handed Arsenal's Emiliano Martínez an unrelated
+    Martínez rated 61. A variant is weak evidence by construction -- it is a
+    name EA chose in a *different* edition -- so it only counts when the
+    edition also places that player at the club he actually played for. Where
+    the club cannot be resolved, the row stays unmatched.
+    """
+    unmatched = merged["fifa_overall"].isna()
+    if not unmatched.any() or "Season" not in merged.columns:
+        return merged
+
+    variant_columns = [c for c in ("fifa_name", "fifa_alt_name") if c in merged.columns]
+    if not variant_columns or "fifa_club" not in fifa.columns:
+        return merged
+
+    # --- the names each player has already been matched under ----------------
+    owners: dict[str, set[str]] = {}
+    matched = merged[~unmatched]
+    for column in variant_columns:
+        for player, value in zip(matched["Player"], matched[column], strict=True):
+            if isinstance(value, str) and (key := normalise_name(value)):
+                owners.setdefault(key, set()).add(str(player))
+
+    variants: dict[str, set[str]] = {}
+    for key, claimants in owners.items():
+        if len(claimants) == 1:
+            variants.setdefault(next(iter(claimants)), set()).add(key)
+    if not variants:
+        return merged
+
+    # --- every edition's entries, indexed by the same keys -------------------
+    editions = fifa.copy()
+    editions["Season"] = editions["Season"].astype(str)
+    # Positions, not rows: materialising ~220,000 Series to build an index that
+    # is then asked about a few hundred of them is the slow way round.
+    index: dict[tuple[str, str], set[int]] = {}
+    seasons = editions["Season"].to_numpy()
+    for column in variant_columns:
+        if column not in editions.columns:
+            continue
+        for position, value in enumerate(editions[column].to_numpy()):
+            if isinstance(value, str) and (key := normalise_name(value)):
+                index.setdefault((seasons[position], key), set()).add(position)
+
+    edition_clubs = editions["fifa_club"].to_numpy()
+    has_team = "Team" in merged.columns
+
+    # Per edition, not pooled. EA renames clubs between editions as licences
+    # come and go, so a majority taken over twelve seasons answers for none of
+    # them: "Real Madrid" is "Real Madrid CF" up to FC 23 and plain "Real
+    # Madrid" after, and the pooled majority rejected Vinícius at his own club
+    # in exactly the three editions this tier exists to repair. The pooled map
+    # stays as a fallback for a season with too few matched players to decide.
+    pooled = _club_names(merged)
+    by_season = {
+        str(season): {**pooled, **_club_names(group)}
+        for season, group in merged.groupby(merged["Season"].astype(str), sort=False)
+    }
+    repaired = 0
+
+    for idx in merged.index[unmatched]:
+        player = str(merged.at[idx, "Player"])
+        known = variants.get(player)
+        if not known:
+            continue
+        season = str(merged.at[idx, "Season"])
+
+        positions: set[int] = set()
+        for key in known:
+            positions |= index.get((season, key), set())
+        if not positions:
+            continue
+
+        club = (
+            by_season.get(season, pooled).get(str(merged.at[idx, "Team"]))
+            if has_team
+            else None
+        )
+        if club is None:
+            continue
+        here = [
+            editions.iloc[position]
+            for position in sorted(positions)
+            if edition_clubs[position] == club
+        ]
+        if len(here) != 1:
+            continue
+        hit = here[0]
+
+        for column in columns:
+            merged.at[idx, column] = hit[column]
+        repaired += 1
+
+    if repaired:
+        logger.info(
+            "Cross-edition names recovered %d player-season(s) EA had renamed",
+            repaired,
+        )
+    return merged
+
+
 def _attach_per_season(
     players: pd.DataFrame, fifa: pd.DataFrame, columns: list[str]
 ) -> pd.DataFrame:
@@ -611,7 +742,11 @@ def _attach_per_season(
         )
         pieces.append(piece)
 
-    return pd.concat(pieces, ignore_index=True)
+    # Only now, with every season matched, is there a body of confirmed names
+    # to carry into the editions that spell a player differently.
+    return _match_across_editions(
+        pd.concat(pieces, ignore_index=True), fifa, columns
+    )
 
 
 def attach_fifa(players: pd.DataFrame, fifa: pd.DataFrame) -> pd.DataFrame:

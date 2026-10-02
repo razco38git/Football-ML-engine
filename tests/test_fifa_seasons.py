@@ -438,3 +438,146 @@ def test_initial_and_surname_alone_never_decide_it():
         [{"Player": "alex balde", "Team": "Barcelona"}],
     )
     assert pd.isna(_overall(attach_fifa(players, export), "alex balde", "Barcelona"))
+
+
+# --- carrying a confirmed match into an edition that renamed the player -----
+#
+# EA does not spell a player the same way twice, and the two failure shapes are
+# opposites. "Vini Jr." shares no token at all with "Vinícius Júnior", so every
+# key in the loose matcher is looking for something that is not there. "Fermín"
+# against "Fermín López" fails the other way: EA's name is a strict subset, and
+# the containment tier only looks for supersets. Neither is guessable from the
+# strings, and both are already answered in another season's edition.
+
+
+def _two_edition_clubs(
+    ea_rows: list[dict], players: list[dict]
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """`_with_clubs`, but spanning two editions.
+
+    Both the club map and the variant map are learned from matched rows, so a
+    cross-edition test needs `CLUB_EVIDENCE_MIN` exact matches per club *per
+    season* -- the club map is built per edition precisely because EA renames
+    clubs between them.
+    """
+    clubs = {"Real Madrid": {"2526": "Real Madrid", "2627": "Real Madrid CF"},
+             "Barcelona": {"2526": "FC Barcelona", "2627": "FC Barcelona"}}
+    rows, squad = list(ea_rows), list(players)
+    for team, per_season in clubs.items():
+        for season, club in per_season.items():
+            for i in range(3):
+                name = f"{team.lower().replace(' ', '')} filler {i}"
+                rows.append({"fifa_name": name, "fifa_overall": 70.0,
+                             "fifa_club": club, "Season": season})
+                squad.append({"Player": name, "Team": team, "Season": season})
+    frame = pd.DataFrame(squad)
+    frame["position_group"] = "M"
+    return frame, _export(rows)
+
+
+VINI = [
+    {"fifa_name": "vinicius jose paixao de oliveira junior", "fifa_alt_name": "vini jr",
+     "fifa_club": "Real Madrid", "fifa_overall": 89.0, "Season": "2526"},
+    {"fifa_name": "vini jr", "fifa_club": "Real Madrid CF",
+     "fifa_overall": 91.0, "Season": "2627"},
+]
+
+
+def test_a_nickname_only_edition_inherits_the_match():
+    """The 2627 entry is reachable only through the 2526 entry's alt name."""
+    players, export = _two_edition_clubs(
+        VINI,
+        [{"Player": "vinicius junior", "Team": "Real Madrid", "Season": s}
+         for s in ("2526", "2627")],
+    )
+    matched = attach_fifa(players, export)
+    got = matched.set_index("Season").loc[
+        matched["Player"].eq("vinicius junior").to_numpy(), "fifa_overall"
+    ]
+    assert got.loc["2526"] == 89.0
+    assert got.loc["2627"] == 91.0
+
+
+def test_a_shortened_name_inherits_the_match():
+    """EA's name is a subset of ours, which no ordered or containment key
+    catches: "Fermín" against "Fermín López"."""
+    players, export = _two_edition_clubs(
+        [
+            {"fifa_name": "fermin lopez marin", "fifa_alt_name": "fermin",
+             "fifa_club": "FC Barcelona", "fifa_overall": 80.0, "Season": "2526"},
+            {"fifa_name": "fermin", "fifa_club": "FC Barcelona",
+             "fifa_overall": 85.0, "Season": "2627"},
+        ],
+        [{"Player": "fermin lopez", "Team": "Barcelona", "Season": s}
+         for s in ("2526", "2627")],
+    )
+    matched = attach_fifa(players, export)
+    got = matched.set_index("Season").loc[
+        matched["Player"].eq("fermin lopez").to_numpy(), "fifa_overall"
+    ]
+    assert got.loc["2627"] == 85.0
+
+
+def test_the_club_is_required_not_merely_a_tiebreak():
+    """Two men share one performance-source name, so the variant map is
+    polluted by construction.
+
+    Understat calls both Luis Alberto Suárez Díaz and Luis Javier Suárez
+    Charris "Luis Suárez". Whichever one matches first lends his EA names to
+    the other, and the nickname tested here is reachable by no other route --
+    so without the club requirement the second man silently takes the first
+    man's rating. The names are deliberately opaque: a realistic pair would be
+    caught by the surname tier and prove nothing about this one.
+    """
+    players, export = _two_edition_clubs(
+        [
+            {"fifa_name": "qoltan", "fifa_alt_name": "zevi",
+             "fifa_club": "FC Barcelona", "fifa_overall": 77.0, "Season": "2526"},
+            {"fifa_name": "zevi", "fifa_club": "Real Madrid CF",
+             "fifa_overall": 78.0, "Season": "2627"},
+        ],
+        [{"Player": "qoltan", "Team": "Barcelona", "Season": "2526"},
+         {"Player": "qoltan", "Team": "Barcelona", "Season": "2627"}],
+    )
+    matched = attach_fifa(players, export)
+    later = matched[matched["Player"].eq("qoltan") & matched["Season"].eq("2627")]
+    assert pd.isna(later["fifa_overall"].iloc[0]), (
+        "a variant was taken at a club the player never played for"
+    )
+
+
+def test_a_variant_claimed_by_two_players_identifies_neither():
+    """A key that names several players names none of them -- the same rule
+    every other tier is held to.
+
+    Two players carry the same familiar name in one edition, so that name
+    cannot say which of them the next edition's entry is.
+    """
+    players, export = _two_edition_clubs(
+        [
+            {"fifa_name": "qoltan", "fifa_alt_name": "zevi",
+             "fifa_club": "FC Barcelona", "fifa_overall": 80.0, "Season": "2526"},
+            {"fifa_name": "brunex", "fifa_alt_name": "zevi",
+             "fifa_club": "FC Barcelona", "fifa_overall": 79.0, "Season": "2526"},
+            {"fifa_name": "zevi", "fifa_club": "FC Barcelona",
+             "fifa_overall": 85.0, "Season": "2627"},
+        ],
+        [{"Player": "qoltan", "Team": "Barcelona", "Season": "2526"},
+         {"Player": "brunex", "Team": "Barcelona", "Season": "2526"},
+         {"Player": "qoltan", "Team": "Barcelona", "Season": "2627"}],
+    )
+    matched = attach_fifa(players, export)
+    later = matched[matched["Player"].eq("qoltan") & matched["Season"].eq("2627")]
+    assert pd.isna(later["fifa_overall"].iloc[0])
+
+
+def test_nothing_already_matched_is_disturbed():
+    """The tier only ever fills a gap; it never revises a decision the
+    per-season matcher made."""
+    players, export = _two_edition_clubs(
+        VINI,
+        [{"Player": "vinicius junior", "Team": "Real Madrid", "Season": s}
+         for s in ("2526", "2627")],
+    )
+    before = attach_fifa(players, export)
+    assert before["fifa_overall"].notna().sum() == len(before)
