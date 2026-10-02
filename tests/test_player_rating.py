@@ -271,3 +271,183 @@ def test_absent_metrics_are_reported_not_silently_skipped(caplog):
 
     assert "absent_metric" in caplog.text
     assert "75%" in caplog.text, "the share of lost weight should be reported"
+
+
+# --- a sub-rating built from data that is not there -------------------------
+#
+# All three of these were live. FBref serves no `misc` table at all for
+# 2014/15 and no `keeper` table for 2015/16, and only La Liga's `misc` for
+# 2015/16. None of it was visible in the output: every 2014/15 centre-back
+# came back with a defending score of ~50 -- the spread across the pool was
+# 2.3 points against ~20 in every other season -- because the metrics were
+# absent, filled with 0.5, and defending is 62% of a centre-back's composite.
+
+
+def _defenders(n: int = 120, seasons: tuple[str, ...] = ("2425",), seed: int = 0) -> pd.DataFrame:
+    """Centre-backs across one or more seasons, with real defensive metrics."""
+    rng = np.random.default_rng(seed)
+    frames = []
+    for season in seasons:
+        quality = rng.uniform(0.1, 1.0, n)
+        minutes = rng.uniform(900, 3200, n)
+        frames.append(
+            pd.DataFrame(
+                {
+                    "League": "E0", "Season": season,
+                    "Player": [f"{season}-P{i}" for i in range(n)],
+                    "Team": [f"T{i % 20}" for i in range(n)],
+                    "position_group": "D", "role": "CB",
+                    "minutes": minutes, "nineties": minutes / 90,
+                    "interceptions_padj": quality * 0.3,
+                    "tackles_won_padj": quality * 0.2,
+                    "fouls_per90": rng.uniform(0.1, 1.5, n),
+                    "xg_buildup_share": quality * 0.1,
+                    "xg_buildup_per90": quality * 0.4,
+                    "xg_chain_share": quality * 0.1,
+                    "xg_chain_per90": quality * 0.3,
+                    "xa_per90": quality * 0.05,
+                    "key_passes_per90": quality * 0.4,
+                    "np_xg_per90": quality * 0.08,
+                    "np_goals_per90": quality * 0.07,
+                    "yellow_cards_per90": rng.uniform(0, 0.3, n),
+                    "red_cards_per90": 0.0,
+                }
+            )
+        )
+    return pd.concat(frames, ignore_index=True)
+
+
+def test_a_metric_covering_a_fraction_of_the_pool_is_not_a_percentile() -> None:
+    """2015/16, where only La Liga's `misc` table came through.
+
+    Interceptions reached 17% of the centre-back pool. The other 83% were
+    filled with 0.5 and sat on the median while the Spanish players spread out
+    around them -- a ranking of one league, presented as a ranking of five.
+    """
+    squad = _defenders(n = 120)
+    thin = squad.index >= 20  # 17% coverage, as 2015/16 had
+    squad.loc[thin, ["interceptions_padj", "tackles_won_padj"]] = np.nan
+
+    rated = rate_players(squad)
+    assert rated.loc[rated["rated"], "sub_defending"].isna().all(), (
+        "defending was computed from a metric covering a sixth of the pool"
+    )
+
+
+def test_most_of_a_sub_ratings_weight_missing_refuses_the_sub_rating() -> None:
+    """What is left has to be most of what was asked for.
+
+    With no interceptions or tackles, centre-back defending keeps only
+    `fouls_per90` -- 8% of the weight, and a *negative* one. Renormalised, it
+    ranks defenders by who fouls least and calls the answer defending.
+    """
+    squad = _defenders()
+    squad[["interceptions_padj", "tackles_won_padj"]] = np.nan
+
+    rated = rate_players(squad)
+    assert rated.loc[rated["rated"], "sub_defending"].isna().all()
+    # Blank, not a plausible 50: a reader can see the number is absent.
+    assert rated["sub_defending"].notna().sum() == 0
+
+
+def test_a_refused_sub_rating_renormalises_rather_than_dropping_the_player() -> None:
+    """Defending is 62% of a centre-back, but EA's half of his rating is still
+    there and is the better half for a defender anyway. Refusing twice would
+    cost 2014/15 its entire back line."""
+    squad = _defenders()
+    squad[["interceptions_padj", "tackles_won_padj"]] = np.nan
+
+    rated = rate_players(squad)
+    assert rated["rated"].all(), "a missing sub-rating must not unrate the pool"
+    assert rated.loc[rated["rated"], "rating"].notna().all()
+
+
+_NO_PERFORMANCE = (
+    "interceptions_padj", "tackles_won_padj", "fouls_per90",
+    "xg_buildup_share", "xg_buildup_per90", "xg_chain_share", "xg_chain_per90",
+    "xa_per90", "key_passes_per90", "np_xg_per90", "np_goals_per90",
+)
+
+
+def test_a_pool_with_no_usable_data_and_no_ea_entry_is_unrated() -> None:
+    """Every 2015/16 goalkeeper: FBref served no `keeper` table, so all four
+    sub-ratings were empty. They came back `rated` with a null rating, which
+    is the one outcome `unrated_reason` exists to prevent."""
+    squad = _defenders()
+    for column in _NO_PERFORMANCE:
+        squad[column] = np.nan
+
+    rated = rate_players(squad)
+    assert not rated["rated"].any()
+    assert rated["unrated_reason"].eq("No performance data this season").all()
+
+
+def test_no_performance_data_still_keeps_eas_half_of_the_rating() -> None:
+    """Refusing outright would throw away a real number to avoid publishing a
+    missing one -- and take every 2015/16 team's goalkeeper line with it.
+
+    EA's overall is present for ~95% of them, so it becomes the whole rating
+    instead of half of it, and `performance_rating` stays blank to say so.
+    """
+    squad = _defenders()
+    for column in _NO_PERFORMANCE:
+        squad[column] = np.nan
+    squad["fifa_overall"] = np.linspace(60, 90, len(squad))
+
+    rated = rate_players(squad)
+    assert rated["rated"].all()
+    assert rated["rating"].notna().all()
+    assert rated["performance_rating"].isna().all(), (
+        "a performance rating must not be invented from no performance data"
+    )
+    # EA's ordering survives: the best-rated EA player is the best-rated here.
+    best = rated.loc[rated["fifa_overall"].idxmax(), "rating"]
+    assert best == rated["rating"].max()
+
+
+def test_nullable_columns_from_the_ingest_do_not_break_the_build() -> None:
+    """The ingest hands over pandas' nullable `Float64`, not plain float.
+
+    A group with no usable sub-ratings gets a float64 column of NaN, which the
+    discipline blend then multiplies against a `Float64` card score -- and the
+    result is a `Float64` block of pd.NA that pandas refuses to write into the
+    plain float64 series collecting the composites. The whole build dies with
+    a dtype error after the scrape, which is twenty minutes in.
+
+    Reading the same frame back from CSV flattens every dtype, so a dry run
+    against the built file passes while the real pipeline crashes. Only a
+    fixture carrying the ingest's own dtypes can catch it.
+    """
+    squad = _defenders(seasons=("1415", "2425"))
+    numeric = squad.select_dtypes("number").columns
+    squad[numeric] = squad[numeric].astype("Float64")
+    # 2014/15: no performance data at all, but cards -- the discipline score
+    # is the one thing still computable, and it is what upcasts the composite.
+    early = squad["Season"].eq("1415")
+    squad.loc[early, list(_NO_PERFORMANCE)] = pd.NA
+    squad["fifa_overall"] = pd.array(
+        np.linspace(60, 90, len(squad)), dtype="Float64"
+    )
+
+    rated = rate_players(squad)
+    assert rated["rated"].all()
+    assert rated.loc[rated["Season"].eq("1415"), "performance_rating"].isna().all()
+    assert rated.loc[rated["Season"].eq("2425"), "sub_defending"].notna().all()
+
+
+def test_one_season_missing_a_metric_does_not_borrow_another_seasons() -> None:
+    """Sub-ratings are built per role *and* season.
+
+    Computed over a whole role at once, a metric present in 2024/25 counts as
+    present for 2014/15 too, and the earlier season falls through to the
+    fill-with-0.5 path instead of being refused. That is exactly how two
+    seasons of invented defending scores shipped.
+    """
+    squad = _defenders(seasons=("1415", "2425"))
+    early = squad["Season"].eq("1415")
+    squad.loc[early, ["interceptions_padj", "tackles_won_padj"]] = np.nan
+
+    rated = rate_players(squad)
+    done = rated[rated["rated"]]
+    assert done.loc[done["Season"].eq("1415"), "sub_defending"].isna().all()
+    assert done.loc[done["Season"].eq("2425"), "sub_defending"].notna().all()

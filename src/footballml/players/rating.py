@@ -43,6 +43,34 @@ Everything debatable is a number in the YAML, not a decision buried in code.
     defence line reaches -0.48 where squad overall reaches -0.52 -- the defence
     number is the weaker of the two, and the match model has learned to
     discount it.
+
+    Van Dijk is the clearest case and worth stating plainly, because it looks
+    like a bug and is not. His interception share is respectable and swings
+    with his role (15th to 80th percentile across his Liverpool seasons); his
+    *tackles won* share sits at the 3rd to 10th percentile in every one of
+    them, and tackles carry 2.5 of the 6.0 defending weight. He does not
+    tackle because he does not have to. Two fixes were measured and both made
+    the rating worse, which is why neither was taken:
+
+    ====================================  =========  ========
+    centre-back defending weights         def > GA   Van Dijk
+    ====================================  =========  ========
+    int 3.0 + tackles 2.5 (this)            -0.439     77
+    tackles halved                          -0.433     83
+    interceptions only                      -0.426     92
+    one combined ball-winning metric        -0.430     73
+    ====================================  =========  ========
+
+    Tackles are the *better* half, not the worse one: dropping them raises Van
+    Dijk fifteen points and costs the only thing the number is for. The limit
+    is the data. Aerial duels would settle it and FBref no longer publishes
+    them -- see :data:`footballml.players.fbref.MISC_COLUMNS`.
+
+    Where a metric is missing rather than merely crude, the rating now says
+    so instead of filling the gap: see :data:`MIN_METRIC_COVERAGE` and
+    :data:`MAX_MISSING_WEIGHT`. 2014/15 centre-backs carry no defending score
+    at all, and 2015/16 goalkeepers are not rated, because FBref served no
+    ``misc`` table for the first and no ``keeper`` table for the second.
 """
 
 from __future__ import annotations
@@ -84,6 +112,27 @@ def percentile_within(
     return ranked if higher_is_better else 1.0 - ranked
 
 
+#: How much of a sub-rating's configured weight may be missing before the
+#: sub-rating is refused rather than computed from what is left.
+#:
+#: Half. A metric or two short of a well-specified group is the case the 0.5
+#: fill was written for, and renormalising over the rest is honest there. Most
+#: of the group missing is a different situation entirely -- see `_weighted`.
+MAX_MISSING_WEIGHT = 0.5
+
+#: How much of a (role, season) pool a metric must cover to count as present.
+#:
+#: A percentile is a ranking against peers, and a peer with no value is filled
+#: with 0.5 -- fine for the odd player, meaningless when most of the pool is
+#: filled that way. FBref served only La Liga's `misc` table for 2015/16, so
+#: interceptions and tackles reached 16-22% of each outfield pool: the Spanish
+#: players spread out and everyone else sat on the median, which is how that
+#: season's centre-back defending came back with a spread of 9 against ~20
+#: everywhere else. Coverage in this dataset is bimodal -- every other
+#: role-season-metric is at 87% or above -- so the threshold has plenty of room
+#: either side of it.
+MIN_METRIC_COVERAGE = 0.5
+
 #: Warnings already emitted, so a message fires once per run rather than once
 #: per (role, season) group -- 66 groups would bury it.
 _WARNED: set[str] = set()
@@ -96,7 +145,11 @@ def _warn_once(message: str, *args: object) -> None:
         logger.warning("%s", key)
 
 
-def _weighted(frame: pd.DataFrame, weights: dict[str, float]) -> pd.Series:
+def _weighted(
+    frame: pd.DataFrame,
+    weights: dict[str, float],
+    max_missing_weight: float = MAX_MISSING_WEIGHT,
+) -> pd.Series:
     """Weighted mean of percentile columns, ignoring any that are absent.
 
     A **negative weight means lower is better**: the percentile is flipped and
@@ -108,16 +161,19 @@ def _weighted(frame: pd.DataFrame, weights: dict[str, float]) -> pd.Series:
     player with one unavailable metric is treated as average on it rather than
     worst.
     """
-    # A column that is entirely missing carries no information, and filling it
-    # with 0.5 would drag every player toward the middle of a sub-rating while
-    # looking like a contribution. FBref serves several of its tables with the
-    # values stripped -- headers present, cells empty -- so this is not
-    # hypothetical: without the guard, ~25 empty columns quietly diluted the
-    # metrics that did have data.
+    # A column that is mostly missing carries little information, and filling
+    # it with 0.5 would drag every player toward the middle of a sub-rating
+    # while looking like a contribution. FBref serves several of its tables
+    # with the values stripped -- headers present, cells empty -- so this is
+    # not hypothetical: without the guard, ~25 empty columns quietly diluted
+    # the metrics that did have data. See `MIN_METRIC_COVERAGE` for why the bar
+    # is a share of the pool rather than "any value at all".
     usable = {
         c: w
         for c, w in weights.items()
-        if c in frame.columns and w != 0 and frame[c].notna().any()
+        if c in frame.columns
+        and w != 0
+        and frame[c].notna().mean() >= MIN_METRIC_COVERAGE
     }
 
     # Skipping quietly is how a third of the centre-back defending weight went
@@ -126,6 +182,7 @@ def _weighted(frame: pd.DataFrame, weights: dict[str, float]) -> pd.Series:
     # interceptions and tackles. Name what was dropped and how much weight went
     # with it, once per distinct set rather than once per group.
     dropped = {c: w for c, w in weights.items() if w != 0 and c not in usable}
+    share = 0.0
     if dropped:
         share = sum(abs(w) for w in dropped.values()) / sum(
             abs(w) for w in weights.values() if w != 0
@@ -135,7 +192,13 @@ def _weighted(frame: pd.DataFrame, weights: dict[str, float]) -> pd.Series:
             "weight): %s", len(dropped), 100 * share, ", ".join(sorted(dropped)),
         )
 
-    if not usable:
+    # What is left has to be most of what was asked for. Renormalising over a
+    # small remainder does not recover the sub-rating, it replaces it: with no
+    # FBref `misc` table for 2014/15, centre-back defending kept only
+    # `fouls_per90` -- a *negative* weight -- so 92% of the weight went missing
+    # and the survivor ranked defenders by who fouled least. That is worse than
+    # admitting the number cannot be computed, because it looks like defending.
+    if not usable or share > max_missing_weight:
         return pd.Series(np.nan, index=frame.index)
 
     total = sum(abs(w) for w in usable.values())
@@ -206,15 +269,38 @@ def rate_players(
     by = ["role", "Season"]
 
     # --- 1 & 2: percentiles into sub-ratings -------------------------------
-    sub_columns: set[str] = set()
+    # Declared from the config up front, in config order, and insertion-ordered
+    # rather than a set. Three reasons, all about the column layout being the
+    # same on every run: a set iterates in string-hash order, which Python
+    # randomises per process, so two builds of identical data wrote the same
+    # numbers under a different layout; discovering the columns as the groups
+    # are walked would make the layout depend on which (role, season) came
+    # first; and each column needs to start as plain float64, because assigning
+    # a nullable Float64 block into one another group created as float64 raises.
+    sub_columns: dict[str, None] = {
+        f"sub_{name}": None
+        for spec in config["positions"].values()
+        for name in spec["sub_ratings"]
+    }
+    for column in sub_columns:
+        work[column] = np.nan
     composites = pd.Series(np.nan, index=work.index)
 
-    for group, spec in config["positions"].items():
-        mask = work["role"] == group
-        if not mask.any():
+    # Per role *and season*, not per role. `_weighted` drops a metric with no
+    # data anywhere in the frame it is handed, and renormalises what is left --
+    # but handed a whole role's twelve seasons it only ever sees the metric as
+    # present, so a season where nobody has it falls through to the
+    # fill-with-0.5 path instead. FBref serves no `misc` table at all for
+    # 2014/15 and only La Liga's for 2015/16, which meant every centre-back in
+    # those two seasons shared one invented defending score: the spread across
+    # the pool was 2.3 points against ~20 in every other season, and defending
+    # is 62% of a centre-back's composite. Splitting by season puts the guard
+    # where the data actually varies. Percentiles are already ranked within
+    # (role, season), so no other number moves.
+    for (group, _season), block in work.groupby(by, observed=True, sort=False):
+        spec = config["positions"].get(group)
+        if spec is None:
             continue
-        block = work[mask]
-
         sub_values: dict[str, pd.Series] = {}
         for sub_name, metrics in spec["sub_ratings"].items():
             percentiles = pd.DataFrame(
@@ -226,13 +312,27 @@ def rate_players(
             )
             sub_values[sub_name] = _weighted(percentiles, metrics)
 
+        # `.astype(float)` on every assignment below, and it is load-bearing.
+        # The ingest hands over nullable Float64 columns, so a group whose
+        # metrics are all absent comes back as a Float64 block of pd.NA --
+        # which pandas refuses to write into the plain float64 column the
+        # previous group created. Reading the same data back from CSV flattens
+        # the dtypes and hides it, so a dry run against the built file cannot
+        # catch this; only the real pipeline can.
         for sub_name, values in sub_values.items():
-            column = f"sub_{sub_name}"
-            sub_columns.add(column)
-            work.loc[mask, column] = values
+            work.loc[block.index, f"sub_{sub_name}"] = values.astype(float)
 
+        # No floor here, unlike the metric calls above. A missing *metric* is
+        # absent evidence and renormalising over a sliver of what was asked for
+        # invents a number; a missing *sub-rating* has already been refused on
+        # that ground, and renormalising over the rest is what the sub-rating
+        # weights are for. Refusing again would drop every 2014/15 centre-back
+        # -- defending is 62% of the composite -- and with them EA's half of
+        # their rating, which is present and is the better half for a defender
+        # anyway. What is left is weaker, visibly so: `sub_defending` comes
+        # back blank rather than as a plausible 50.
         composite = _weighted(
-            pd.DataFrame(sub_values), spec["sub_rating_weights"]
+            pd.DataFrame(sub_values), spec["sub_rating_weights"], max_missing_weight=1.0
         )
 
         # Discipline only ever costs: a clean player is not rewarded, a
@@ -251,9 +351,42 @@ def rate_players(
                 weight = float(discipline["weight"])
                 composite = composite * (1 - weight) + score * weight
 
-        composites.loc[block.index] = composite
+        composites.loc[block.index] = composite.astype(float)
 
     work["composite_raw"] = composites
+
+    # A group whose sub-ratings could not be computed at all -- every 2015/16
+    # goalkeeper, because FBref served no `keeper` table that season -- must
+    # not come back as a rated player with a blank rating, which is the one
+    # outcome `unrated_reason` exists to prevent.
+    #
+    # But only where there is nothing else. EA's overall is half the published
+    # rating and is present for ~95% of these players, so refusing outright
+    # would throw away a real number to avoid publishing a missing one, and
+    # take every 2015/16 team's goalkeeper line with it. Those players keep a
+    # rating from EA alone and a blank `performance_rating`, which is exactly
+    # what the two columns are carried separately to show.
+    hollow = work["composite_raw"].isna()
+    if hollow.any():
+        missing = sorted(
+            f"{role} {season}"
+            for role, season in work.loc[hollow, by].drop_duplicates().itertuples(index=False)
+        )
+        rescued = hollow & work.get(
+            "fifa_overall", pd.Series(np.nan, index=work.index)
+        ).notna()
+        logger.warning(
+            "No usable performance data for %d player-season(s) (%s); %d keep a "
+            "rating from EA alone, %d are left unrated",
+            int(hollow.sum()), ", ".join(missing),
+            int(rescued.sum()), int((hollow & ~rescued).sum()),
+        )
+        df.loc[work.index[hollow & ~rescued], "unrated_reason"] = (
+            "No performance data this season"
+        )
+        work = work[~(hollow & ~rescued)]
+        if work.empty:
+            return df
 
     # --- 3: shrink toward the positional mean ------------------------------
     work["composite"] = shrink_toward_mean(work, "composite_raw", by, k)
@@ -358,6 +491,12 @@ def _blend_with_fifa(work: pd.DataFrame, config: dict[str, Any]) -> pd.Series:
     blended[present] = (
         performance[present] * (1 - weight) + fifa_on_our_scale[present] * weight
     )
+    # No performance half to blend: the season's source table was missing for
+    # this whole group (see `rate_players`). EA's judgement is the entire
+    # rating rather than half of it.
+    hollow = present & performance.isna()
+    if hollow.any():
+        blended[hollow] = fifa_on_our_scale[hollow]
 
     k = float(config.get("unmatched_shrinkage_nineties", 0.0))
     if k > 0 and (~present).any():

@@ -49,6 +49,14 @@ OUT = RAW_DIR / "fifa"
 #: Where the raw exports are expected, unless --sources says otherwise.
 DEFAULT_SOURCES = OUT / "sources"
 
+#: FIFA 15 -> season 2014/15, the oldest season we can rate.
+#:
+#: The binding constraint is Understat, whose coverage starts there -- a player
+#: rating blends an EA overall with performance percentiles, and without the
+#: second half there is nothing to rate. Match data goes back to 2010/11, so it
+#: is not the limit; an earlier comment here claimed it was.
+EARLIEST_EDITION = 15
+
 #: Goalkeeper attributes. EA has no pace or shooting for keepers, so without
 #: these a goalkeeper carries no attributes at all and cannot be compared to
 #: anyone -- which is how the Player Similarity tab first shipped.
@@ -86,7 +94,7 @@ class Source:
 #: hold -- "male_players.csv" and "male_players (1).csv" are different editions
 #: from different years.
 SOURCES: tuple[Source, ...] = (
-    Source("male_players (legacy)_23.csv", "16-23", "sofifa",
+    Source("male_players (legacy)_23.csv", "15-23", "sofifa",
            "sofifa's combined FIFA 15-23 export; split by its `fifa_version` column"),
     Source("FC26_20250921.csv", "26", "sofifa", "sofifa FC26 export, dated 2025-09-21"),
     Source("male_players.csv", "24", "ea-fc24", "EA's own FC24 site export"),
@@ -241,14 +249,15 @@ def main() -> int:
         if path is None:
             continue
 
-        if source.schema == "sofifa" and source.editions == "16-23":
+        if source.schema == "sofifa" and source.editions == "15-23":
             logger.info("=== %s ===", source.provenance)
             frame = pd.read_csv(path, low_memory=False)
             for edition, group in frame.groupby("fifa_version"):
                 edition = int(edition)
-                if edition < 16:
-                    # Season 14/15 and earlier predate our match data, so a
-                    # rating file for them would never be joined to anything.
+                if edition < EARLIEST_EDITION:
+                    # FIFA 14 and earlier have no counterpart in the performance
+                    # data: Understat's coverage begins with 2014/15, so there
+                    # would be nothing to blend an EA overall against.
                     continue
                 if wanted and edition not in wanted:
                     continue

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api, LEAGUE_NAMES, type PlayerRating } from '../api/client';
+import { api, LEAGUE_NAMES, seasonLabel, type PlayerRating } from '../api/client';
 import { getRatingBg, getRatingTextColor, teamColor } from '../api/display';
 import { useAsync } from '../api/hooks';
 
@@ -91,7 +91,20 @@ function RatingBadge({ value, size = 'sm' }: { value: number | null; size?: 'sm'
 }
 
 function StatBar({ label, value }: { label: string; value: number | null }) {
-  if (value == null) return null;
+  // An attribute this position is scored on, with no value, is a gap in the
+  // source rather than an attribute that does not apply -- FBref published no
+  // defensive data at all for 2014/15, so no centre-back that season has a
+  // defending score. Hiding the row left a defender with three bars and no
+  // hint that a fourth was missing; showing it empty says which one.
+  if (value == null) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-xs w-32 shrink-0" style={{ color: 'var(--muted-foreground)' }}>{label}</span>
+        <div className="flex-1 h-1.5 rounded-full" style={{ background: 'var(--secondary)' }} />
+        <span className="text-xs font-data w-6 text-right" style={{ color: 'var(--muted-foreground)' }} title="Not published for this season">—</span>
+      </div>
+    );
+  }
   const bg = getRatingBg(value);
   return (
     <div className="flex items-center gap-2">
@@ -210,6 +223,9 @@ function PlayerDetailPanel({ player, onClose }: { player: PlayerRating; onClose:
 }
 
 export default function PlayerDatabase() {
+  // Empty means "whatever the server defaults to" -- early in a campaign that
+  // is last season, because too few players have the minutes to be rated yet.
+  const [season, setSeason] = useState('');
   const [league, setLeague] = useState('All');
   const [position, setPosition] = useState('All');
   const [minRating, setMinRating] = useState(0);
@@ -221,6 +237,7 @@ export default function PlayerDatabase() {
   const { data, loading, error, reload } = useAsync(
     () =>
       api.players({
+        season: season || undefined,
         league: league === 'All' ? undefined : league,
         position: position === 'All' ? undefined : position,
         search: search || undefined,
@@ -232,7 +249,13 @@ export default function PlayerDatabase() {
         // someone, not scrolling.
         limit: 50,
       }),
-    [league, position, minRating, search, sort, descending],
+    [season, league, position, minRating, search, sort, descending],
+  );
+
+  // True when the newest season with ratings is not the newest season that
+  // exists -- i.e. the campaign is under way but too little has been played.
+  const isPreviousSeason = Boolean(
+    data?.season && data.seasons.length > 0 && data.seasons[0] !== data.season,
   );
 
   // Empty while "All positions" is selected, which is what makes the attribute
@@ -281,6 +304,18 @@ export default function PlayerDatabase() {
         <p className="mt-1 text-sm" style={{ color: 'var(--muted-foreground)' }}>
           Ratings out of 99 built from per-90 output, ranked against positional peers.
           Click any player for the breakdown.
+          {data?.season && (
+            <>
+              {' '}Showing <strong style={{ color: 'var(--foreground)' }}>
+                {seasonLabel(data.season)}
+              </strong>
+              {isPreviousSeason && (
+                <> — clubs are that season's, so a summer transfer is not reflected here.
+                  A player needs 450 minutes before he can be rated, so the current
+                  campaign only appears once enough of it has been played.</>
+              )}
+            </>
+          )}
         </p>
       </div>
 
@@ -292,6 +327,16 @@ export default function PlayerDatabase() {
           className="px-3 py-2 rounded-lg text-sm"
           style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)', minWidth: 190 }}
         />
+        <select
+          value={data?.season ?? season}
+          onChange={e => setSeason(e.target.value)}
+          className="px-3 py-2 rounded-lg text-sm"
+          style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+        >
+          {(data?.seasons ?? []).map(code => (
+            <option key={code} value={code}>{seasonLabel(code)}</option>
+          ))}
+        </select>
         <select
           value={league}
           onChange={e => setLeague(e.target.value)}
@@ -436,7 +481,7 @@ export default function PlayerDatabase() {
                         Muted, not badged. These are the inputs to OVR, not
                         peers of it, and three equally loud numbers in a row
                         would leave a reader unsure which one the site means.
-                        A dash where EA has no entry, which is ~8% of players.
+                        A dash where EA has no entry, which is under 2% of the current season.
                       */}
                       <td className="px-2 py-2 text-center text-xs font-data" style={{ color: 'var(--muted-foreground)' }}>
                         {p.fifa_overall ?? '—'}

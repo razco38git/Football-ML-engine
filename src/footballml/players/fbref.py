@@ -5,7 +5,8 @@ which is why an Understat-only rating judged defenders on their attacking
 involvement and refused to rate goalkeepers. FBref supplies both, through two
 of the five stat tables soccerdata exposes:
 
-- ``misc`` -- interceptions, tackles won, fouls, crosses. Actual defending.
+- ``misc`` -- interceptions, tackles won, fouls, crosses. Actual defending,
+  though only two of the four things a defender does; see ``MISC_COLUMNS``.
 - ``keeper`` -- saves, save percentage, goals against, clean sheets, penalties.
 
 This is deliberately used *instead of* FIFA ratings for goalkeepers. FIFA's
@@ -15,6 +16,33 @@ bot protection is not something to build a pipeline on.
 
 The cost is real: FBref drives a headless Chrome and takes 10-15 seconds per
 league-season against Understat's sub-second. It runs in the batch job only.
+
+.. note::
+    **The other three tables are a dead end -- do not retry them.** FBref's
+    ``defense``, ``possession`` and ``passing`` pages carry everything missing
+    from the rating: carries, progressive passes, take-ons, touches by zone,
+    blocks, clearances, duels. They are fetched successfully and they arrive
+    **with the values stripped** for players, though the squad totals on the
+    same page are intact -- 48 populated cells against 1,236::
+
+        <td class="right iz" data-stat="touches" ></td>
+        <td class="right iz" data-stat="carries" ></td>
+
+    Column headers, player names and minutes come through; every statistic is
+    empty. Verified three ways: a fresh fetch through this same browser session
+    (2.6 MB, table found inside a 1.2 MB HTML comment, all 528 players present,
+    every stat cell blank), 195 cached copies spanning 2014/15 to 2026/27 (4-9%
+    of cells populated), and against ``misc`` as a control on the same day
+    (1056 of 1056 rows populated). A plain request is 403 regardless.
+
+    A ``players/fbref_extended.py`` existed for this and was removed: it cost
+    40 seconds on every ``build_players`` run and returned three usable columns
+    -- ``tackles_won_per90`` and ``interceptions_per90``, which ``misc`` above
+    already supplies, and ``fb_assists_per90``, which nothing read.
+
+    Those metrics need event data. ``socceraction`` computes VAEP and xThreat
+    from it for free, but only from Opta, StatsBomb or Wyscout, and StatsBomb's
+    open data covers no current big-five season.
 """
 
 from __future__ import annotations
@@ -29,13 +57,26 @@ from footballml.ingest.understat import UNDERSTAT_LEAGUES
 logger = logging.getLogger(__name__)
 
 #: ``misc`` columns worth keeping, mapped to readable names.
+#:
+#: ``Recov`` and the three Aerial Duels columns are deliberately absent, having
+#: been tried: FBref's ``misc`` table has twenty-one columns and carries
+#: neither, in any of the thirteen cached seasons. ``data-stat="ball_recoveries"``
+#: and ``data-stat="aerials_won"`` appear zero times in the HTML -- not blank,
+#: as the gated tables are, but simply not served. A name here that the table
+#: does not carry is skipped in silence, so ``recoveries`` was configured,
+#: weighted in the centre-back score, and never built.
+#:
+#: Aerial duels are the loss that matters. They are the one freely available
+#: measure of the thing a centre-back is actually judged on, and the one
+#: measure that would not read Van Dijk -- 6th percentile for tackles won in
+#: every Liverpool season, because he does not need to make them -- as a poor
+#: defender. Nothing reachable here replaces them.
 MISC_COLUMNS = {
     "Int": "interceptions",
     "TklW": "tackles_won",
     "Fls": "fouls",
     "Fld": "fouled",
     "Crs": "crosses",
-    "Recov": "recoveries",
 }
 
 #: ``keeper`` columns worth keeping.
@@ -94,22 +135,27 @@ def normalise_name(name: str) -> str:
     return "".join(c for c in ascii_only.lower() if c.isalnum() or c.isspace()).strip()
 
 
-def _name_keys(name: str) -> set[str]:
-    """Candidate keys for a name: the whole thing, and first+last.
+def _name_keys(name: str) -> list[str]:
+    """Candidate keys for a name, **most specific first**.
 
     Sources disagree about middle names -- ``"Amad Diallo Traore"`` against
     ``"Amad Diallo"`` -- so a first-plus-last key catches those without
     resorting to a similarity threshold that could pair the wrong players.
+
+    Order is part of the contract. Callers take the first key that hits, so the
+    full name must be tried before ``"a onana"``, which cannot tell André from
+    Amadou. Returning a set left that order to string hashing, which Python
+    randomises per process -- the same data matched differently run to run.
     """
     norm = normalise_name(name)
     if not norm:
-        return set()
+        return []
     parts = norm.split()
-    keys = {norm}
+    keys = [norm]
     if len(parts) > 2:
-        keys.add(f"{parts[0]} {parts[-1]}")
+        keys.append(f"{parts[0]} {parts[-1]}")
     if len(parts) >= 2:
-        keys.add(f"{parts[0][0]} {parts[-1]}")  # "a robertson"
+        keys.append(f"{parts[0][0]} {parts[-1]}")  # "a robertson"
     return keys
 
 
@@ -175,11 +221,32 @@ def match_players(
         if not unmatched.any():
             break
 
+        # A loose key can name two different players: "a onana" reaches both
+        # André and Amadou, who were in the Premier League together. Taking the
+        # first row seen resolved that by *row order*, which made the build
+        # irreproducible -- two runs over the same data gave 197 players a
+        # different rating and moved 312 team strengths, because a goalkeeper
+        # kept inheriting a midfielder's tackles. An ambiguous key is not a
+        # match, so drop it and let the player fall through to the next key or
+        # go unmatched.
         lookup: dict[tuple, dict] = {}
+        ambiguous: set[tuple] = set()
         for _, row in right.iterrows():
             group = tuple(row[c] for c in keys)
             for key in _name_keys(str(row["Player"])):
-                lookup.setdefault((*group, key), row)
+                full = (*group, key)
+                seen = lookup.get(full)
+                if seen is None:
+                    lookup[full] = row
+                elif seen["_norm"] != row["_norm"]:
+                    ambiguous.add(full)
+        for key in ambiguous:
+            del lookup[key]
+        if ambiguous:
+            logger.info(
+                "Ambiguous on %s: %d name keys matched more than one player, left unmatched",
+                "+".join(keys), len(ambiguous),
+            )
 
         for idx in merged.index[unmatched]:
             group = tuple(merged.at[idx, c] for c in keys)
