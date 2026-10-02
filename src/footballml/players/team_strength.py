@@ -36,6 +36,7 @@ LINE_BY_ROLE = {
     "GK": "goalkeeper",
     "CB": "defence",
     "FB": "defence",
+    "DM": "midfield",
     "MID": "midfield",
     "AMW": "attack",
     "FWD": "attack",

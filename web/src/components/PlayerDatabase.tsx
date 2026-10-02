@@ -7,7 +7,8 @@ const POSITIONS: Record<string, string> = {
   GK: 'Goalkeeper',
   CB: 'Centre back',
   FB: 'Full back',
-  MID: 'Midfielder',
+  DM: 'Defensive midfielder',
+  MID: 'Central midfielder',
   AMW: 'Attacking mid / winger',
   FWD: 'Forward',
 };
@@ -36,6 +37,14 @@ const ATTRIBUTES: Record<string, { key: keyof PlayerRating; label: string; short
     { key: 'sub_defending', label: 'Defending', short: 'DEF' },
     { key: 'sub_creation', label: 'Creation & crossing', short: 'CRE' },
     { key: 'sub_involvement', label: 'Build-up', short: 'BLD' },
+    { key: 'sub_finishing', label: 'Finishing', short: 'FIN' },
+  ],
+  // A holder leads with winning the ball back; a number eight with creating.
+  // Same four bars, ordered by what the role is for.
+  DM: [
+    { key: 'sub_defending', label: 'Defending', short: 'DEF' },
+    { key: 'sub_involvement', label: 'Build-up', short: 'BLD' },
+    { key: 'sub_creation', label: 'Creation', short: 'CRE' },
     { key: 'sub_finishing', label: 'Finishing', short: 'FIN' },
   ],
   MID: [

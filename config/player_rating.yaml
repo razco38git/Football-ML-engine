@@ -158,8 +158,50 @@ positions:
       volume: 0.08
       defending: 0.08
 
+  DM:
+    label: Defensive midfielder
+    sub_ratings:
+      # The same metrics and the same weights as MID, deliberately. What was
+      # wrong was the *pool*, not the scoring: a holder was ranked for chance
+      # creation against number eights and lost by 5.2 rating points on
+      # average, taking 18% of each season's top fifty while being 40% of the
+      # players. Compared with his own kind on identical terms the gap closes
+      # to 0.1 and his share reaches 38%.
+      #
+      # Re-weighting toward defending and build-up was measured too --
+      # defending 0.40, involvement 0.32, creation 0.18 -- and rejected: the
+      # midfield line's correlation with next season's points fell from 0.646
+      # to 0.634 while the overall barely moved. Separate the players, not the
+      # yardstick.
+      creation:
+        xa_per90: 3.0
+        key_passes_per90: 2.0
+        assists_per90: 1.0
+      involvement:
+        xg_chain_share: 1.0
+        xg_chain_per90: 1.0
+        xg_buildup_share: 1.0
+        xg_buildup_per90: 1.0
+      finishing:
+        np_xg_per90: 2.0
+        np_goals_per90: 1.5
+        finishing_delta_per90: 0.3
+      volume:
+        shots_per90: 1.0
+      defending:
+        interceptions_per90: 1.0
+        interceptions_padj: 1.0
+        tackles_won_per90: 1.0
+        tackles_won_padj: 1.0
+    sub_rating_weights:
+      creation: 0.28
+      involvement: 0.27
+      finishing: 0.17
+      defending: 0.20
+      volume: 0.08
+
   MID:
-    label: Midfielder
+    label: Central midfielder
     sub_ratings:
       creation:
         xa_per90: 3.0
