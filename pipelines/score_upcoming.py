@@ -42,19 +42,99 @@ from footballml.data import (  # noqa: E402
     load_team_strength,
 )
 from footballml.features.build import build_match_features, build_upcoming_features  # noqa: E402
+from footballml.ingest.european import SHOWN_COMPETITIONS
 from footballml.ingest.matchhistory import LEAGUES, fetch_fixtures  # noqa: E402
 from footballml.ingest.schedule import (  # noqa: E402
+    COMPETITION_HORIZON_DAYS,
     DEFAULT_HORIZON_DAYS,
     fetch_schedule,
     window_fixtures,
 )
 
 OUTPUT_COLUMNS = [
-    "League", "Date", "HomeTeam", "AwayTeam",
+    "League", "competition", "Date", "HomeTeam", "AwayTeam",
     "expected_goals_home", "expected_goals_away",
     "prob_home_win", "prob_draw", "prob_away_win", "predicted_outcome",
     "modal_score_home", "modal_score_away", "prob_over_2_5", "prob_btts",
 ]
+
+
+def _european_results() -> pd.DataFrame:
+    """Played UEFA ties, shaped so `store.settle` can match them.
+
+    `League` is the home side's division and `competition` the competition, the
+    same convention the predictions were stored under.
+    """
+    path = PROCESSED_DIR / "european_matches.csv"
+    if not path.exists():
+        return pd.DataFrame()
+    frame = pd.read_csv(path)
+    if frame.empty:
+        return pd.DataFrame()
+    return pd.DataFrame(
+        {
+            "League": frame["home_league"],
+            "competition": frame["League"],
+            "Date": pd.to_datetime(frame["Date"]),
+            "HomeTeam": frame["HomeTeam"],
+            "AwayTeam": frame["AwayTeam"],
+            "FTHG": frame["FTHG"],
+            "FTAG": frame["FTAG"],
+            "FTR": frame["FTR"],
+        }
+    )
+
+
+def _european_fixtures(leagues: list[str] | None, log: logging.Logger) -> pd.DataFrame:
+    """Upcoming UEFA ties we can actually rate.
+
+    Only matches where **both** clubs played in one of the five leagues this
+    season: everyone else -- Benfica, Ajax, Celtic, Galatasaray -- has no form
+    history, no xG and no squad rating here, so there is nothing to predict
+    from. That keeps about 41% of a Champions League round.
+
+    `League` is set to the **home side's domestic division**, not the
+    competition. `LEAGUE_CODES` has no UEFA entry, so a row labelled "UCL" would
+    give the model a NaN `league_code` -- a value no training row ever carried,
+    which it would accept in silence. The competition is carried separately.
+    """
+    wanted = [c for c in (leagues or SHOWN_COMPETITIONS) if c in SHOWN_COMPETITIONS]
+    if not wanted:
+        return pd.DataFrame()
+
+    from footballml.ingest.european import big_five_only
+
+    try:
+        schedule = fetch_schedule(wanted)
+        schedule = window_fixtures(schedule, horizon_days=COMPETITION_HORIZON_DAYS)
+    except Exception as exc:  # noqa: BLE001 - one missing source is survivable
+        log.warning("No European schedule (%s)", exc)
+        return pd.DataFrame()
+    if schedule.empty:
+        return pd.DataFrame()
+
+    tmh = load_team_match_history(PROCESSED_DIR / "team_match_history_all.csv")
+    # `big_five_only` wants the wide match shape and fills the two division
+    # columns; the schedule has no scores, which is exactly what we want here.
+    kept, dropped = big_five_only(schedule.assign(FTHG=pd.NA, FTAG=pd.NA, FTR=pd.NA), tmh)
+    log.info(
+        "European: %d of %d fixtures have both clubs in the big five",
+        len(kept), len(schedule),
+    )
+    if kept.empty:
+        return pd.DataFrame()
+
+    return pd.DataFrame(
+        {
+            "League": kept["home_league"],
+            "competition": kept["League"],
+            "Season": kept["Season"],
+            "Date": pd.to_datetime(kept["Date"]),
+            "HomeTeam": kept["HomeTeam"],
+            "AwayTeam": kept["AwayTeam"],
+            "played": kept.get("played", False),
+        }
+    )
 
 
 def _collect_fixtures(
@@ -72,6 +152,7 @@ def _collect_fixtures(
     outage at one source degrades coverage instead of stopping the record.
     """
     schedule = fetch_schedule(leagues)
+    schedule = pd.concat([schedule, _european_fixtures(leagues, log)], ignore_index=True)
     if schedule.empty:
         # The schedule source itself gave us nothing, which is a problem rather
         # than an answer. football-data's rolling file is the fallback.
@@ -122,7 +203,9 @@ def _collect_fixtures(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--leagues", nargs="+", choices=sorted(LEAGUES))
+    parser.add_argument(
+        "--leagues", nargs="+", choices=sorted([*LEAGUES, *SHOWN_COMPETITIONS])
+    )
     parser.add_argument("--settle-only", action="store_true")
     parser.add_argument(
         "--horizon-days", type=int, default=DEFAULT_HORIZON_DAYS,
@@ -138,7 +221,13 @@ def main() -> None:
 
     # Settle first: a fixture predicted last week may have been played since.
     played = build_match_features(tmh, strength=strength)
-    settled = store.settle(played[played["FTR"].notna()])
+    results = played[played["FTR"].notna()].assign(competition=store.DOMESTIC)
+    # European results live in their own file -- they are deliberately kept out
+    # of the match history so they never reach a rolling window or the Elo walk
+    # as *history*. Without them a stored UCL prediction never settles, and sits
+    # in the record forever with null results.
+    results = pd.concat([results, _european_results()], ignore_index=True)
+    settled = store.settle(results)
     log.info("Settled %d previously stored predictions", settled)
 
     if args.settle_only:

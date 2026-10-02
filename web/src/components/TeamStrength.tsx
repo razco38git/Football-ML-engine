@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api, LEAGUE_NAMES, type PlayerRating, type TeamStrength } from '../api/client';
 import { getRatingBg, getRatingTextColor, teamColor } from '../api/display';
 import { useAsync } from '../api/hooks';
+import { LeagueStrengthPanel } from './LeagueStrength';
 
 const LINES: { key: keyof TeamStrength; label: string }[] = [
   { key: 'strength_goalkeeper', label: 'GK' },
@@ -148,9 +149,13 @@ export default function TeamStrength() {
         </h2>
         <p className="mt-1 text-sm" style={{ color: 'var(--muted-foreground)' }}>
           Built from the likely starting eleven — the highest-minute player in each formation
-          slot, rated and weighted by line. Click a team to see the squad behind it.
+          slot, rated and weighted by line. Click a team to see the squad behind it, or a
+          league to filter to it.
         </p>
       </div>
+
+      {/* Clicking a league filters the table below it. */}
+      <LeagueStrengthPanel onPick={setLeague} />
 
       <div className="flex flex-wrap gap-3 mb-5 items-center">
         <select

@@ -29,10 +29,35 @@ logger = logging.getLogger(__name__)
 PREDICTIONS_PATH = PROCESSED_DIR / "predictions.csv"
 
 #: Identifies one forecast. A model version may predict a fixture only once.
-KEY = ("model_version", "League", "Date", "HomeTeam", "AwayTeam")
+#:
+#: ``competition`` is part of the identity, not decoration. A UEFA tie is stored
+#: with ``League`` set to the *home side's domestic division* -- because
+#: `LEAGUE_CODES` has no UEFA entry and labelling it "UCL" would leave the
+#: model's `league_code` feature NaN, a value no training row ever carried. That
+#: makes it indistinguishable from a domestic fixture on ``League`` alone, so
+#: without this column two clubs meeting in both competitions in one season
+#: would collide, and a European prediction could settle against the wrong
+#: result.
+KEY = ("model_version", "League", "competition", "Date", "HomeTeam", "AwayTeam")
+
+#: Marks a prediction as domestic. Rows written before `competition` existed
+#: read back as NaN and mean the same thing, so both are normalised to this.
+DOMESTIC = "domestic"
 
 #: Result columns, null until the match is played and settled.
 ACTUAL_COLUMNS = ("actual_home_goals", "actual_away_goals", "actual_result")
+
+
+def _competition(frame: pd.DataFrame) -> pd.Series:
+    """The competition column, defaulting to domestic.
+
+    Absent in every row written before UEFA ties were stored, and absent from
+    the domestic results frames that feed `settle`. Treating a blank as
+    `DOMESTIC` keeps those rows joining exactly as they always did.
+    """
+    if "competition" not in frame.columns:
+        return pd.Series(DOMESTIC, index=frame.index, dtype="object")
+    return frame["competition"].astype("object").fillna(DOMESTIC).replace("", DOMESTIC)
 
 
 def append(
@@ -51,6 +76,9 @@ def append(
     path = path or PREDICTIONS_PATH
     incoming = predictions.copy()
     incoming["model_version"] = model_version
+    # Part of KEY, so it has to exist before the dedupe merge. A caller that
+    # does not set it is predicting a domestic fixture.
+    incoming["competition"] = _competition(incoming)
     incoming["predicted_at"] = datetime.now(UTC).isoformat()
     incoming["Date"] = pd.to_datetime(incoming["Date"]).dt.strftime("%Y-%m-%d")
     for col in ACTUAL_COLUMNS:
@@ -62,6 +90,7 @@ def append(
     if not existing.empty:
         # load() parses Date back to datetime, while incoming holds strings.
         # Align both before the dedupe merge or it raises on dtype mismatch.
+        existing["competition"] = _competition(existing)
         seen = existing[list(KEY)].copy()
         seen["Date"] = pd.to_datetime(seen["Date"]).dt.strftime("%Y-%m-%d")
         merged = incoming.merge(seen.assign(_seen=True), on=list(KEY), how="left")
@@ -112,10 +141,13 @@ def settle(matches: pd.DataFrame, path: Path | None = None) -> int:
     if stored.empty:
         return 0
 
-    key = ["League", "Date", "HomeTeam", "AwayTeam"]
-    results = matches[[*key, "FTHG", "FTAG", "FTR"]].copy()
+    key = ["League", "competition", "Date", "HomeTeam", "AwayTeam"]
+    results = matches.copy()
+    results["competition"] = _competition(results)
+    results = results[[*key, "FTHG", "FTAG", "FTR"]]
     results["Date"] = pd.to_datetime(results["Date"])
     results = results.dropna(subset=["FTR"]).drop_duplicates(subset=key)
+    stored["competition"] = _competition(stored)
 
     merged = stored.merge(results, on=key, how="left", suffixes=("", "_new"))
     # Read back from CSV, an all-blank column arrives as float64, which rejects
@@ -154,7 +186,8 @@ def settled(path: Path | None = None) -> pd.DataFrame:
     rows = stored[stored["actual_result"].notna()]
     if "predicted_at" in rows.columns:
         rows = rows.sort_values("predicted_at")
-    key = ["League", "Date", "HomeTeam", "AwayTeam"]
+    rows = rows.assign(competition=_competition(rows))
+    key = ["League", "competition", "Date", "HomeTeam", "AwayTeam"]
     present = [c for c in key if c in rows.columns]
     if present:
         rows = rows.drop_duplicates(present, keep="first")

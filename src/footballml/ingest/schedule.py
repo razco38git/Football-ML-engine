@@ -44,6 +44,15 @@ logger = logging.getLogger(__name__)
 #: is a fortnight from being known.
 DEFAULT_HORIZON_DAYS = 10
 
+#: Longer, for UEFA competitions. Their rounds are a fortnight apart rather than
+#: weekly, and an international break stretches the gap further -- so a ten-day
+#: window leaves the Champions League tab empty most of the time, which reads as
+#: a broken page rather than as the calendar. Three weeks covers a European
+#: round plus a break. The cost is predicting slightly further from team news,
+#: which matters less here: these are cross-league ties the model already judges
+#: with about half its usual edge.
+COMPETITION_HORIZON_DAYS = 21
+
 #: FBref writes scores with an en-dash. A row with no score is unplayed, which
 #: is exactly what this module is for -- but a parse that quietly fails would
 #: mark *every* fixture unplayed, so the dash characters are matched explicitly.
@@ -56,7 +65,9 @@ def fetch_schedule(
     """Every scheduled fixture, played or not, in canonical team names.
 
     Args:
-        leagues: Division codes, e.g. ``["E0"]``. Defaults to all five.
+        leagues: Division codes, e.g. ``["E0"]``. A UEFA competition code from
+            :data:`footballml.ingest.european.EUROPEAN_LEAGUES` -- ``"UCL"`` and
+            friends -- is accepted too. Defaults to the five domestic divisions.
         seasons: Season labels. Defaults to the current one.
 
     Returns:
@@ -64,7 +75,15 @@ def fetch_schedule(
         ``played``. Empty if soccerdata is not installed, so the caller can fall
         back rather than crash -- FBref lives in the optional ingest extra.
     """
+    # Imported here, not at module scope: `european` reads `_SCORE` from this
+    # module, so a top-level import would be circular.
+    from footballml.ingest.european import EUROPEAN_LEAGUES, _register
+
+    known = {**UNDERSTAT_LEAGUES, **EUROPEAN_LEAGUES}
     codes = list(leagues or UNDERSTAT_LEAGUES)
+    unknown = [c for c in codes if c not in known]
+    if unknown:
+        raise KeyError(f"unknown competition code(s): {unknown}")
     seasons = seasons or [current_season_label(pd.Timestamp.today())]
 
     try:
@@ -73,14 +92,18 @@ def fetch_schedule(
         logger.warning("soccerdata not installed; no schedule available")
         return _empty()
 
-    reader = sd.FBref(
-        leagues=[UNDERSTAT_LEAGUES[c] for c in codes], seasons=list(seasons)
-    )
+    # soccerdata ships no UEFA club competitions, so they must be registered
+    # before the reader will accept their names.
+    uefa = [c for c in codes if c in EUROPEAN_LEAGUES]
+    if uefa:
+        _register(uefa)
+
+    reader = sd.FBref(leagues=[known[c] for c in codes], seasons=list(seasons))
     raw = reader.read_schedule().reset_index()
     if raw.empty:
         return _empty()
 
-    inverse = {v: k for k, v in UNDERSTAT_LEAGUES.items()}
+    inverse = {v: k for k, v in known.items()}
     aliases = load_aliases("fbref")
 
     out = pd.DataFrame(

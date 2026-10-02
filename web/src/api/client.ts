@@ -41,6 +41,23 @@ export interface Prediction {
   home_team: string;
   away_team: string;
 
+  /**
+   * True when the two clubs play in different divisions and the cross-league
+   * correction was applied. Always false for a real fixture — the model has
+   * never trained on a match between two leagues, so it cannot judge the gap
+   * itself and the correction is fitted from actual European results.
+   */
+  league_adjusted: boolean;
+  /** Each club's own division. `league` is the home side's for a hypothetical. */
+  home_division: string | null;
+  away_division: string | null;
+  /**
+   * `"domestic"`, or a UEFA code like `"UCL"`. Note `league` is the *home
+   * side's division* even for a European tie — the model has no league code for
+   * a competition, and a missing one is a value it never trained on.
+   */
+  competition: string | null;
+
   expected_goals_home: number;
   expected_goals_away: number;
   prob_home_win: number;
@@ -165,6 +182,9 @@ export const api = {
   /** The players behind a team's rating. */
   squad: (team: string) => fetchSquad(team),
 
+  /** How the five leagues compare on average squad rating. */
+  leagueStrength: (season?: string) => fetchLeagueStrength(season),
+
   /** Settled matches: prediction beside the real score. */
   history: (source: 'live' | 'backtest', league?: string, limit = 50) =>
     fetchHistory(source, league, limit),
@@ -192,6 +212,22 @@ export const api = {
   },
 };
 
+/**
+ * UEFA competitions the site shows fixtures for.
+ *
+ * Deliberately separate from `LEAGUE_NAMES`. Five components use that map to
+ * build dropdowns for things that only exist per division — squad lists,
+ * projected tables, team ratings — and a "Champions League" option there is
+ * meaningless or an outright 404.
+ */
+export const COMPETITION_NAMES: Record<string, string> = {
+  UCL: 'Champions League',
+};
+
+/** Everything that can label a prediction. Display lookups only, never a dropdown. */
+export const competitionLabel = (code: string): string =>
+  LEAGUE_NAMES[code] ?? COMPETITION_NAMES[code] ?? code;
+
 /** Division codes to the names the design already uses. */
 export const LEAGUE_NAMES: Record<string, string> = {
   E0: 'Premier League',
@@ -216,7 +252,7 @@ export interface PlayerRating {
   /**
    * The two halves behind `rating`, blended 50/50. They disagree often — a
    * player can hold a high EA overall on reputation while this season's output
-   * says otherwise. `fifa_overall` is null for the ~8% with no EA entry.
+   * says otherwise. `fifa_overall` is null where EA has no entry — 3.9% across all seasons, 1.6% in the current one.
    */
   fifa_overall: number | null;
   performance_rating: number | null;
@@ -242,9 +278,22 @@ export interface PlayerRating {
   goals_against_per90: number | null;
 }
 
+/** A season label like `"2526"` shown as `2025/26`. */
+export const seasonLabel = (code: string): string =>
+  code.length === 4 ? `20${code.slice(0, 2)}/${code.slice(2)}` : code;
+
 export interface PlayerPage {
   total: number;
   players: PlayerRating[];
+  /** Every season with ratings, newest first. Drives the selector. */
+  seasons: string[];
+  /**
+   * The season these rows are from. Early in a campaign the default is the
+   * *previous* season — too few players have the minutes to be rated yet — so
+   * the page has to say which one it is showing, or last season's clubs read
+   * as stale data.
+   */
+  season: string | null;
 }
 
 export interface PlayerQuery {
@@ -297,7 +346,7 @@ export interface SimilarPlayer {
    * not to the theoretical range.
    *
    * Either can be null, and null is not zero. `fifa_similarity` is null when a
-   * player has no EA entry (8.6% of them); `percentile_similarity` is null
+   * player has no EA entry (1.6% of the current season); `percentile_similarity` is null
    * whenever the comparison crosses positions, because our sub-ratings are
    * ranks within a position and a centre-back's 80 is not a winger's 80.
    */
@@ -351,6 +400,38 @@ export function fetchTeams(league?: string, limit = 100): Promise<TeamStrength[]
   return get<TeamStrength[]>(`/teams?${params}`);
 }
 
+export interface LeagueStrength {
+  league: string;
+  season: string;
+  n_teams: number;
+  /** Mean squad rating across the league's clubs — the headline number. */
+  mean_strength: number;
+  median_strength: number;
+  /**
+   * Spread between clubs. A high mean with a high spread is a league carried
+   * by a few sides rather than strong throughout.
+   */
+  spread: number;
+  strongest_team: string;
+  strongest_strength: number;
+  weakest_team: string;
+  weakest_strength: number;
+}
+
+/**
+ * How the five leagues compare, strongest first.
+ *
+ * Comparable because a rating is not league-relative: EA's overall is a global
+ * scale and the performance percentiles pool all five leagues. The caveat is
+ * that per-90 output is easier to accumulate against weaker opponents, which
+ * flatters the weaker leagues — so the real gaps are, if anything, wider.
+ */
+export function fetchLeagueStrength(season?: string): Promise<LeagueStrength[]> {
+  const params = new URLSearchParams();
+  if (season) params.set('season', season);
+  return get<LeagueStrength[]>(`/leagues/strength?${params}`);
+}
+
 /** The players a team's rating was built from, highest minutes first. */
 export function fetchSquad(team: string): Promise<PlayerRating[]> {
   return get<PlayerRating[]>(`/teams/${encodeURIComponent(team)}/squad`);
@@ -379,6 +460,13 @@ export interface MatchResult {
   confidence: number;
 }
 
+export interface CompetitionAccuracy {
+  n: number;
+  accuracy: number;
+  rps: number;
+  rps_base_rate: number;
+}
+
 export interface Accuracy {
   n: number;
   accuracy: number;
@@ -392,6 +480,12 @@ export interface Accuracy {
   /** How often the bookmakers' shortest price won, where odds exist. */
   accuracy_market: number | null;
   by_league_accuracy: Record<string, number>;
+  /**
+   * Per competition, kept apart rather than pooled. Measured skill over a base
+   * rate is 12.8% on domestic matches against 6.2% on cross-league ones, so one
+   * blended figure would overstate the European ties.
+   */
+  by_competition: Record<string, CompetitionAccuracy>;
   calibration: {
     bin_lower: number;
     bin_upper: number;

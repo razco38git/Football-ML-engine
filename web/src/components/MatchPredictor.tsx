@@ -1,5 +1,12 @@
 import { useState } from 'react';
-import { api, LEAGUE_NAMES, type Prediction, type TeamForm } from '../api/client';
+import {
+  api,
+  COMPETITION_NAMES,
+  LEAGUE_NAMES,
+  competitionLabel,
+  type Prediction,
+  type TeamForm,
+} from '../api/client';
 import { confidence, formatDate, mean, pct, shortName, teamColor, verdict } from '../api/display';
 import { useAsync } from '../api/hooks';
 
@@ -63,7 +70,7 @@ function TeamSide({ team, form, league, align }: {
             {team}
           </div>
           <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-            {LEAGUE_NAMES[league] ?? league}
+            {competitionLabel(league)}
           </div>
         </div>
       </div>
@@ -207,14 +214,24 @@ function SquadStrength({ p }: { p: Prediction }) {
       {missing.length > 0 && (
         <div className="text-xs mt-2" style={{ color: 'var(--muted-foreground)' }}>
           No rating for {missing.join(' or ')} — newly promoted, so there is no
-          squad rating from last season in this league.
+          squad rating from last season.
         </div>
       )}
     </div>
   );
 }
 
-function MatchCard({ p }: { p: Prediction }) {
+/** One prediction, rendered. Exported so the What-If tab shows the same card
+ *  rather than a second, subtly different one.
+ *
+ *  `leagues` overrides the per-side league label. A real fixture has one league
+ *  and needs no override, but a hypothetical pairing can cross borders, and the
+ *  prediction carries only the league it was *scored* in -- which would label
+ *  Man City "LaLiga" in a Real Madrid tie. */
+export function MatchCard({ p, leagues }: {
+  p: Prediction;
+  leagues?: { home: string; away: string };
+}) {
   const [expanded, setExpanded] = useState(false);
 
   // `verdict` decides whether naming a winner is honest here; see display.ts.
@@ -234,7 +251,7 @@ function MatchCard({ p }: { p: Prediction }) {
         style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--border)' }}
       >
         <span className="text-xs font-medium tracking-widest uppercase" style={{ color: 'var(--muted-foreground)' }}>
-          {LEAGUE_NAMES[p.league] ?? p.league}
+          {competitionLabel(p.competition && p.competition !== 'domestic' ? p.competition : p.league)}
         </span>
         <div className="flex items-center gap-3">
           {settled && (
@@ -261,7 +278,7 @@ function MatchCard({ p }: { p: Prediction }) {
           its badge and form pills were simply unreachable.
         */}
         <div className="grid items-center gap-4 grid-cols-1 sm:grid-cols-[1fr_auto_1fr]">
-          <TeamSide team={p.home_team} form={p.form_home} league={p.league} align="left" />
+          <TeamSide team={p.home_team} form={p.form_home} league={leagues?.home ?? p.league} align="left" />
 
           <div className="flex flex-col items-center gap-2">
             {/*
@@ -352,7 +369,7 @@ function MatchCard({ p }: { p: Prediction }) {
             </div>
           </div>
 
-          <TeamSide team={p.away_team} form={p.form_away} league={p.league} align="right" />
+          <TeamSide team={p.away_team} form={p.form_away} league={leagues?.away ?? p.league} align="right" />
         </div>
 
         <div className="mt-4">
@@ -473,6 +490,7 @@ type Mode = 'upcoming' | 'recent';
 export default function MatchPredictor() {
   const [mode, setMode] = useState<Mode>('upcoming');
   const [league, setLeague] = useState('All');
+  const isCompetition = league in COMPETITION_NAMES;
 
   const { data, loading, error, reload } = useAsync(
     () => (mode === 'upcoming' ? api.upcoming(league) : api.matches(league, 20)),
@@ -514,12 +532,32 @@ export default function MatchPredictor() {
           className="px-3 py-2 rounded-lg text-sm"
           style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
         >
-          <option value="All">All leagues</option>
+          <option value="All">All competitions</option>
           {Object.entries(LEAGUE_NAMES).map(([code, name]) => (
+            <option key={code} value={code}>{name}</option>
+          ))}
+          {Object.entries(COMPETITION_NAMES).map(([code, name]) => (
             <option key={code} value={code}>{name}</option>
           ))}
         </select>
       </div>
+
+      {/* A Champions League view that shows 7 of 18 matches has to say so. */}
+      {isCompetition && (
+        <div
+          className="rounded-xl border p-4 mb-6 text-xs leading-relaxed"
+          style={{ background: 'rgba(0,176,255,0.07)', borderColor: 'rgba(0,176,255,0.3)', color: '#7fd3ff' }}
+        >
+          <strong>Only ties between clubs from the big five.</strong> We can rate a
+          club only if it plays in England, Spain, Germany, Italy or France, so a match
+          against Benfica, Ajax or Galatasaray has no form, no expected goals and no
+          squad rating to predict from and is not shown. That covers about{' '}
+          <strong>33%</strong> of this season's Champions League — 48 of its 144 matches.
+          These predictions are also weaker than domestic ones: measured over 822 past
+          European ties, the model keeps about half its usual edge over a simple base
+          rate. The Prediction Accuracy tab reports them separately for that reason.
+        </div>
+      )}
 
       {loading && (
         <div className="text-center py-16 text-sm" style={{ color: 'var(--muted-foreground)' }}>
@@ -540,13 +578,22 @@ export default function MatchPredictor() {
         </div>
       )}
 
-      {/* An empty upcoming list is normal mid-week, not a failure. */}
+      {/* An empty upcoming list is normal mid-week, not a failure -- but the
+          message has to match the mode, or "Recent results" offers to show you
+          recent results. */}
       {!loading && !error && data?.length === 0 && (
         <div className="rounded-xl p-8 text-center" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
-          <div className="text-sm mb-2" style={{ color: 'var(--foreground)' }}>No fixtures published right now</div>
-          <div className="text-xs mb-4" style={{ color: 'var(--muted-foreground)' }}>
-            The fixture feed covers the next few days. Mid-week it is often empty.
+          <div className="text-sm mb-2" style={{ color: 'var(--foreground)' }}>
+            {mode === 'upcoming' ? 'No fixtures published right now' : 'No results to show'}
           </div>
+          <div className="text-xs mb-4" style={{ color: 'var(--muted-foreground)' }}>
+            {mode === 'upcoming'
+              ? isCompetition
+                ? 'European rounds are a fortnight apart, so this is empty between them.'
+                : 'The fixture feed covers the next few days. Mid-week it is often empty.'
+              : 'Nothing has been played and scored here yet.'}
+          </div>
+          {mode === 'upcoming' && (
           <button
             onClick={() => setMode('recent')}
             className="px-4 py-2 rounded-lg text-sm font-display font-bold"
@@ -554,6 +601,7 @@ export default function MatchPredictor() {
           >
             Show recent results instead
           </button>
+          )}
         </div>
       )}
 

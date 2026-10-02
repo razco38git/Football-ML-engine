@@ -5,8 +5,9 @@ import PlayerSimilarity from './components/PlayerSimilarity';
 import TeamStrength from './components/TeamStrength';
 import PredictionHistory from './components/PredictionHistory';
 import SeasonProjection from './components/SeasonProjection';
+import WhatIf from './components/WhatIf';
 
-type Tab = 'predictor' | 'players' | 'similarity' | 'teams' | 'projection' | 'history';
+type Tab = 'predictor' | 'whatif' | 'players' | 'similarity' | 'teams' | 'projection' | 'history';
 
 const tabs: { id: Tab; label: string; icon: string; badge?: string }[] = [
   { id: 'predictor', label: 'Match Predictor', icon: '⚡' },
@@ -15,6 +16,10 @@ const tabs: { id: Tab; label: string; icon: string; badge?: string }[] = [
   { id: 'teams', label: 'Team Strength', icon: '🏆' },
   { id: 'projection', label: 'Projected Tables', icon: '🔮' },
   { id: 'history', label: 'Prediction Accuracy', icon: '📊' },
+  // Last, and badged, because it is the one tab whose answers can never be
+  // checked: these pairings are not scheduled, so no result will ever settle
+  // them. Everything above describes matches that did or will happen.
+  { id: 'whatif', label: 'What If?', icon: '🧪', badge: 'SANDBOX' },
 ];
 
 export default function App() {
@@ -91,6 +96,7 @@ export default function App() {
       {/* Main content */}
       <main className="max-w-7xl mx-auto px-6 py-8">
         {activeTab === 'predictor' && <MatchPredictor />}
+        {activeTab === 'whatif' && <WhatIf />}
         {activeTab === 'players' && <PlayerDatabase />}
         {activeTab === 'similarity' && <PlayerSimilarity />}
         {activeTab === 'teams' && <TeamStrength />}
@@ -104,7 +110,7 @@ export default function App() {
         style={{ borderTop: '1px solid var(--border)' }}
       >
         <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-          FootballIQ · ML data sourced from EA FC, Football Manager & ScoutLab · For analytical purposes only
+          FootballIQ · football-data.co.uk, Understat, FBref and EA FC · For analytical purposes only
         </p>
       </footer>
 

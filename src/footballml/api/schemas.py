@@ -73,6 +73,21 @@ class Prediction(BaseModel):
     home_team: str
     away_team: str
 
+    #: True when the two clubs play in different divisions and the cross-league
+    #: correction was applied to the goal rates. Always False for a real
+    #: fixture. See `footballml.league_adjust` for why the model needs help
+    #: here: it has never trained on a match between two leagues.
+    league_adjusted: bool = False
+    #: Each club's own domestic division. For a hypothetical pairing `league`
+    #: is the home side's, so these are the only way to know the away side's.
+    home_division: str | None = None
+    away_division: str | None = None
+    #: ``"domestic"``, or a UEFA code such as ``"UCL"``. Distinct from
+    #: ``league``, which stays the home side's division even for a European tie
+    #: -- the model has no league code for a competition, and a missing one is a
+    #: feature value it never trained on.
+    competition: str | None = None
+
     expected_goals_home: float
     expected_goals_away: float
     prob_home_win: float
@@ -144,7 +159,7 @@ class PlayerRating(BaseModel):
     #: the work. They are blended 50/50 (see config/player_rating.yaml), and
     #: they disagree often: a player can hold a high EA overall on reputation
     #: while this season's output says otherwise, or vice versa.
-    #: `fifa_overall` is EA's own 0-99 number, absent for the ~8% with no EA
+    #: `fifa_overall` is EA's own 0-99 number, absent where there is no EA
     #: entry; `performance_rating` is ours, from per-90 output alone.
     fifa_overall: int | None = None
     performance_rating: int | None = None
@@ -177,6 +192,14 @@ class PlayerPage(BaseModel):
 
     total: int
     players: list[PlayerRating]
+    #: Every season that has ratings, newest first, so a caller can offer them
+    #: without hardcoding a range that goes stale the moment one is added.
+    seasons: list[str] = Field(default_factory=list)
+    #: The season these rows are from. The default is the newest season with
+    #: enough ratings to represent a league, which early in a campaign is the
+    #: *previous* one -- so a club here is last season's squad, which reads as
+    #: stale unless the page says which season it is showing.
+    season: str | None = None
 
 
 class TeamStrength(BaseModel):
@@ -197,6 +220,31 @@ class TeamStrength(BaseModel):
     strength_defence: float | None = None
     strength_midfield: float | None = None
     strength_attack: float | None = None
+
+
+class LeagueStrength(BaseModel):
+    """How strong a league is, averaged over its clubs' squad ratings.
+
+    Comparable across leagues because neither half of a player rating is
+    league-relative: EA's overall is a global scale, and the performance
+    percentiles are ranked within role and *season*, pooling all five leagues,
+    so a Ligue 1 midfielder is ranked against Premier League midfielders rather
+    than only his own division.
+    """
+
+    league: str
+    season: str
+    n_teams: int
+    #: Mean squad rating across the league's clubs -- the headline number.
+    mean_strength: float
+    median_strength: float
+    #: Spread between clubs. A high mean with a high spread is a league carried
+    #: by a few sides rather than strong throughout.
+    spread: float
+    strongest_team: str
+    strongest_strength: float
+    weakest_team: str
+    weakest_strength: float
 
 
 class MatchResult(BaseModel):
@@ -257,6 +305,19 @@ class CalibrationBin(BaseModel):
     observed_rate: float
 
 
+class CompetitionAccuracy(BaseModel):
+    """One competition's record, reported on its own.
+
+    Cross-league predictions are measurably weaker than domestic ones, so the
+    site reports them separately rather than hiding them inside one number.
+    """
+
+    n: int
+    accuracy: float
+    rps: float
+    rps_base_rate: float
+
+
 class Accuracy(BaseModel):
     """Published track record over settled predictions."""
 
@@ -282,6 +343,15 @@ class Accuracy(BaseModel):
 
     by_league_accuracy: dict[str, float] = Field(
         default_factory=dict, description="Accuracy per league"
+    )
+    by_competition: dict[str, CompetitionAccuracy] = Field(
+        default_factory=dict,
+        description=(
+            "Accuracy and RPS per competition, kept apart rather than blended. "
+            "Measured skill over a base rate is 12.8% on domestic matches "
+            "against 6.2% on cross-league ones, so a single pooled figure would "
+            "overstate the European ties and flatter the domestic ones."
+        ),
     )
     calibration: list[CalibrationBin] = Field(default_factory=list)
 
@@ -328,7 +398,7 @@ class SimilarPlayer(BaseModel):
     attributes, which share one scale across outfield positions;
     ``percentile_similarity`` compares our own sub-ratings, which are ranks
     *within* a position and so are ``None`` whenever the comparison crosses one.
-    Either can be ``None`` -- 8.6% of rated players have no EA entry, and a zero
+    Either can be ``None`` -- some rated players have no EA entry, and a zero
     there would read as "nothing alike" rather than "not measured".
 
     50 means "no more alike than two random players in this position"; the scale

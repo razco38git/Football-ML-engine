@@ -14,7 +14,8 @@ import { useAsync } from '../api/hooks';
  *
  * Both scores are anchored so that 50 means "no more alike than two random
  * players in this position". Either can be missing, and missing is not zero —
- * 8.6% of rated players have no EA entry at all.
+ * A small share of rated players have no EA entry at all — 1.6% of the
+ * current season, 3.9% across all of them.
  */
 
 /** Short labels for the radar, keyed by the API's attribute names. */

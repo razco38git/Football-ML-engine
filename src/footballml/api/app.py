@@ -27,8 +27,10 @@ from footballml import registry, store
 from footballml.api.schemas import (
     Accuracy,
     CalibrationBin,
+    CompetitionAccuracy,
     Driver,
     Health,
+    LeagueStrength,
     LikelyScore,
     MatchResult,
     MatchResultPage,
@@ -50,10 +52,19 @@ from footballml.data import (
     load_team_match_history,
     load_team_strength,
 )
-from footballml.features.build import build_match_features, build_upcoming_features
+from footballml.entities import load_aliases
+from footballml.features.build import (
+    LEAGUE_CODES,
+    build_match_features,
+    build_upcoming_features,
+)
 from footballml.form import build_index, recent_form
+from footballml.ingest.european import SHOWN_COMPETITIONS
 from footballml.ingest.matchhistory import LEAGUES, fetch_fixtures
 from footballml.labels import humanise
+from footballml.league_adjust import adjust as adjust_for_league
+from footballml.league_adjust import fitted_model_version
+from footballml.league_adjust import load as load_league_adjustment
 from footballml.models.evaluate import (
     base_rate_probs,
     calibration_table,
@@ -96,6 +107,15 @@ class State:
     #: the artifact's expected columns cannot be produced.
     strength: pd.DataFrame = field(default_factory=pd.DataFrame)
     projection: pd.DataFrame = field(default_factory=pd.DataFrame)
+    #: Scored European ties, from `pipelines.validate_european`. These cannot be
+    #: produced on demand like domestic ones: `state.features` is built from the
+    #: domestic match history, which deliberately excludes European results so
+    #: they never reach a rolling window or the Elo walk as history.
+    european: pd.DataFrame = field(default_factory=pd.DataFrame)
+    #: Per-league goal-rate offsets for cross-league pairings. Empty until
+    #: `pipelines.fit_league_adjustment` runs, and empty means every gap is
+    #: zero, i.e. the correction is the identity.
+    league_offsets: dict[str, float] = field(default_factory=dict)
     # Scored predictions, not raw fixtures. Rebuilding features over the full
     # history costs ~6.5s, which is far too slow to repeat per request when the
     # answer only changes when the fixture list does.
@@ -201,6 +221,35 @@ def _load_state(startup: bool = False) -> dict[str, int]:
         state.teams["Season"] = state.teams["Season"].astype(str)
         logger.info("Loaded %d team-seasons", len(state.teams))
 
+    european_path = PROCESSED_DIR / "european_predictions.csv"
+    if european_path.exists():
+        state.european = pd.read_csv(european_path)
+        state.european["Date"] = pd.to_datetime(state.european["Date"])
+        logger.info("Loaded %d scored European ties", len(state.european))
+
+    offsets = load_league_adjustment()
+    if offsets:
+        state.league_offsets = offsets
+        logger.info(
+            "Cross-league correction loaded for %d leagues: %s",
+            len(offsets), ", ".join(f"{k} {v:+.3f}" for k, v in sorted(offsets.items())),
+        )
+        fitted_against = fitted_model_version()
+        if metadata is not None and fitted_against not in (None, metadata.version):
+            # Not fatal: a stale correction is still closer to right than none,
+            # and refusing to serve would be worse. But it is measuring a model
+            # that no longer exists, so it should not pass unremarked.
+            logger.warning(
+                "Cross-league correction was fitted against model %s, serving %s. "
+                "Re-run `pipelines.validate_european` then "
+                "`pipelines.fit_league_adjustment`.",
+                fitted_against, metadata.version,
+            )
+    else:
+        logger.info(
+            "No cross-league correction; run `python -m pipelines.fit_league_adjustment`"
+        )
+
     projection_path = PROCESSED_DIR / "season_projection.csv"
     if projection_path.exists():
         state.projection = pd.read_csv(projection_path)
@@ -289,6 +338,10 @@ def _to_predictions(
         entry = Prediction(
             league=r["League"],
             date=pd.Timestamp(r["Date"]).date(),
+            league_adjusted=bool(r.get("league_adjusted", False)),
+            competition=(r.get("competition") or None),
+            home_division=r.get("home_division") or None,
+            away_division=r.get("away_division") or None,
             home_team=r["HomeTeam"],
             away_team=r["AwayTeam"],
             expected_goals_home=round(float(r["expected_goals_home"]), 3),
@@ -476,7 +529,10 @@ def upcoming(
 
     results = state._upcoming or []
     if league:
-        results = [p for p in results if p.league == league]
+        # A European tie carries `league` = the home side's division, because the
+        # model has no code for a competition. So filtering by "UCL" has to look
+        # at `competition`, or it would match nothing at all.
+        results = [p for p in results if league in (p.league, p.competition)]
     if not explain:
         # Strip rather than recompute: the caller asked for a lighter payload.
         results = [p.model_copy(update={"drivers_home": [], "drivers_away": []}) for p in results]
@@ -484,10 +540,16 @@ def upcoming(
 
 
 def _score_upcoming() -> list[Prediction]:
-    """Fetch and score every published fixture. Expensive; call via the cache."""
+    """Fetch and score every published fixture. Expensive; call via the cache.
+
+    Fixtures come from the season schedule rather than football-data's rolling
+    file. That file is a snapshot, not a schedule -- on a Monday it routinely
+    holds the round that has just been *played* -- and it publishes no UEFA
+    divisions at all, so a Champions League tie could never appear through it.
+    """
     model, _ = _require_model()
 
-    fixtures = fetch_fixtures()
+    fixtures = _upcoming_fixture_list()
     if fixtures.empty:
         return []
 
@@ -496,19 +558,109 @@ def _score_upcoming() -> list[Prediction]:
         logger.warning("No published fixtures matched a known team")
         return []
 
-    odds_cols = [c for c in ODDS_COLUMNS if c in fixtures.columns]
-    if odds_cols:
-        key = ["League", "Date", "HomeTeam", "AwayTeam"]
+    carry = ["League", "Date", "HomeTeam", "AwayTeam"]
+    extras = [c for c in (*ODDS_COLUMNS, "competition") if c in fixtures.columns]
+    if extras:
         scored = scored.merge(
-            fixtures[[*key, *odds_cols]].assign(Date=pd.to_datetime(fixtures["Date"])),
-            on=key,
+            fixtures[[*carry, *extras]].assign(Date=pd.to_datetime(fixtures["Date"])),
+            on=carry,
             how="left",
         )
+    scored["competition"] = scored.get("competition", store.DOMESTIC)
+    scored["competition"] = scored["competition"].fillna(store.DOMESTIC)
 
-    preds = model.predict_frame(scored[state.columns])
+    # A European tie is cross-league by construction, so it needs the same
+    # correction `/predict` applies -- the model has never trained on a match
+    # between two divisions and cannot judge the gap itself.
+    divisions = {
+        side: [_division_of(t, lg) for t, lg in zip(scored[col], scored["League"], strict=True)]
+        for side, col in (("home", "HomeTeam"), ("away", "AwayTeam"))
+    }
+    mu_home, mu_away = model.predict_goal_rates(scored[state.columns])
+    mu_home, mu_away = adjust_for_league(
+        mu_home, mu_away, divisions["home"], divisions["away"], state.league_offsets
+    )
+    preds = model.frame_from_rates(mu_home, mu_away, index=scored.index)
+
     frame = pd.concat([scored.reset_index(drop=True), preds.reset_index(drop=True)], axis=1)
+    frame["home_division"] = divisions["home"]
+    frame["away_division"] = divisions["away"]
+    frame["league_adjusted"] = [
+        h != a and bool(state.league_offsets)
+        for h, a in zip(divisions["home"], divisions["away"], strict=True)
+    ]
     drivers = model.explain(scored[state.columns], top_n=5)
     return _to_predictions(frame, drivers)
+
+
+def _upcoming_fixture_list() -> pd.DataFrame:
+    """Scheduled fixtures across the five leagues and the Champions League.
+
+    Odds come from football-data, which is the only source for them and covers
+    the domestic leagues only -- a European tie simply has none, and the
+    accuracy page's market benchmark is absent for those rows rather than wrong.
+    """
+    from footballml.ingest.schedule import upcoming_fixtures
+
+    try:
+        domestic = upcoming_fixtures()
+    except Exception as exc:  # noqa: BLE001 - a scraper outage must not 500
+        logger.warning("No schedule available (%s); falling back to the fixture file", exc)
+        domestic = fetch_fixtures()
+    domestic = domestic.assign(competition=store.DOMESTIC) if not domestic.empty else domestic
+
+    european = _upcoming_european()
+    fixtures = pd.concat([f for f in (domestic, european) if not f.empty], ignore_index=True)
+    if fixtures.empty:
+        return fixtures
+
+    odds = fetch_fixtures()
+    odds_cols = [c for c in ODDS_COLUMNS if c in odds.columns]
+    if odds_cols and not odds.empty:
+        key = ["League", "Date", "HomeTeam", "AwayTeam"]
+        odds = odds[[*key, *odds_cols]].assign(Date=pd.to_datetime(odds["Date"]))
+        fixtures = fixtures.merge(odds, on=key, how="left")
+    return fixtures
+
+
+def _upcoming_european() -> pd.DataFrame:
+    """Upcoming UEFA ties where both clubs are rateable.
+
+    Only Champions League, and only ties between big-five clubs: a match
+    against Benfica or Ajax has no form, no xG and no squad rating to predict
+    from. That is 41% of a UCL round, which is why the page says so.
+    """
+    from footballml.ingest.european import big_five_only
+    from footballml.ingest.schedule import COMPETITION_HORIZON_DAYS, upcoming_fixtures
+
+    try:
+        schedule = upcoming_fixtures(
+            list(SHOWN_COMPETITIONS), horizon_days=COMPETITION_HORIZON_DAYS
+        )
+    except Exception as exc:  # noqa: BLE001 - one missing source is survivable
+        logger.warning("No European schedule (%s)", exc)
+        return pd.DataFrame()
+    if schedule.empty:
+        return pd.DataFrame()
+
+    kept, _ = big_five_only(
+        schedule.assign(FTHG=pd.NA, FTAG=pd.NA, FTR=pd.NA), state.tmh
+    )
+    if kept.empty:
+        return pd.DataFrame()
+    return pd.DataFrame(
+        {
+            # The home side's division, not the competition: `LEAGUE_CODES` has
+            # no UEFA entry and a NaN `league_code` is a value no training row
+            # ever carried.
+            "League": kept["home_league"],
+            "competition": kept["League"],
+            "Season": kept["Season"],
+            "Date": pd.to_datetime(kept["Date"]),
+            "HomeTeam": kept["HomeTeam"],
+            "AwayTeam": kept["AwayTeam"],
+        }
+    )
 
 
 @app.get("/matches", response_model=list[Prediction])
@@ -523,6 +675,9 @@ def matches(
     track record. The honest track record lives at ``/accuracy``, which reads
     only predictions stored before kickoff.
     """
+    if league in SHOWN_COMPETITIONS:
+        return _european_matches(league, limit, offset)
+
     model, _ = _require_model()
 
     played = state.features[state.features["FTR"].notna()]
@@ -537,6 +692,57 @@ def matches(
     return _to_predictions(frame)
 
 
+def _european_matches(competition: str, limit: int, offset: int) -> list[Prediction]:
+    """Played European ties, already scored.
+
+    Served from `european_predictions.csv` rather than recomputed, because
+    `state.features` holds only domestic matches -- European results are kept
+    out of the match history on purpose. Without this, selecting a competition
+    under "Recent results" is a permanent dead end: the filter would match
+    nothing, for ever, with no way for the reader to tell that from "no matches
+    have been played yet".
+    """
+    if state.european.empty:
+        return []
+    rows = state.european[state.european["competition"] == competition]
+    rows = rows[rows["FTR"].notna()]
+    window = rows.sort_values("Date", ascending=False).iloc[offset : offset + limit]
+    if window.empty:
+        return []
+
+    frame = window.rename(columns={"home_league": "home_division", "away_league": "away_division"})
+    # `_to_predictions` reads the result straight off FTR/FTHG/FTAG, so those
+    # stay as they are. `League` becomes the home division for display, matching
+    # how these were stored.
+    frame = frame.assign(
+        League=frame["home_division"],
+        league_adjusted=frame["home_division"] != frame["away_division"],
+    )
+    return _to_predictions(frame, with_form=False)
+
+
+def _canonical_team(name: str, known: set[str]) -> str:
+    """Accept a team by any name the project knows it under.
+
+    `/predict` is the one endpoint callers hand a team name to, and the obvious
+    place to get it from is `/teams` -- which serves the ratings table, spelled
+    the way Understat does ("Manchester City"). The match history is spelled the
+    way football-data does ("Man City"), so the two do not meet and every such
+    request 404'd. `config/team_aliases.yaml` is where naming is reconciled, so
+    resolve through it rather than asking callers to know which spelling wins.
+    """
+    if name in known:
+        return name
+    for source in ("understat", "fbref"):
+        try:
+            resolved = load_aliases(source).get(name)
+        except FileNotFoundError:  # pragma: no cover - config ships with the repo
+            continue
+        if resolved in known:
+            return resolved
+    raise HTTPException(404, f"Unknown team {name!r}")
+
+
 @app.post("/predict", response_model=Prediction)
 def predict(request: PredictRequest) -> Prediction:
     """Predict any pairing, using each side's form as of today.
@@ -546,15 +752,13 @@ def predict(request: PredictRequest) -> Prediction:
     model, _ = _require_model()
 
     known = set(state.tmh["Team"].unique())
-    for team in (request.home_team, request.away_team):
-        if team not in known:
-            raise HTTPException(404, f"Unknown team {team!r}")
-    if request.home_team == request.away_team:
+    home, away = (_canonical_team(t, known) for t in (request.home_team, request.away_team))
+    if home == away:
         raise HTTPException(400, "A team cannot play itself")
 
     league = request.league
     if league is None:
-        recent = state.tmh[state.tmh["Team"] == request.home_team].nlargest(1, "Date")
+        recent = state.tmh[state.tmh["Team"] == home].nlargest(1, "Date")
         league = str(recent["League"].iloc[0])
 
     fixture = pd.DataFrame(
@@ -565,8 +769,8 @@ def predict(request: PredictRequest) -> Prediction:
                 # Dated a day ahead so it sorts after every played match and
                 # therefore picks up each side's complete history.
                 "Date": pd.Timestamp.today().normalize() + pd.Timedelta(days=1),
-                "HomeTeam": request.home_team,
-                "AwayTeam": request.away_team,
+                "HomeTeam": home,
+                "AwayTeam": away,
             }
         ]
     )
@@ -575,10 +779,74 @@ def predict(request: PredictRequest) -> Prediction:
     if scored.empty:
         raise HTTPException(422, "Could not build features for that pairing")
 
-    preds = model.predict_frame(scored[state.columns])
+    # The model cannot make this correction for itself: every match it trained
+    # on was domestic, so the gap between two leagues is always zero in its
+    # training data. See `footballml.league_adjust`. A same-league pairing has a
+    # zero gap and passes through untouched.
+    home_division = _division_of(home, league)
+    away_division = _division_of(away, league)
+    mu_home, mu_away = model.predict_goal_rates(scored[state.columns])
+    corrected_home, corrected_away = adjust_for_league(
+        mu_home, mu_away, home_division, away_division, state.league_offsets
+    )
+    preds = model.frame_from_rates(corrected_home, corrected_away, index=scored.index)
+
     frame = pd.concat([scored.reset_index(drop=True), preds.reset_index(drop=True)], axis=1)
+    frame["league_adjusted"] = home_division != away_division and bool(state.league_offsets)
+    frame["home_division"] = home_division
+    frame["away_division"] = away_division
     drivers = model.explain(scored[state.columns], top_n=5) if request.explain else None
     return _to_predictions(frame, drivers)[0]
+
+
+def _division_of(team: str, fallback: str) -> str:
+    """The domestic league a club plays in, for the cross-league correction.
+
+    Taken from the match history rather than the fixture's own label, which for
+    a hypothetical pairing is the *home* side's league and so would report both
+    clubs as playing in the same one.
+
+    A club we have never seen falls back to the label. If that label is a
+    competition rather than a division -- "UCL" -- the correction would look up
+    an offset that does not exist, get 0.0, and silently become the identity for
+    exactly the match that needs it most. These fixtures are filtered to
+    big-five clubs so it should not arise; warn loudly if it ever does.
+    """
+    rows = state.tmh[state.tmh["Team"] == team]
+    if not rows.empty:
+        return str(rows.nlargest(1, "Date")["League"].iloc[0])
+    if fallback not in LEAGUE_CODES:
+        logger.warning(
+            "No division known for %r and the fixture is labelled %r, which is not "
+            "a division -- the cross-league correction will not apply to it",
+            team, fallback,
+        )
+    return fallback
+
+
+def _by_competition(rows: pd.DataFrame) -> dict[str, CompetitionAccuracy]:
+    """Each competition's record on its own, never pooled.
+
+    Skill over a base rate is 12.8% on domestic matches and 6.2% on
+    cross-league ones, measured over 822 UEFA ties. Publishing one blended
+    figure would overstate the European predictions and flatter the domestic
+    ones, which is the kind of claim this project takes trouble to avoid.
+    """
+    if rows.empty or "competition" not in rows.columns:
+        return {}
+    out = {}
+    for name, block in rows.groupby(rows["competition"].fillna(store.DOMESTIC)):
+        actual = block["actual_result"]
+        metrics = evaluate(actual, block[PROB_COLUMNS].to_numpy())
+        out[str(name)] = CompetitionAccuracy(
+            n=metrics["n"],
+            accuracy=round(metrics["accuracy"], 4),
+            rps=round(metrics["rps"], 4),
+            rps_base_rate=round(
+                evaluate(actual, base_rate_probs(actual, len(block)))["rps"], 4
+            ),
+        )
+    return out
 
 
 @app.get("/accuracy", response_model=Accuracy)
@@ -614,6 +882,7 @@ def accuracy(league: str | None = Query(None)) -> Accuracy:
             )
             for lg, g in rows.groupby("League")
         },
+        by_competition=_by_competition(rows),
         calibration=[
             CalibrationBin(**row)
             for row in calibration_table(actual, probs)
@@ -730,7 +999,10 @@ def players(
         )
 
     rows = state.players[state.players["rated"]]
-    rows = rows[rows["Season"] == (season or _default_season(rows))]
+    # Resolve it rather than just applying it: when the caller passes nothing,
+    # the page still has to say which season it ended up showing.
+    shown = str(season or _default_season(rows))
+    rows = rows[rows["Season"].astype(str) == shown]
 
     if league:
         rows = rows[rows["League"] == league]
@@ -754,6 +1026,10 @@ def players(
     return PlayerPage(
         total=len(rows),
         players=[_to_player(r) for _, r in rows.iloc[offset : offset + limit].iterrows()],
+        seasons=sorted(
+            {str(s) for s in state.players["Season"].dropna().unique()}, reverse=True
+        ),
+        season=shown,
     )
 
 
@@ -875,6 +1151,57 @@ def teams(
         )
         for _, r in rows.iterrows()
     ]
+
+
+@app.get("/leagues/strength", response_model=list[LeagueStrength])
+def league_strength(
+    season: str | None = Query(None, description="Defaults to the latest available"),
+) -> list[LeagueStrength]:
+    """How the five leagues compare, averaged over each one's squad ratings.
+
+    Context for a cross-league question: `/predict` will happily score Real
+    Madrid against Man City, but the model has never seen the two divisions
+    meet, so the honest framing is "here is how far apart these leagues are on
+    our own ratings" rather than a fixture forecast.
+
+    The comparison is meaningful because a rating is not league-relative -- see
+    `LeagueStrength` -- with one caveat worth stating: the performance half is
+    built from per-90 output, which is easier to accumulate against weaker
+    opponents. That flatters the weaker leagues, so if anything the real gaps
+    are wider than these.
+    """
+    if state.teams.empty:
+        raise HTTPException(
+            404, "No team ratings loaded. Run `python -m pipelines.build_players`."
+        )
+
+    rows = state.teams
+    rows = rows[rows["Season"] == (season or rows["Season"].max())]
+    rows = rows[rows["strength_overall"].notna()]
+    if rows.empty:
+        raise HTTPException(404, f"No team ratings for season {season!r}")
+
+    out: list[LeagueStrength] = []
+    for league, block in rows.groupby("League"):
+        strongest = block.loc[block["strength_overall"].idxmax()]
+        weakest = block.loc[block["strength_overall"].idxmin()]
+        out.append(
+            LeagueStrength(
+                league=str(league),
+                season=str(block["Season"].iloc[0]),
+                n_teams=len(block),
+                mean_strength=round(float(block["strength_overall"].mean()), 1),
+                median_strength=round(float(block["strength_overall"].median()), 1),
+                # Population sd, not sample: these are all the clubs in the
+                # league, not a sample drawn from a larger set.
+                spread=round(float(block["strength_overall"].std(ddof=0)), 1),
+                strongest_team=str(strongest["Team"]),
+                strongest_strength=round(float(strongest["strength_overall"]), 1),
+                weakest_team=str(weakest["Team"]),
+                weakest_strength=round(float(weakest["strength_overall"]), 1),
+            )
+        )
+    return sorted(out, key=lambda x: x.mean_strength, reverse=True)
 
 
 @app.get("/teams/{name}/squad", response_model=list[PlayerRating])

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api, LEAGUE_NAMES, type Accuracy, type MatchResult } from '../api/client';
+import { api, COMPETITION_NAMES, LEAGUE_NAMES, competitionLabel, type Accuracy, type MatchResult } from '../api/client';
 import { formatDate, pct, teamColor } from '../api/display';
 import { useAsync } from '../api/hooks';
 
@@ -70,7 +70,7 @@ function ResultRow({ m }: { m: MatchResult }) {
     >
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs tracking-widest uppercase" style={{ color: 'var(--muted-foreground)' }}>
-          {LEAGUE_NAMES[m.league] ?? m.league}
+          {competitionLabel(m.league)}
         </span>
         <div className="flex items-center gap-2">
           <ResultBadge correct={m.correct} />
@@ -222,9 +222,22 @@ export default function PredictionHistory() {
   const [source, setSource] = useState<Source>('backtest');
   const [league, setLeague] = useState('All');
 
+  /**
+   * The backtest is a walk-forward over the domestic history and contains no
+   * European tie, so a competition filter there can only ever return an error
+   * — and since the dropdown hides those options under the backtest, there
+   * would be no way to clear it from the page.
+   *
+   * Derived rather than reset on click: a click handler guards the one
+   * transition it is attached to, and leaves every other route into this state
+   * — a stale tab, a hot reload that kept the old state — stuck on an error.
+   */
+  const competitionPicked = league in COMPETITION_NAMES;
+  const effectiveLeague = source === 'backtest' && competitionPicked ? 'All' : league;
+
   const { data, loading, error, reload } = useAsync(
-    () => api.history(source, league === 'All' ? undefined : league, 60),
-    [source, league],
+    () => api.history(source, effectiveLeague === 'All' ? undefined : effectiveLeague, 60),
+    [source, effectiveLeague],
   );
 
   const summary = data?.summary;
@@ -261,15 +274,23 @@ export default function PredictionHistory() {
         </div>
 
         <select
-          value={league}
+          value={effectiveLeague}
           onChange={e => setLeague(e.target.value)}
           className="px-3 py-2 rounded-lg text-sm"
           style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
         >
-          <option value="All">All leagues</option>
+          <option value="All">All competitions</option>
           {Object.entries(LEAGUE_NAMES).map(([code, name]) => (
             <option key={code} value={code}>{name}</option>
           ))}
+          {/* Live record only. The backtest holds no European tie, so offering
+              one here is an option that can only produce an error. The derived
+              `effectiveLeague` above is the backstop for state that arrives
+              here by some other route. */}
+          {source === 'live' &&
+            Object.entries(COMPETITION_NAMES).map(([code, name]) => (
+              <option key={code} value={code}>{name}</option>
+            ))}
         </select>
 
         {data && (
@@ -294,16 +315,36 @@ export default function PredictionHistory() {
           <div className="text-sm mb-2" style={{ color: '#ff9100' }}>{error}</div>
           {source === 'live' && (
             <div className="text-xs mb-4" style={{ color: 'var(--muted-foreground)' }}>
-              The live record only counts predictions made before kickoff, so it fills up a few
-              matches at a time.
+              {competitionPicked ? (
+                <>
+                  European rounds are a fortnight apart and only ties between big-five clubs
+                  can be rated, so this record builds up slowly — a handful of matches per
+                  round, and nothing at all between them.
+                </>
+              ) : (
+                <>
+                  The live record only counts predictions made before kickoff, so it fills up a
+                  few matches at a time.
+                </>
+              )}
             </div>
           )}
           <button
-            onClick={source === 'live' ? () => setSource('backtest') : reload}
+            onClick={
+              competitionPicked
+                ? () => setLeague('All')
+                : source === 'live'
+                  ? () => setSource('backtest')
+                  : reload
+            }
             className="px-4 py-2 rounded-lg text-sm font-display font-bold"
             style={{ background: 'rgba(0,230,118,0.15)', color: '#00e676' }}
           >
-            {source === 'live' ? 'Show backtest history instead' : 'Retry'}
+            {competitionPicked
+              ? 'Show all competitions'
+              : source === 'live'
+                ? 'Show backtest history instead'
+                : 'Retry'}
           </button>
         </div>
       )}
@@ -339,6 +380,44 @@ export default function PredictionHistory() {
 
           <Explainer summary={summary} />
 
+          {/* Domestic and European kept apart. Pooling them would overstate the
+              European ties, which keep about half the model's usual edge. */}
+          {Object.keys(summary.by_competition ?? {}).length > 1 && (
+            <div
+              className="rounded-xl p-5 mb-6"
+              style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+            >
+              <div
+                className="text-xs font-display font-bold uppercase tracking-wider mb-1"
+                style={{ color: 'var(--muted-foreground)' }}
+              >
+                By competition
+              </div>
+              <p className="text-xs mb-3" style={{ color: 'var(--muted-foreground)' }}>
+                Reported separately rather than pooled: a cross-league tie is a harder
+                prediction, and one blended figure would flatter it.
+              </p>
+              <div className="flex flex-wrap gap-x-8 gap-y-3">
+                {Object.entries(summary.by_competition)
+                  .sort((a, b) => b[1].n - a[1].n)
+                  .map(([code, row]) => (
+                    <div key={code}>
+                      <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                        {code === 'domestic' ? 'Domestic leagues' : competitionLabel(code)}
+                        {' · '}{row.n} settled
+                      </div>
+                      <div className="font-data font-bold text-sm" style={{ color: 'var(--foreground)' }}>
+                        {pct(row.accuracy)}
+                        <span className="text-xs font-normal ml-2" style={{ color: 'var(--muted-foreground)' }}>
+                          RPS {row.rps.toFixed(4)} vs {row.rps_base_rate.toFixed(4)} base
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
           {Object.keys(summary.by_league_accuracy).length > 1 && (
             <div
               className="rounded-xl p-5 mb-6"
@@ -356,7 +435,7 @@ export default function PredictionHistory() {
                   .map(([code, value]) => (
                     <div key={code} className="flex items-center gap-2">
                       <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                        {LEAGUE_NAMES[code] ?? code}
+                        {competitionLabel(code)}
                       </span>
                       <span className="font-data font-bold text-sm" style={{ color: 'var(--foreground)' }}>
                         {pct(value)}
