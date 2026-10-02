@@ -13,16 +13,21 @@ dependencies = [
     "scipy>=1.12",
     "scikit-learn>=1.4",
     "pyyaml>=6.0",
-    "typer>=0.12",
+    # Core, not an ingest extra, despite only the fetchers calling it:
+    # `api/app.py` imports `ingest.matchhistory` at module scope for `LEAGUES`
+    # and `fetch_fixtures`, and that module imports `requests` at module scope.
+    # So `pip install -e ".[api]"` produced an API that raised ImportError on
+    # start. It only ever worked because `requests` arrived transitively.
+    "requests>=2.31",
 ]
 
 [project.optional-dependencies]
 # Kept separate: soccerdata pulls seleniumbase/selenium, a heavyweight browser
 # automation stack. Only the nightly ingest job needs it -- the API and the
-# model training path must stay installable without it.
+# model training path must stay installable without it, which is why `requests`
+# is a core dependency rather than living here.
 ingest = [
     "soccerdata>=1.9.1",
-    "requests>=2.31",
 ]
 model = [
     "lightgbm>=4.3",

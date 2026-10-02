@@ -24,7 +24,18 @@ Order is not arbitrary:
    step 3 to use the model just trained.
 5. ``project_season`` simulates every remaining fixture into a projected table,
    also on the freshly trained model.
-6. ``reload`` tells a running API to re-read all of it.
+6. ``fetch_european`` pulls any new UEFA results, then ``validate_european``
+   scores every European tie with the model from step 3 and
+   ``fit_league_adjustment`` refits the cross-league correction. All three must
+   follow the retrain, because the offsets describe *that* model's residual
+   error on those ties and do not transfer to another.
+7. ``reload`` tells a running API to re-read all of it.
+
+Step 6 sounds expensive and is not. Building features for 438 European
+matchdays takes ~92 minutes, but a past tie's features are built from the
+domestic matches *before* it and history does not move, so
+``validate_european`` caches them. In a normal week it rebuilds nothing and
+only re-scores; in a European week it builds the handful of new matchdays.
 
 Each step is timed and logged to ``logs/weekly-<date>.log`` as well as stdout,
 because a scheduled run nobody watched still has to be readable afterwards.
@@ -54,24 +65,53 @@ logger = logging.getLogger("weekly")
 
 @dataclass(frozen=True)
 class Step:
-    """One pipeline invocation."""
+    """One pipeline invocation.
+
+    `required` decides what a failure costs. A required step failing stops the
+    run, because a half-built dataset masquerading as a complete one is the
+    thing this job exists to prevent. An optional step failing is logged, the
+    run continues, and the site still gets its fresh data -- the run then exits
+    non-zero so the failure is not silent.
+    """
 
     name: str
     args: tuple[str, ...]
     why: str
+    required: bool = True
 
 
 #: The weekly run, in dependency order. See the module docstring.
 STEPS: tuple[Step, ...] = (
     Step("build_dataset", (), "fetch match results"),
+    # 1415 is the earliest season that can be rated at all -- Understat has no
+    # data before it -- and it was added after this step was written. Left at
+    # 1516 the weekly run would quietly delete a season from the ratings file
+    # every Monday, and the only sign would be a gap in the season dropdown.
     Step(
         "build_players",
-        ("--start-season", "1516"),
+        ("--start-season", "1415"),
         "rebuild player ratings and team strength",
     ),
     Step("train", (), "retrain on the new matches"),
     Step("score_upcoming", (), "settle played predictions, forecast the next round"),
     Step("project_season", (), "simulate the rest of the season for each league"),
+    # The cross-league correction has to follow `train`: the offsets describe
+    # that model's residual error on European ties, so a retrain makes the old
+    # ones stale. `validate_european` caches the features it builds -- a past
+    # tie's features cannot change -- so in most weeks it only scores, and only
+    # in European weeks does it build anything.
+    # Optional. These drive a headless browser against FBref, comfortably the
+    # most fragile thing in the job, and they only refine a correction that
+    # applies to European ties. Letting a scraper outage block `reload` would
+    # mean a week of fresh domestic data sitting on disk while the site served
+    # the old model -- a worse failure than the staleness this job prevents.
+    Step("fetch_european", (), "pull any new UEFA results", required=False),
+    Step(
+        "validate_european", (), "score European ties with the new model", required=False
+    ),
+    Step(
+        "fit_league_adjustment", (), "refit the cross-league correction", required=False
+    ),
 )
 
 #: Not a pipeline module -- handled in-process, see `reload_api`.
@@ -220,6 +260,7 @@ def main() -> int:
     logger.info("Weekly refresh starting; logging to %s", log_path.name)
     started = time.monotonic()
     ran: list[str] = []
+    failed_optional: list[str] = []
 
     for step in STEPS:
         if step.name not in wanted:
@@ -228,13 +269,22 @@ def main() -> int:
         try:
             run_step(step)
         except subprocess.CalledProcessError as exc:
+            if step.required:
+                logger.error(
+                    "%s failed (exit %d). Stopping: a partial refresh looks like a "
+                    "complete one, and the site would serve a mix of old and new. "
+                    "Fix it, then rerun just this step with --only %s",
+                    step.name, exc.returncode, step.name,
+                )
+                return 1
             logger.error(
-                "%s failed (exit %d). Stopping: a partial refresh looks like a "
-                "complete one, and the site would serve a mix of old and new. "
-                "Fix it, then rerun just this step with --only %s",
+                "%s failed (exit %d). Continuing: it is optional, and stopping "
+                "here would leave freshly built data unpublished. Rerun it with "
+                "--only %s once the cause is fixed.",
                 step.name, exc.returncode, step.name,
             )
-            return 1
+            failed_optional.append(step.name)
+            continue
         ran.append(step.name)
 
     if RELOAD in wanted:
@@ -251,6 +301,15 @@ def main() -> int:
         "Weekly refresh finished in %s (%s)", _duration(time.monotonic() - started),
         ", ".join(ran) or "nothing to do",
     )
+    if failed_optional:
+        # The site is up to date, so this is not a failed refresh -- but
+        # something did fail, and a job that exits 0 after an error is a job
+        # nobody will ever look at again.
+        logger.error(
+            "Finished, but %d optional step(s) failed: %s",
+            len(failed_optional), ", ".join(failed_optional),
+        )
+        return 1
     return 0
 
 

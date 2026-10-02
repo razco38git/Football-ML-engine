@@ -13,9 +13,18 @@ data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 
+# Dropped in the working directory by the headless-Chrome driver that FBref
+# scraping needs -- a lock file, not project content.
+downloaded_files/
+
 # Trained model artifacts. Rebuilt by `python -m pipelines.train`; binaries do
 # not belong in git, and the metadata is not useful without them.
-models/
+#
+# Anchored to the repository root. Unanchored, `models/` also matches
+# `src/footballml/models/`, which is a source package: git refuses to stage a
+# change to it without -f, and a new module there would never be offered at
+# all.
+/models/
 
 # Environment
 .env
