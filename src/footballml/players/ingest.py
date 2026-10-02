@@ -201,7 +201,6 @@ def fetch_player_seasons(
     leagues: list[str] | None = None,
     seasons: list[str] | None = None,
     with_fbref: bool = True,
-    with_extended: bool = True,
     with_fifa: bool = True,
 ) -> pd.DataFrame:
     """Fetch per-season player totals and derive per-90 rates.
@@ -280,22 +279,6 @@ def fetch_player_seasons(
             on=["League", "Season", "Team"],
             fallback_on=["League", "Season"],
         )
-
-        if with_extended:
-            # Defending, possession and passing -- the tables soccerdata does
-            # not list. Without these a defender is judged on three numbers.
-            # Nested rather than combined: turning the extended tables off must
-            # not also drop the basic ones.
-            from footballml.players.fbref_extended import fetch_extended_stats
-
-            deep = fetch_extended_stats(codes, seasons)
-            if not deep.empty:
-                out = match_players(
-                    out,
-                    deep,
-                    on=["League", "Season", "Team"],
-                    fallback_on=["League", "Season"],
-                )
 
     if with_fifa:
         # Optional: adds EA overalls for the blend and, more importantly, the

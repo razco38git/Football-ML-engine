@@ -105,8 +105,8 @@ class Match:
     role: str
     rating: int | None
     minutes: int
-    #: 0-100, or None when either player has no EA entry. 8.6% of rated players
-    #: have none, and a silent zero would read as "completely different".
+    #: 0-100, or None when either player has no EA entry. A small share have
+    #: none, and a silent zero would read as "completely different".
     fifa_similarity: float | None
     #: 0-100, or None across roles -- the percentiles are not comparable there.
     percentile_similarity: float | None

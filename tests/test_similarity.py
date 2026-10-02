@@ -141,7 +141,7 @@ def test_a_keeper_is_scored_on_the_keeper_attributes():
 
 
 def test_a_missing_ea_entry_leaves_the_axis_empty_not_zero(outfielders):
-    """8.6% of rated players have no EA row. A zero would read as 'opposite'."""
+    """Some rated players have no EA row. A zero would read as 'opposite'."""
     absent = _player("No EA", "AMW")
     for attribute in OUTFIELD_ATTRIBUTES:
         absent[f"fifa_{attribute}"] = np.nan

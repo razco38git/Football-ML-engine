@@ -1,7 +1,7 @@
 """Predict fixtures and show why, with actual results when they exist.
 
 Trains on everything before a cutoff date, then predicts matches on or after it.
-Because the dataset runs to May 2025, predicting a past date shows the
+Because the dataset ends at the last completed round, predicting a past date shows the
 prediction *and* what actually happened -- which is the accuracy tracker in
 miniature, and the quickest way to see whether the model is sane.
 
