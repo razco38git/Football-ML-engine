@@ -177,7 +177,7 @@ export const api = {
   similar: (name: string, options: SimilarQuery = {}) => fetchSimilar(name, options),
 
   /** Team ratings built from player ratings. */
-  teams: (league?: string, limit = 100) => fetchTeams(league, limit),
+  teams: (league?: string, limit = 100, season?: string) => fetchTeams(league, limit, season),
 
   /** The players behind a team's rating. */
   squad: (team: string) => fetchSquad(team),
@@ -393,11 +393,24 @@ export interface TeamStrength {
   strength_attack: number | null;
 }
 
+export interface TeamStrengthPage {
+  teams: TeamStrength[];
+  /** Every season with team ratings, newest first. */
+  seasons: string[];
+  /** The season these rows are from. */
+  season: string | null;
+}
+
 /** Team ratings built from player ratings, strongest first. */
-export function fetchTeams(league?: string, limit = 100): Promise<TeamStrength[]> {
+export function fetchTeams(
+  league?: string,
+  limit = 100,
+  season?: string,
+): Promise<TeamStrengthPage> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (league && league !== 'All') params.set('league', league);
-  return get<TeamStrength[]>(`/teams?${params}`);
+  if (season) params.set('season', season);
+  return get<TeamStrengthPage>(`/teams?${params}`);
 }
 
 export interface LeagueStrength {

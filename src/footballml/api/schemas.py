@@ -222,6 +222,21 @@ class TeamStrength(BaseModel):
     strength_attack: float | None = None
 
 
+class TeamStrengthPage(BaseModel):
+    """Team ratings plus the seasons a caller can choose between.
+
+    Same shape as :class:`PlayerPage` and for the same reason: the endpoint
+    always took a `season`, and nothing could offer it without hardcoding a
+    range that goes stale the moment a season is built.
+    """
+
+    teams: list[TeamStrength]
+    #: Every season with team ratings, newest first.
+    seasons: list[str] = Field(default_factory=list)
+    #: The season these rows are from.
+    season: str | None = None
+
+
 class LeagueStrength(BaseModel):
     """How strong a league is, averaged over its clubs' squad ratings.
 

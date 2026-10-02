@@ -45,6 +45,7 @@ from footballml.api.schemas import (
     SimilarPlayers,
     TeamForm,
     TeamStrength,
+    TeamStrengthPage,
 )
 from footballml.data import (
     ODDS_COLUMNS,
@@ -1113,20 +1114,24 @@ def player_similarity(
     )
 
 
-@app.get("/teams", response_model=list[TeamStrength])
+@app.get("/teams", response_model=TeamStrengthPage)
 def teams(
     league: str | None = Query(None, description="Division code, e.g. E0"),
     season: str | None = Query(None, description="Defaults to the latest available"),
     limit: int = Query(100, le=200),
-) -> list[TeamStrength]:
+) -> TeamStrengthPage:
     """Team ratings built from player ratings, strongest first."""
     if state.teams.empty:
         raise HTTPException(
             404, "No team ratings loaded. Run `python -m pipelines.build_players`."
         )
 
+    seasons = sorted(
+        {str(s) for s in state.teams["Season"].dropna().unique()}, reverse=True
+    )
+    shown = season or (seasons[0] if seasons else None)
     rows = state.teams
-    rows = rows[rows["Season"] == (season or rows["Season"].max())]
+    rows = rows[rows["Season"].astype(str) == str(shown)]
     if league:
         rows = rows[rows["League"] == league]
 
@@ -1136,21 +1141,25 @@ def teams(
         value = row.get(column)
         return None if pd.isna(value) else round(float(value), 1)
 
-    return [
-        TeamStrength(
-            team=str(r["Team"]),
-            league=str(r["League"]),
-            season=str(r["Season"]),
-            method=str(r.get("method", "eleven")),
-            n_players=int(r.get("n_players", 0)),
-            strength_overall=round(float(r["strength_overall"]), 1),
-            strength_goalkeeper=num(r, "strength_goalkeeper"),
-            strength_defence=num(r, "strength_defence"),
-            strength_midfield=num(r, "strength_midfield"),
-            strength_attack=num(r, "strength_attack"),
-        )
-        for _, r in rows.iterrows()
-    ]
+    return TeamStrengthPage(
+        teams=[
+            TeamStrength(
+                team=str(r["Team"]),
+                league=str(r["League"]),
+                season=str(r["Season"]),
+                method=str(r.get("method", "eleven")),
+                n_players=int(r.get("n_players", 0)),
+                strength_overall=round(float(r["strength_overall"]), 1),
+                strength_goalkeeper=num(r, "strength_goalkeeper"),
+                strength_defence=num(r, "strength_defence"),
+                strength_midfield=num(r, "strength_midfield"),
+                strength_attack=num(r, "strength_attack"),
+            )
+            for _, r in rows.iterrows()
+        ],
+        seasons=seasons,
+        season=str(shown) if shown is not None else None,
+    )
 
 
 @app.get("/leagues/strength", response_model=list[LeagueStrength])

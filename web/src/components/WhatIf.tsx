@@ -27,9 +27,9 @@ export default function WhatIf() {
     let live = true;
     api
       .teams(undefined, 200)
-      .then(rows => {
+      .then(page => {
         if (!live) return;
-        const sorted = [...rows].sort(
+        const sorted = [...page.teams].sort(
           (a, b) => a.league.localeCompare(b.league) || a.team.localeCompare(b.team),
         );
         setTeams(sorted);

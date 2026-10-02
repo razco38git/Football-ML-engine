@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api, LEAGUE_NAMES, type PlayerRating, type TeamStrength } from '../api/client';
+import { api, LEAGUE_NAMES, seasonLabel, type PlayerRating, type TeamStrength } from '../api/client';
 import { getRatingBg, getRatingTextColor, teamColor } from '../api/display';
 import { useAsync } from '../api/hooks';
 import { LeagueStrengthPanel } from './LeagueStrength';
@@ -132,14 +132,22 @@ function SquadPanel({ team, onClose }: { team: TeamStrength; onClose: () => void
 
 export default function TeamStrength() {
   const [league, setLeague] = useState('All');
+  const [season, setSeason] = useState('');
   const [selected, setSelected] = useState<TeamStrength | null>(null);
 
   const { data, loading, error, reload } = useAsync(
-    () => api.teams(league === 'All' ? undefined : league),
-    [league],
+    () => api.teams(league === 'All' ? undefined : league, 100, season || undefined),
+    [league, season],
   );
 
-  const best = data?.[0]?.strength_overall ?? 100;
+  const rows = data?.teams ?? [];
+  const best = rows[0]?.strength_overall ?? 100;
+  // A squad is rated from the season's own players, so an earlier season shows
+  // that season's team -- which is the point of being able to pick one, and
+  // worth saying out loud rather than leaving the reader to infer it.
+  const isPrevious = Boolean(
+    data?.season && data.seasons.length > 0 && data.seasons[0] !== data.season,
+  );
 
   return (
     <div>
@@ -169,9 +177,19 @@ export default function TeamStrength() {
             <option key={code} value={code}>{name}</option>
           ))}
         </select>
-        {data && data.length > 0 && (
+        <select
+          value={data?.season ?? season}
+          onChange={e => setSeason(e.target.value)}
+          className="px-3 py-2 rounded-lg text-sm"
+          style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--foreground)' }}
+        >
+          {(data?.seasons ?? []).map(s => (
+            <option key={s} value={s}>{seasonLabel(s)}</option>
+          ))}
+        </select>
+        {rows.length > 0 && (
           <span className="text-xs ml-auto" style={{ color: 'var(--muted-foreground)' }}>
-            {data.length} teams · {data[0].season.slice(0, 2)}/{data[0].season.slice(2)}
+            {rows.length} teams{isPrevious ? ` · ${seasonLabel(data!.season!)}` : ''}
           </span>
         )}
       </div>
@@ -197,7 +215,7 @@ export default function TeamStrength() {
 
       {data && (
         <div className="flex flex-col gap-2">
-          {data.map((t, i) => (
+          {rows.map((t, i) => (
             <div
               key={`${t.team}-${i}`}
               onClick={() => setSelected(t)}

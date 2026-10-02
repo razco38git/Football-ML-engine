@@ -87,3 +87,49 @@ def test_no_ratings_at_all_says_what_to_run(monkeypatch: pytest.MonkeyPatch) -> 
     response = TestClient(api.app).get("/leagues/strength")
     assert response.status_code == 404
     assert "build_players" in response.json()["detail"]
+
+
+# --- picking a season on the Team Strength tab -----------------------------
+#
+# `/teams` always took a `season`, and nothing could offer it: the response was
+# a bare list, so a caller had no way to learn which seasons exist short of
+# hardcoding a range that goes stale the moment one is built. Same shape as
+# `/players` now, and for the same reason.
+
+
+def test_the_latest_season_is_still_the_default(client: TestClient) -> None:
+    page = client.get("/teams").json()
+    assert page["season"] == "2526"
+    assert {t["team"] for t in page["teams"]} == {"Man City", "Arsenal", "Burnley",
+                                                  "Paris SG", "Metz"}
+
+
+def test_every_season_with_ratings_is_offered(client: TestClient) -> None:
+    """Newest first, so a dropdown reads the way a reader expects."""
+    assert client.get("/teams").json()["seasons"] == ["2526", "2425"]
+
+
+def test_asking_for_an_earlier_season_gets_that_season(client: TestClient) -> None:
+    page = client.get("/teams?season=2425").json()
+    assert page["season"] == "2425"
+    assert [t["team"] for t in page["teams"]] == ["Man City"]
+    # That season's rating, not the newest one's.
+    assert page["teams"][0]["strength_overall"] == 50.0
+    # And the full list stays available, so the control does not collapse to
+    # the one season being viewed.
+    assert page["seasons"] == ["2526", "2425"]
+
+
+def test_a_season_with_no_ratings_is_empty_rather_than_the_latest(
+    client: TestClient,
+) -> None:
+    """Silently falling back would show 2025/26 rows under a 2019/20 label."""
+    page = client.get("/teams?season=1920").json()
+    assert page["teams"] == []
+    assert page["season"] == "1920"
+
+
+def test_the_league_filter_still_applies(client: TestClient) -> None:
+    page = client.get("/teams?league=F1").json()
+    assert {t["team"] for t in page["teams"]} == {"Paris SG", "Metz"}
+    assert page["seasons"] == ["2526", "2425"]
