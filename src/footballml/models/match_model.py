@@ -148,7 +148,21 @@ class MatchPredictor:
         Columns: expected goals per side, 1X2 probabilities, the modal scoreline,
         over/under 2.5 and both-teams-to-score.
         """
-        mu_h, mu_a = self.predict_goal_rates(X)
+        return self.frame_from_rates(*self.predict_goal_rates(X), index=X.index)
+
+    def frame_from_rates(
+        self, mu_h: np.ndarray, mu_a: np.ndarray, index: pd.Index | None = None
+    ) -> pd.DataFrame:
+        """The same table, from goal rates that a caller may have adjusted.
+
+        Split out for the one correction the model cannot make for itself. Every
+        match it trains on is domestic, so the gap between two *leagues* is
+        always zero in training and the booster never learns what a cross-league
+        rating difference means -- measured on 822 UEFA ties, its predicted
+        home-win probability moved at +0.0034 per rating point where the truth
+        moves at +0.0402. :mod:`footballml.league_adjust` corrects the rates
+        outside the model, and needs everything downstream of them rebuilt.
+        """
         matrix = score_matrix(mu_h, mu_a, rho=self.rho_, max_goals=self.max_goals)
         probs = outcome_probs(matrix)
         modal = most_likely_score(matrix)
@@ -187,7 +201,7 @@ class MatchPredictor:
                 "prob_over_2_5": over_under(matrix, 2.5),
                 "prob_btts": both_teams_score(matrix),
             },
-            index=X.index,
+            index=pd.RangeIndex(len(mu_h)) if index is None else index,
         )
 
     def explain(self, X: pd.DataFrame, top_n: int = 5) -> list[dict[str, list[tuple[str, float]]]]:

@@ -29,7 +29,7 @@ from footballml.data import (  # noqa: E402
     load_team_match_history,
     load_team_strength,
 )
-from footballml.features.build import build_match_features  # noqa: E402
+from footballml.features.build import AUTO, build_match_features  # noqa: E402
 from footballml.models.calibration import (  # noqa: E402
     TemperatureCalibrator,
     expected_calibration_error,
@@ -176,22 +176,32 @@ def main() -> None:
         help="Exclude squad-strength features, for an A/B against the baseline.",
     )
     parser.add_argument(
+        "--no-european",
+        action="store_true",
+        help=(
+            "Build Elo from domestic matches only, as it was before UEFA ties "
+            "were fed in. The A/B for that change."
+        ),
+    )
+    parser.add_argument(
         "--save-predictions",
         action="store_true",
         help="Write every walk-forward prediction to data/processed/.",
     )
     args = parser.parse_args()
 
-    path = PROCESSED_DIR / ("team_match_history_all.csv" if args.all_leagues else None or "")
+    # Was `PROCESSED_DIR / (... if args.all_leagues else None or "")`, which in
+    # the else branch resolved to the directory itself. Harmless only because
+    # every branch below reassigns `path`.
+    path = None
     if args.all_leagues:
+        path = PROCESSED_DIR / "team_match_history_all.csv"
         if not path.exists():
             raise SystemExit(f"{path} not found -- run `python -m pipelines.build_dataset` first")
     elif args.xg:
         path = PROCESSED_DIR / "team_match_history_xg.csv"
         if not path.exists():
             raise SystemExit(f"{path} not found -- run `python -m pipelines.ingest_xg` first")
-    else:
-        path = None
 
     tmh = load_team_match_history(path)
     if args.leagues:
@@ -200,7 +210,8 @@ def main() -> None:
     # Strength is joined from the *previous* season. It is computed over a whole
     # season, so a match seeing its own would be predicting October from May.
     strength = None if args.no_strength else load_team_strength()
-    features = build_match_features(tmh, strength=strength)
+    european = None if args.no_european else AUTO
+    features = build_match_features(tmh, strength=strength, european=european)
 
     cols = feature_columns(features)
     note = ""
