@@ -40,7 +40,12 @@ function Badge({ value, size = 34 }: { value: number | null; size?: number }) {
 }
 
 function SquadPanel({ team, onClose }: { team: TeamStrength; onClose: () => void }) {
-  const { data, loading, error } = useAsync(() => api.squad(team.team), [team.team]);
+  // The season the row came from, not whatever the player file's newest is:
+  // those differ, and the panel header and the squad under it disagreed.
+  const { data, loading, error } = useAsync(
+    () => api.squad(team.team, team.season),
+    [team.team, team.season],
+  );
   const color = teamColor(team.team);
 
   return (

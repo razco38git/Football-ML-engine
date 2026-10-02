@@ -133,3 +133,40 @@ def test_the_league_filter_still_applies(client: TestClient) -> None:
     page = client.get("/teams?league=F1").json()
     assert {t["team"] for t in page["teams"]} == {"Paris SG", "Metz"}
     assert page["seasons"] == ["2526", "2425"]
+
+
+# --- the squad behind a team rating ----------------------------------------
+
+
+PLAYERS = pd.DataFrame(
+    [("Man City", s, f"P{i}", 2000, True) for s in ("2526",) for i in range(14)]
+    + [("Man City", "2627", "Keeper", 500, True), ("Man City", "2627", "Stopper", 500, True)],
+    columns=["Team", "Season", "Player", "minutes", "rated"],
+).assign(League="E0", position="MID", rating=70, fifa_overall=70.0)
+
+
+@pytest.fixture
+def squad_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    monkeypatch.setattr(api.state, "teams", TEAMS)
+    monkeypatch.setattr(api.state, "players", PLAYERS)
+    return TestClient(api.app)
+
+
+def test_the_squad_is_not_taken_from_a_season_nobody_qualifies_in(
+    squad_client: TestClient,
+) -> None:
+    """Five matchweeks in, barely anyone has cleared the minutes floor -- 181
+    rated players across all five leagues in 2026/27.
+
+    Team *ratings* already refuse a season that thin, so the newest season in
+    the two files differs. Taking the player file's newest left the panel
+    header reading 2025/26 above a squad of two.
+    """
+    squad = squad_client.get("/teams/Man City/squad").json()
+    assert len(squad) == 14, "fell back to the season with two rated players"
+
+
+def test_an_explicit_season_is_honoured(squad_client: TestClient) -> None:
+    """The tab passes the season its row came from, so the two always agree."""
+    squad = squad_client.get("/teams/Man City/squad?season=2627").json()
+    assert {p["player"] for p in squad} == {"Keeper", "Stopper"}

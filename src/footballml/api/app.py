@@ -79,6 +79,7 @@ from footballml.players.similarity import (
     similar_players,
     values_for,
 )
+from footballml.players.team_strength import MIN_RATED_PLAYERS
 
 logger = logging.getLogger(__name__)
 
@@ -1232,7 +1233,18 @@ def team_squad(
     if rows.empty:
         raise HTTPException(404, f"Unknown team {name!r}")
 
-    rows = rows[rows["Season"] == (season or rows["Season"].max())]
+    # Not simply the newest season this player file has. Five matchweeks into a
+    # campaign barely anyone has cleared the minutes floor -- 181 rated players
+    # across all five leagues in 2026/27 -- so `max()` picked a season in which
+    # Liverpool had two rated players, a goalkeeper and a centre back. Team
+    # *ratings* already refuse a season that thin (`MIN_RATED_PLAYERS`), so the
+    # panel header read 2025/26 while the squad under it was 2026/27 and two
+    # names long.
+    if season is None:
+        counts = rows.groupby("Season").size()
+        enough = counts[counts >= MIN_RATED_PLAYERS]
+        season = (enough.index.max() if not enough.empty else counts.index.max())
+    rows = rows[rows["Season"].astype(str) == str(season)]
     return [_to_player(r) for _, r in rows.sort_values("minutes", ascending=False).iterrows()]
 
 

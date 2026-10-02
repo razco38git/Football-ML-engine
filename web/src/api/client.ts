@@ -180,7 +180,7 @@ export const api = {
   teams: (league?: string, limit = 100, season?: string) => fetchTeams(league, limit, season),
 
   /** The players behind a team's rating. */
-  squad: (team: string) => fetchSquad(team),
+  squad: (team: string, season?: string) => fetchSquad(team, season),
 
   /** How the five leagues compare on average squad rating. */
   leagueStrength: (season?: string) => fetchLeagueStrength(season),
@@ -446,8 +446,9 @@ export function fetchLeagueStrength(season?: string): Promise<LeagueStrength[]> 
 }
 
 /** The players a team's rating was built from, highest minutes first. */
-export function fetchSquad(team: string): Promise<PlayerRating[]> {
-  return get<PlayerRating[]>(`/teams/${encodeURIComponent(team)}/squad`);
+export function fetchSquad(team: string, season?: string): Promise<PlayerRating[]> {
+  const params = season ? `?season=${encodeURIComponent(season)}` : '';
+  return get<PlayerRating[]>(`/teams/${encodeURIComponent(team)}/squad${params}`);
 }
 
 export interface MatchResult {
