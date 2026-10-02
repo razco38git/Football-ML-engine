@@ -141,11 +141,43 @@ def _probs(frame: pd.DataFrame) -> np.ndarray:
     return frame[PROB_COLUMNS].to_numpy(dtype=float)
 
 
+#: How many matchdays to build before writing the cache again.
+#:
+#: The cache used to be written once, after the last of 438 matchdays. Anything
+#: that stopped the run first -- a timeout, a laptop sleeping, Ctrl-C -- threw
+#: away every minute of it, and at ~9 seconds a matchday that is an hour and a
+#: half with nothing to show. One run was killed at matchday 200 and the next
+#: started again from zero.
+#:
+#: 25 matchdays is ~4 minutes of work at risk, against a write of a file that
+#: is 1.6 MB. The write is atomic (see `_checkpoint`), so a kill *during* one
+#: cannot leave a half-written cache behind either.
+CHECKPOINT_EVERY = 25
+
+
+def _checkpoint(frames: list[pd.DataFrame], fingerprint: str | None) -> None:
+    """Write what has been built so far, atomically.
+
+    Via a temporary file and a replace, because the alternative is a cache
+    truncated mid-write that still carries a valid fingerprint -- which the
+    next run would load and trust. `load_cache` survives an unreadable file,
+    but not a readable and wrong one.
+    """
+    if fingerprint is None or not frames:
+        return
+    partial = pd.concat(frames, ignore_index=True)
+    partial["Date"] = pd.to_datetime(partial["Date"])
+    tmp = FEATURES_CACHE.with_suffix(".pkl.tmp")
+    partial.assign(**{FINGERPRINT_COLUMN: fingerprint}).to_pickle(tmp)
+    tmp.replace(FEATURES_CACHE)
+
+
 def build_features(
     european: pd.DataFrame,
     tmh: pd.DataFrame,
     strength: pd.DataFrame,
     cached: pd.DataFrame | None = None,
+    fingerprint: str | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Features for every European tie, one matchday at a time.
 
@@ -202,8 +234,9 @@ def build_features(
             logger.warning("%s: no features built for %d match(es)", date, len(batch))
             continue
         out.append(built)
-        if i % 25 == 0:
+        if i % CHECKPOINT_EVERY == 0:
             print(f"  ... {i}/{dates} matchdays", flush=True)
+            _checkpoint(out, fingerprint)
 
     if not out:
         return pd.DataFrame(), pd.DataFrame()
@@ -333,7 +366,10 @@ def main() -> int:
 
     fingerprint = strength_fingerprint()
     cached = pd.DataFrame() if args.no_cache else load_cache(fingerprint)
-    features, raw = build_features(european, tmh, strength, cached=cached)
+    features, raw = build_features(
+        european, tmh, strength, cached=cached,
+        fingerprint=None if args.no_cache else fingerprint,
+    )
     if features.empty:
         print("No features built.")
         return 1

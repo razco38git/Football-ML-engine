@@ -17,6 +17,7 @@ from __future__ import annotations
 import importlib
 
 import pandas as pd
+import pytest
 
 validate = importlib.import_module("pipelines.validate_european")
 
@@ -251,3 +252,59 @@ def test_an_unreadable_cache_rebuilds_rather_than_crashing(tmp_path) -> None:
     path = tmp_path / "features.pkl"
     path.write_bytes(b"not a pickle")
     assert validate.load_cache("f", path).empty
+
+
+# --- surviving an interruption ---------------------------------------------
+#
+# The cache was written once, after the last of 438 matchdays. Anything that
+# stopped the run first threw away every minute of it: one run was killed at
+# matchday 200, ~33 minutes in, and the next started again from zero.
+
+
+def test_progress_is_written_before_the_run_finishes(tmp_path, monkeypatch) -> None:
+    """A kill partway through must cost minutes, not the whole rebuild."""
+    monkeypatch.setattr(validate, "FEATURES_CACHE", tmp_path / "features.pkl")
+    monkeypatch.setattr(validate, "CHECKPOINT_EVERY", 2)
+
+    days = pd.date_range("2024-09-17", periods=5, freq="7D")
+    european = pd.DataFrame(
+        [{"League": "UCL", "Season": "2425", "Date": d, "HomeTeam": f"H{i}",
+          "AwayTeam": f"A{i}", "FTHG": 1, "FTAG": 0, "FTR": "H",
+          "home_league": "E0", "away_league": "SP1"} for i, d in enumerate(days)]
+    )
+
+    seen = []
+
+    def fake(tmh, fixtures, **kwargs):
+        seen.append(len(seen))
+        # Fail on the fifth matchday, after two checkpoints have been written.
+        if len(seen) == 5:
+            raise KeyboardInterrupt
+        return fixtures.assign(FTHG=float("nan"), FTAG=float("nan"), FTR=None, home_elo=1.0)
+
+    monkeypatch.setattr(validate, "build_upcoming_features", fake)
+    with pytest.raises(KeyboardInterrupt):
+        validate.build_features(european, pd.DataFrame(), pd.DataFrame(),
+                                cached=None, fingerprint="f")
+
+    kept = validate.load_cache("f", tmp_path / "features.pkl")
+    assert len(kept) == 4, "the work done before the interruption was thrown away"
+
+
+def test_a_checkpoint_cannot_leave_a_half_written_cache(tmp_path, monkeypatch) -> None:
+    """Truncated but readable is the dangerous outcome: it still carries a
+    valid fingerprint, so the next run loads and trusts it. The write goes
+    through a temporary file and a replace."""
+    monkeypatch.setattr(validate, "FEATURES_CACHE", tmp_path / "features.pkl")
+    good = pd.DataFrame([{"Date": pd.Timestamp("2024-09-17"), "HomeTeam": "A",
+                          "AwayTeam": "B", "home_elo": 1500.0}])
+    validate._checkpoint([good], "f")
+    assert len(validate.load_cache("f", tmp_path / "features.pkl")) == 1
+    assert not (tmp_path / "features.pkl.tmp").exists(), "temporary file left behind"
+
+
+def test_no_cache_writes_nothing(tmp_path, monkeypatch) -> None:
+    """`--no-cache` must not quietly start writing one from a checkpoint."""
+    monkeypatch.setattr(validate, "FEATURES_CACHE", tmp_path / "features.pkl")
+    validate._checkpoint([pd.DataFrame([{"Date": pd.Timestamp("2024-09-17")}])], None)
+    assert not (tmp_path / "features.pkl").exists()
