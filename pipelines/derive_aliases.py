@@ -36,7 +36,8 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from footballml.entities.teams import ALIAS_CONFIG  # noqa: E402
+from footballml.data import PROCESSED_DIR  # noqa: E402
+from footballml.entities.teams import ALIAS_CONFIG, load_aliases  # noqa: E402
 from footballml.ingest.matchhistory import fetch_match_history, to_matches  # noqa: E402
 from footballml.ingest.understat import UNDERSTAT_LEAGUES, season_labels  # noqa: E402
 
@@ -120,6 +121,9 @@ def _read_fbref(leagues: list[str], seasons: list[str]) -> pd.DataFrame:
 
 READERS = {"understat": _read_understat, "fbref": _read_fbref}
 
+#: EA club names are derived from our own built ratings, not fetched.
+PLAYER_RATINGS = PROCESSED_DIR / "player_ratings.csv"
+
 
 def derive(
     source: str, leagues: list[str], seasons: list[str]
@@ -155,13 +159,23 @@ def derive(
         ):
             votes[name][canonical] += 1
 
+    return _resolve(votes, unit="matched fixtures")
+
+
+def _resolve(
+    votes: dict[str, Counter], unit: str, min_evidence: int = MIN_EVIDENCE
+) -> tuple[dict[str, str], list[str]]:
+    """Turn votes into aliases, keeping only the well-evidenced, agreed ones.
+
+    Shared by both sources so one cannot drift to a looser bar than the other.
+    """
     aliases: dict[str, str] = {}
     warnings: list[str] = []
     for name, counter in sorted(votes.items()):
         best, count = counter.most_common(1)[0]
         total = sum(counter.values())
-        if total < MIN_EVIDENCE:
-            warnings.append(f"{name!r}: only {total} matched fixtures, skipped")
+        if total < min_evidence:
+            warnings.append(f"{name!r}: only {total} {unit}, skipped")
             continue
         if count / total < MIN_AGREEMENT:
             warnings.append(f"{name!r}: ambiguous, candidates {dict(counter)}")
@@ -172,11 +186,196 @@ def derive(
     return aliases, warnings
 
 
+def derive_sofifa(seasons: list[str] | None = None) -> tuple[dict[str, str], list[str]]:
+    """EA club names to canonical ones, by which players they share.
+
+    EA publishes no fixtures, so the date-and-scoreline matching the other
+    sources use has nothing to work with. Squads do the same job: a club is the
+    one its players play for. Within a single season the two labels describe the
+    same squad, so agreement is near-total and a disagreement is a real transfer
+    rather than a naming difference.
+
+    String similarity is deliberately not used. It would read "Real Betis",
+    "Real Sociedad" and "Real Valladolid" as near-identical, which is exactly
+    the collapse this project avoids elsewhere -- and the names that actually
+    need mapping ("1. FSV Mainz 05" to "Mainz 05", "FC Bayern München" to
+    "Bayern Munich") are not the ones string similarity finds easiest.
+
+    Clubs outside the big five -- Ajax, Sporting, Olympiacos -- appear only
+    through the odd player who moved mid-season, so they fall under
+    `MIN_EVIDENCE` and are skipped rather than mapped to whichever club happened
+    to sign one.
+    """
+    ratings = pd.read_csv(PLAYER_RATINGS, low_memory=False)
+    rated = ratings[ratings["rated"].fillna(False).astype(bool)]
+    rated = rated.dropna(subset=["fifa_club", "Team"])
+    if seasons:
+        rated = rated[rated["Season"].astype(str).isin(seasons)]
+
+    # Vote once per season, not once per player. Pooling thirteen seasons of
+    # players lets transfers accumulate against a perfectly good name: Villarreal
+    # drew 194 votes for itself and a tail of twenty from players who left, and
+    # West Ham fell to 0.88 -- under the bar on leavers alone. Within one season
+    # the two labels describe the same squad and agreement runs 95-100%, so each
+    # season casts a single vote and the thresholds then measure what they are
+    # meant to: whether the *name* maps consistently.
+    # `Team` here is Understat's spelling, because that is what the ratings are
+    # built from. Every other alias map in this file lands on football-data's,
+    # so chain through the understat map rather than leaving EA pointing at a
+    # third naming scheme that then needs its own translation downstream.
+    to_canonical = load_aliases("understat")
+
+    votes: dict[str, Counter] = defaultdict(Counter)
+    for (ea_club, _season), squad in rated.groupby(
+        [rated["fifa_club"].astype(str), rated["Season"].astype(str)]
+    ):
+        counts = squad["Team"].map(lambda t: to_canonical.get(str(t), str(t))).value_counts()
+        total = int(counts.sum())
+        # Enough players to be a squad rather than a loanee or two -- which is
+        # how clubs outside the big five turn up here at all -- and enough of
+        # them agreeing to rule out a coincidence.
+        if total >= MIN_EVIDENCE and counts.iloc[0] / total >= MIN_AGREEMENT:
+            votes[ea_club][str(counts.index[0])] += 1
+
+    # One well-evidenced season is enough. Requiring several would be stricter
+    # but wrong: EA renames clubs when it loses a licence -- Inter becomes
+    # "Lombardia FC", Lazio "Latium", Atalanta "Bergamo Calcio" -- so the labels
+    # that most need mapping are precisely the ones that exist for a single
+    # edition. The evidence bar is the within-season agreement above; the count
+    # here only guards against a label that never formed a squad at all.
+    aliases, warnings = _resolve(votes, unit="well-evidenced seasons", min_evidence=1)
+
+    # Votes alone cannot reach a label whose edition has too few *rated* players
+    # to form a squad, which is every label introduced by the newest edition: a
+    # season five matchweeks old clears the 450-minute floor for barely a
+    # hundred players. Those are the labels that matter most, because a rename
+    # arrives with a new edition. Chain them instead -- see `_chain_editions`.
+    resolved = {name: counter.most_common(1)[0][0] for name, counter in votes.items()}
+    chained, chain_warnings = _chain_editions(
+        resolved, wanted=set(rated["fifa_club"].astype(str))
+    )
+    for name, canonical in chained.items():
+        if name != canonical:
+            aliases[name] = canonical
+    return dict(sorted(aliases.items())), [*warnings, *chain_warnings]
+
+
+#: Players two adjacent editions must share before one club is called the other,
+#: and the share of them that must agree.
+#:
+#: Both are looser than the within-season bars, and deliberately. A squad is the
+#: same squad within one season, so agreement there runs 95-100%; between
+#: editions a real summer intervenes and the overlap is 57-83% even for clubs
+#: that plainly did not change. Holding the within-season bar here would reject
+#: every rename it exists to catch.
+CHAIN_EVIDENCE_MIN = 4
+CHAIN_AGREEMENT = 0.5
+
+
+def _chain_editions(
+    resolved: dict[str, str], wanted: set[str]
+) -> tuple[dict[str, str], list[str]]:
+    """Resolve an edition's new club labels through the edition before it.
+
+    EA renames a club the season it loses the licence, so the label that needs
+    mapping appears for the first time in the newest export -- the one whose
+    season has barely started and therefore has almost no rated players to vote
+    with. In 2026/27, 181 rated player-seasons had to speak for the whole of
+    Serie A, and the result was that 18 of Napoli's 21 players read as having
+    *left* for "SSC Napoli", which is Napoli.
+
+    No ratings are needed to fix it. Two editions a year apart share most of
+    their squads, so the club a label's players were at last edition names it:
+    `SSC Napoli` is `Napoli`, `Bergamo Calcio` is `Atalanta`, `Latium` is
+    `Lazio`. Chaining newest-to-oldest then lands every label on a canonical
+    name the votes already established.
+
+    Players are identified by name within EA, not across sources, so this does
+    not depend on the performance-source matching at all. A name that is not
+    unique within an edition is dropped rather than guessed at.
+
+    Each **pair** of editions casts one vote, for the same reason each season
+    does in :func:`derive_sofifa`: pooling every player across twelve pairs
+    lets a decade of loans and transfers out-vote the club itself. Wigan drew
+    106 for Wigan and 150 spread over sixty-odd other clubs, none of them with
+    more than seven -- a clear answer that a pooled share of 0.42 called
+    ambiguous.
+
+    Args:
+        resolved: EA club label to canonical name, from the season votes --
+            including the labels that map to themselves, which the alias map
+            itself omits.
+        wanted: The labels worth reporting on. The EA database carries every
+            club on earth and almost none of them can or should resolve to a
+            big-five canonical name, so a warning for each would bury the few
+            that matter.
+
+    Returns:
+        ``(resolved, warnings)`` -- the input plus every label the chain could
+        reach, and a note for each wanted label it could not.
+    """
+    from footballml.players.fifa import load_fifa
+
+    fifa = load_fifa()
+    fifa["Season"] = fifa["Season"].astype(str)
+    key = "_norm" if "_norm" in fifa.columns else "fifa_name"
+
+    # Name to club, per edition. A name carried by two players in one edition
+    # identifies neither, so it is dropped from both sides of every pairing.
+    by_season: dict[str, dict[str, str]] = {}
+    for season, edition in fifa.groupby("Season"):
+        names = edition.dropna(subset=[key, "fifa_club"])
+        counts = names[key].value_counts()
+        unique = names[names[key].isin(counts[counts == 1].index)]
+        by_season[str(season)] = dict(
+            zip(unique[key].astype(str), unique["fifa_club"].astype(str), strict=True)
+        )
+
+    seasons = sorted(by_season)
+    previous: dict[str, Counter] = defaultdict(Counter)
+    for newer, older in zip(seasons[1:], seasons[:-1], strict=True):
+        before = by_season[older]
+        pair: dict[str, Counter] = defaultdict(Counter)
+        for name, club in by_season[newer].items():
+            if (was := before.get(name)) is not None:
+                pair[club][was] += 1
+        for club, counter in pair.items():
+            was, count = counter.most_common(1)[0]
+            total = sum(counter.values())
+            if total >= CHAIN_EVIDENCE_MIN and count / total >= CHAIN_AGREEMENT:
+                previous[club][was] += 1
+
+    out = dict(resolved)
+    warnings: list[str] = []
+    # Newest edition first, so a label introduced two editions ago is reached
+    # through the one in between rather than having to survive the whole gap.
+    for season in reversed(seasons):
+        for club in sorted(set(by_season[season].values())):
+            if club in out:
+                continue
+            counter = previous.get(club)
+            was = counter.most_common(1)[0][0] if counter else None
+            if was is not None and was in out:
+                out[club] = out[was]
+            elif club in wanted and was != club:
+                # A label that chains to itself is simply a club we have no
+                # canonical name for -- Benfica, Shakhtar, Vancouver -- which is
+                # the normal state of most of the EA database and not a failure.
+                # What is worth reporting is a *rename* the chain could not
+                # follow back to a name we know.
+                warnings.append(
+                    f"{club!r}: chains to {was!r}, itself unresolved"
+                    if was
+                    else f"{club!r}: no edition before it shares a squad"
+                )
+    return out, warnings
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--write", action="store_true", help="Update the alias config.")
     parser.add_argument(
-        "--source", default="understat", choices=sorted(READERS),
+        "--source", default="understat", choices=[*sorted(READERS), "sofifa"],
         help="Which source's names to resolve against football-data's.",
     )
     parser.add_argument("--start-season", default="1415")
@@ -187,7 +386,12 @@ def main() -> None:
     log = logging.getLogger("derive_aliases")
 
     seasons = season_labels(args.start_season, args.end_season)
-    aliases, warnings = derive(args.source, sorted(UNDERSTAT_LEAGUES), seasons)
+    if args.source == "sofifa":
+        # EA has no fixtures to match on; its clubs are resolved by the players
+        # they share with ours. See `derive_sofifa`.
+        aliases, warnings = derive_sofifa(seasons)
+    else:
+        aliases, warnings = derive(args.source, sorted(UNDERSTAT_LEAGUES), seasons)
 
     print(f"\n=== {len(aliases)} aliases derived ===")
     for k, v in aliases.items():

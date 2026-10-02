@@ -46,7 +46,189 @@ fbref:
   Real Betis: Betis
   Real Sociedad: Sociedad
   Saint-Étienne: St Etienne
-sofifa: {}
+sofifa:
+  1. FC Heidenheim 1846: Heidenheim
+  1. FC Köln: FC Koln
+  1. FC Nürnberg: Nurnberg
+  1. FC Union Berlin: Union Berlin
+  1. FSV Mainz 05: Mainz
+  AC Milan: Milan
+  AFC Bournemouth: Bournemouth
+  AJ Auxerre: Auxerre
+  AS Monaco: Monaco
+  AS Nancy Lorraine: Nancy
+  AS Roma: Roma
+  AS Saint-Étienne: St Etienne
+  Almería: Almeria
+  Amiens SC: Amiens
+  Angers SCO: Angers
+  Athletic Club: Ath Bilbao
+  Athletic Club de Bilbao: Ath Bilbao
+  Athletic Club de Bilbao B: Ath Bilbao
+  Atlético Madrid: Ath Madrid
+  Atlético de Madrid: Ath Madrid
+  Bayer 04 Leverkusen: Leverkusen
+  Bergamo Calcio: Atalanta
+  Borussia Dortmund: Dortmund
+  Borussia Mönchengladbach: M'gladbach
+  Brighton & Hove Albion: Brighton
+  CA Osasuna: Osasuna
+  CD Leganés: Leganes
+  Cardiff City: Cardiff
+  Celta de Vigo: Celta
+  Chievo Verona: Chievo
+  Clermont Foot 63: Clermont
+  Cádiz: Cadiz
+  Cádiz CF: Cadiz
+  Córdoba CF: Cordoba
+  D. Alavés: Alaves
+  DSC Arminia Bielefeld: Bielefeld
+  Darmstadt 98: Darmstadt
+  Deportivo Alavés: Alaves
+  Deportivo de La Coruña: La Coruna
+  Dijon FCO: Dijon
+  Düsseldorf: Fortuna Dusseldorf
+  ESTAC Troyes: Troyes
+  Eintracht Frankfurt: Ein Frankfurt
+  Elche CF: Elche
+  En Avant de Guingamp: Guingamp
+  Espanyol: Espanol
+  FC Augsburg: Augsburg
+  FC Barcelona: Barcelona
+  FC Barcelona B: Barcelona
+  FC Bayern München: Bayern Munich
+  FC Bayern München II: Bayern Munich
+  FC Girondins de Bordeaux: Bordeaux
+  FC Ingolstadt 04: Ingolstadt
+  FC Köln: FC Koln
+  FC Lorient: Lorient
+  FC Metz: Metz
+  FC Nantes: Nantes
+  FC Schalke 04: Schalke 04
+  FC St. Pauli: St Pauli
+  FC Union Berlin: Union Berlin
+  FSV Mainz 05: Mainz
+  Falkirk: Swansea
+  Fortuna Düsseldorf: Fortuna Dusseldorf
+  Frankfurt: Ein Frankfurt
+  Fulham FC: Fulham
+  Fürth: Greuther Furth
+  GFC Ajaccio: Ajaccio GFCO
+  Getafe CF: Getafe
+  Girona FC: Girona
+  Granada CF: Granada
+  Hamburger SV: Hamburg
+  Hannover 96: Hannover
+  Havre AC: Le Havre
+  Hellas Verona: Verona
+  Hellas Verona FC: Verona
+  Hertha BSC: Hertha
+  Huddersfield Town: Huddersfield
+  Hull City: Hull
+  LOSC Lille: Lille
+  Latium: Lazio
+  Le Havre AC: Le Havre
+  Leeds United: Leeds
+  Leganés: Leganes
+  Leicester City: Leicester
+  Levante UD: Levante
+  Levante Unión Deportiva: Levante
+  Lille OSC: Lille
+  Lombardia FC: Inter
+  Luton Town: Luton
+  Manchester City: Man City
+  Manchester United: Man United
+  Manchester Utd: Man United
+  Milano FC: Milan
+  Montpellier Hérault SC: Montpellier
+  Málaga CF: Malaga
+  Napoli FC: Napoli
+  Newcastle United: Newcastle
+  Newcastle Utd: Newcastle
+  Norwich City: Norwich
+  Nottingham Forest: Nott'm Forest
+  Nîmes: Nimes
+  Nîmes Olympique: Nimes
+  Nürnberg: Nurnberg
+  OGC Nice: Nice
+  OL: Lyon
+  OM: Marseille
+  Olympique Lyonnais: Lyon
+  Olympique Marseille: Marseille
+  Olympique de Marseille: Marseille
+  Palermo FC: Palermo
+  Paris: Paris FC
+  Paris Saint Germain: Paris SG
+  Paris Saint-Germain: Paris SG
+  Queens Park Rangers: QPR
+  R. Valladolid CF: Valladolid
+  RC Celta: Celta
+  RC Celta de Vigo: Celta
+  RC Lens: Lens
+  RC Strasbourg Alsace: Strasbourg
+  RCD Espanyol: Espanol
+  RCD Espanyol de Barcelona: Espanol
+  RCD Mallorca: Mallorca
+  Racing Club de Lens: Lens
+  Rayo Vallecano: Vallecano
+  Real Betis: Betis
+  Real Betis Balompié: Betis
+  Real Madrid CF: Real Madrid
+  Real Oviedo: Oviedo
+  Real Sociedad: Sociedad
+  Real Sociedad B: Sociedad
+  Real Valladolid: Valladolid
+  Real Valladolid CF: Valladolid
+  Roma FC: Roma
+  SC Bastia: Bastia
+  SC Freiburg: Freiburg
+  SC Paderborn 07: Paderborn
+  SD Eibar: Eibar
+  SD Huesca: Huesca
+  SPAL: Spal
+  SSC Napoli: Napoli
+  SV Darmstadt 98: Darmstadt
+  SV Werder Bremen: Werder Bremen
+  Sevilla Atlético: Sevilla
+  Sevilla FC: Sevilla
+  Sheffield Utd: Sheffield United
+  SpVgg Greuther Fürth: Greuther Furth
+  Sport-Club Freiburg: Freiburg
+  Sporting Club Bastia: Bastia
+  Spurs: Tottenham
+  St. Pauli: St Pauli
+  Stade Brestois 29: Brest
+  Stade Malherbe Caen: Caen
+  Stade Rennais FC: Rennes
+  Stade de Reims: Reims
+  Stoke City: Stoke
+  Swansea City: Swansea
+  TSG 1899 Hoffenheim: Hoffenheim
+  TSG Hoffenheim: Hoffenheim
+  Torino F.C.: Torino
+  Tottenham Hotspur: Tottenham
+  Toulouse FC: Toulouse
+  Toulouse Football Club: Toulouse
+  U.C. Sampdoria: Sampdoria
+  U.S. Sassuolo Calcio: Sassuolo
+  UD Almería: Almeria
+  UD Las Palmas: Las Palmas
+  US Salernitana 1919: Salernitana
+  Udinese Calcio: Udinese
+  Unión Deportiva Almería: Almeria
+  Unión Deportiva Las Palmas: Las Palmas
+  Valencia CF: Valencia
+  Venezia FC: Venezia
+  VfB Stuttgart: Stuttgart
+  VfL Bochum: Bochum
+  VfL Bochum 1848: Bochum
+  VfL Wolfsburg: Wolfsburg
+  Villarreal CF: Villarreal
+  Villarreal II: Villarreal
+  West Bromwich Albion: West Brom
+  West Ham United: West Ham
+  Wolverhampton Wanderers: Wolves
+  Évian Thonon Gaillard FC: Evian Thonon Gaillard
 understat:
   AC Milan: Milan
   Arminia Bielefeld: Bielefeld
