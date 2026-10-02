@@ -15,16 +15,28 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from footballml.data import load_team_match_history
+from footballml.data import PROCESSED_DIR, load_team_match_history
 from footballml.features.build import build_match_features
 from footballml.features.rolling import add_team_form, prepare_team_match
 
 
 @pytest.fixture(scope="module")
 def tmh() -> pd.DataFrame:
-    """Two recent seasons -- enough to exercise the windows, fast enough to iterate."""
-    df = load_team_match_history()
-    return df[df["Season"].isin([2324, 2425])].copy()
+    """Two recent seasons across all five leagues.
+
+    The multi-league file, explicitly. These used to run against the default,
+    which is the legacy EPL-only `team_match_history.csv` -- 11,400 rows of one
+    division, ending 2025-05-25, with **no `League` column at all**. The model
+    trains on 58,286 rows across five. So the repo's most load-bearing test was
+    validating leakage on a dataset that shared neither the shape nor the span
+    of the real one, and in particular could not exercise any cross-league or
+    European path, because there were no leagues in it to cross.
+    """
+    path = PROCESSED_DIR / "team_match_history_all.csv"
+    if not path.exists():
+        pytest.skip("team_match_history_all.csv not built; run `pipelines.build_dataset`")
+    df = load_team_match_history(path)
+    return df[df["Season"].astype(str).isin(["2324", "2425"])].copy()
 
 
 @pytest.fixture(scope="module")
@@ -33,7 +45,7 @@ def features(tmh: pd.DataFrame) -> pd.DataFrame:
 
 
 def _feature_cols(df: pd.DataFrame) -> list[str]:
-    ignore = {"Season", "Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "FTR"}
+    ignore = {"League", "Season", "Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "FTR"}
     return [c for c in df.columns if c not in ignore and pd.api.types.is_numeric_dtype(df[c])]
 
 
