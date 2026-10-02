@@ -18,6 +18,7 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 
+from footballml.data import load_european_matches
 from footballml.entities import load_aliases
 from footballml.features.elo import add_elo
 from footballml.features.rolling import (
@@ -182,7 +183,18 @@ def add_team_strength(
     # alias keys, so this is safe on an already-resolved frame.
     lookup["Team"] = lookup["Team"].replace(load_aliases("understat"))
     lookup["_season_key"] = lookup["Season"].astype(str)
-    lookup = lookup.drop(columns=["Season"])
+
+    # Keyed on season and team alone, *not* league. A club plays in exactly one
+    # league per season -- checked across all 1,072 team-seasons: no team name
+    # appears in two leagues, and no (season, team) pair repeats -- so for a
+    # real fixture, where both sides share the fixture's league, this joins
+    # exactly what including `League` did.
+    #
+    # It differs only for a pairing the fixture list never contains: `/predict`
+    # scores a hypothetical tie in the *home* side's league, which left the away
+    # side matching nothing and being scored with no squad strength at all --
+    # about a fifth of the model's influence on expected goals, silently absent.
+    lookup = lookup.drop(columns=["Season", "League"])
     out["_season_key"] = out["Season"].astype(str)
 
     if previous_season:
@@ -195,7 +207,7 @@ def add_team_strength(
         prefixed = lookup.rename(
             columns={"Team": f"{side}Team", **{c: f"{side.lower()}_{c}" for c in available}}
         )
-        out = out.merge(prefixed, on=["League", "_season_key", f"{side}Team"], how="left")
+        out = out.merge(prefixed, on=["_season_key", f"{side}Team"], how="left")
 
     return out.drop(columns=["_season_key"])
 
@@ -209,17 +221,73 @@ def _next_season(label: str) -> str:
     return f"{start % 100:02d}{(start + 1) % 100:02d}"
 
 
+#: Sentinel for "load the European matches from disk". A plain ``None`` default
+#: cannot express this, because ``None`` has to keep meaning "no European data".
+AUTO = object()
+
+
+def european_elo_rows(matches: pd.DataFrame) -> pd.DataFrame:
+    """Wide UEFA results to the minimal long shape the Elo walk consumes.
+
+    Only the columns ``_walk`` reads. These rows are never returned to the
+    caller and never reach a rolling window, so the match statistics and xG
+    that the domestic history carries are neither needed nor available.
+    """
+    if matches.empty:
+        return pd.DataFrame()
+
+    neutral = matches.get("Round", pd.Series(index=matches.index, dtype="object")) == "Final"
+    sides = []
+    for own, opp, venue in (("HomeTeam", "AwayTeam", "Home"), ("AwayTeam", "HomeTeam", "Away")):
+        goals_for, goals_against = ("FTHG", "FTAG") if venue == "Home" else ("FTAG", "FTHG")
+        sides.append(
+            pd.DataFrame(
+                {
+                    "League": matches["League"],
+                    # The competition's own season label, so a UEFA tie counts
+                    # as the same season as the domestic matches around it and
+                    # does not trigger a spurious between-season regression.
+                    "Season": matches["Season"].astype(str),
+                    "Date": pd.to_datetime(matches["Date"]),
+                    "Team": matches[own],
+                    "Opponent": matches[opp],
+                    "Venue": venue,
+                    "GoalsFor": matches[goals_for],
+                    "GoalsAgainst": matches[goals_against],
+                    "Neutral": neutral,
+                }
+            )
+        )
+    return pd.concat(sides, ignore_index=True)
+
+
 def build_team_features(
     tmh: pd.DataFrame,
     windows: Sequence[int] = DEFAULT_WINDOWS,
     congestion_days: int = 14,
+    european: pd.DataFrame | None | object = AUTO,
 ) -> pd.DataFrame:
-    """Run the full long-shape feature build: prepare, roll, venue-split, rest."""
+    """Run the full long-shape feature build: prepare, roll, venue-split, rest.
+
+    Args:
+        european: UEFA ties for Elo to learn from. Defaults to loading them
+            from disk rather than taking them from the caller, and that is
+            deliberate: nine call sites build features, and one of them
+            forgetting to pass these would serve predictions from a *different*
+            Elo than the model was trained on. The reload guard compares
+            feature **names**, so it would not notice. Pass ``None`` to opt out
+            explicitly, which tests do.
+    """
     df = prepare_team_match(tmh)
+    if european is AUTO:
+        european = load_european_matches()
+    extra = None if european is None else european_elo_rows(european)
     # Elo before the rolling features, so it is just another team-level column
     # the pivot picks up. It answers what the windows cannot: how good a side is
-    # over years rather than over its last five or nineteen matches.
-    df = add_elo(df)
+    # over years rather than over its last five or nineteen matches -- and,
+    # once `extra` connects the leagues, how good it is against a side it has
+    # never played.
+    df = add_elo(df, extra=extra)
     for window in windows:
         df = add_team_form(df, window=window, venue_split=False)
         df = add_team_form(df, window=window, venue_split=True)
@@ -232,6 +300,7 @@ def build_match_features(
     congestion_days: int = 14,
     strength: pd.DataFrame | None = None,
     previous_season_strength: bool = True,
+    european: pd.DataFrame | None | object = AUTO,
 ) -> pd.DataFrame:
     """Build the wide, model-ready match feature table from long team-match rows.
 
@@ -240,6 +309,8 @@ def build_match_features(
             ``Venue`` column of ``"Home"``/``"Away"``).
         windows: Rolling window sizes to compute form over.
         congestion_days: Lookback for the fixture-congestion count.
+        european: UEFA ties for Elo to learn from; see
+            :func:`build_team_features`. Loaded from disk by default.
         strength: Optional ``team_strength.csv`` to join squad quality from.
         previous_season_strength: Join the preceding season's strength. Leave
             True for training and backtesting; pass False only for live
@@ -255,7 +326,9 @@ def build_match_features(
         # column. Default rather than fail, so older data still builds.
         tmh = tmh.assign(League="E0")
 
-    long_df = build_team_features(tmh, windows=windows, congestion_days=congestion_days)
+    long_df = build_team_features(
+        tmh, windows=windows, congestion_days=congestion_days, european=european
+    )
 
     feature_cols = _feature_columns(long_df, tmh)
 

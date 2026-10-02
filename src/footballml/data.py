@@ -47,6 +47,35 @@ def load_team_strength(path: Path | None = None) -> pd.DataFrame:
     return df
 
 
+EUROPEAN_MATCHES = PROCESSED_DIR / "european_matches.csv"
+
+
+def load_european_matches(path: Path | None = None) -> pd.DataFrame:
+    """UEFA club ties between big-five clubs, or an empty frame if not fetched.
+
+    These are the only matches in the project where two of the five leagues
+    meet, and they exist for one reason: Elo's updates are zero-sum, so without
+    them the five leagues are five disconnected pools each anchored at 1500 and
+    a rating cannot be compared across a border. Measured on 822 of these ties,
+    before they were fed in, the model's predicted home-win probability had *no*
+    relationship with which league was stronger (slope -0.0002, p 0.94) while
+    the actual result did (slope +0.0402, p 1.1e-05). Feeding them in lifted
+    that to +0.0034 -- the right direction and about 8% of the distance; see
+    :mod:`footballml.league_adjust` for what closes the rest.
+
+    Empty rather than raising, so the match pipeline still runs before
+    `pipelines.fetch_european` has been executed -- Elo then behaves exactly as
+    it did before, which is the documented pre-2026-09-30 behaviour.
+    """
+    path = path or EUROPEAN_MATCHES
+    if not path.exists():
+        return pd.DataFrame()
+    df = pd.read_csv(path)
+    df["Date"] = pd.to_datetime(df["Date"])
+    df["Season"] = df["Season"].astype(str)
+    return df
+
+
 #: Bet365 1X2 decimal odds columns in the football-data.co.uk schema.
 ODDS_COLUMNS = ("B365H", "B365D", "B365A")
 
