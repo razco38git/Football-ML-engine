@@ -178,6 +178,15 @@ class PlayerRating(BaseModel):
     #: performance 78 produce a rating of 64, because 63 is the 1st percentile
     #: among that season's defensive midfielders and maps to 49.4.
     fifa_on_our_scale: int | None = None
+    #: How much of this role's definition the season's data actually supported,
+    #: 0-1. Below 1 the blend leans on EA in proportion -- see
+    #: `fifa_weight_used` -- so without this the page would claim a 50/50 split
+    #: that did not happen. 2014/15 and 2015/16 are where it bites: FBref
+    #: served no `misc` table, and a centre back keeps 0.38 of himself.
+    measured_share: float | None = None
+    #: Where the EA half of the blend actually landed for this row. 0.5 almost
+    #: everywhere; 0.81 for a 2014/15 centre back.
+    fifa_weight_used: float | None = None
 
     #: Populated per position group; a forward has no defending sub-rating.
     sub_finishing: int | None = None

@@ -95,6 +95,31 @@ Everything debatable is a number in the YAML, not a decision buried in code.
     :data:`MAX_MISSING_WEIGHT`. 2014/15 centre-backs carry no defending score
     at all, and 2015/16 goalkeepers are not rated, because FBref served no
     ``misc`` table for the first and no ``keeper`` table for the second.
+
+    And where most of a role is missing, the rating now says how much. Refusing
+    the sub-rating was only half the job: the composite renormalised over what
+    survived and was published at the usual 50/50, so a 2014/15 centre back was
+    ranked on his passing and his goals -- 38% of what the role means -- and
+    presented as though the rest had been weighed. ``measured_share`` carries
+    that fraction through to the blend, which leans on EA in proportion to it;
+    ``fifa_weight_used`` records where it landed. The seasons affected:
+
+        CB 38%   FB 62%   DM 80%   MID 80%   AMW 92%   FWD 100%
+
+    This does not rescue a famous season, and should not be sold as though it
+    might. Leicester are 15th in 2015/16 team strength and move by less than a
+    point, because EA's own FC16 ratings put that squad **18th of 20** -- below
+    Watford and Aston Villa -- and the bookmakers said 5000-1. A squad-quality
+    rating that liked Leicester in 2015/16 would be the broken one. What the
+    correction fixes is the *ordering of defenders within* those two seasons,
+    which was decided by attacking output.
+
+    The larger limit is not fixable here and belongs on the page. Correlated
+    against EA's next-edition move, the rating tracks forwards at 0.15 and
+    goalkeepers at 0.23, but centre backs, full backs and midfielders at
+    0.04-0.06, in *every* season. The cause is the stripped FBref tables
+    described in :mod:`footballml.players.fbref`: the rating is better at
+    attackers because the data is.
 """
 
 from __future__ import annotations
@@ -169,6 +194,33 @@ def _warn_once(message: str, *args: object) -> None:
         logger.warning("%s", key)
 
 
+def usable_weights(
+    frame: pd.DataFrame, weights: dict[str, float]
+) -> tuple[dict[str, float], float]:
+    """Which weighted columns carry enough data, and what share of the weight they are.
+
+    Split out of :func:`_weighted` because the share is worth more than the
+    warning it used to produce. It says how much of a role's definition the
+    season actually supports, and `rate_players` passes that on to the blend:
+    a rating built from 38% of what the role means should not be trusted like
+    one built from all of it. See `measured_share` there.
+
+    Returns the usable subset and the fraction of total absolute weight it
+    accounts for -- 1.0 when everything is present, 0.0 when nothing is.
+    """
+    usable = {
+        c: w
+        for c, w in weights.items()
+        if c in frame.columns
+        and w != 0
+        and frame[c].notna().mean() >= MIN_METRIC_COVERAGE
+    }
+    total = sum(abs(w) for w in weights.values() if w != 0)
+    if not total:
+        return usable, 0.0
+    return usable, sum(abs(w) for w in usable.values()) / total
+
+
 def _weighted(
     frame: pd.DataFrame,
     weights: dict[str, float],
@@ -192,13 +244,7 @@ def _weighted(
     # not hypothetical: without the guard, ~25 empty columns quietly diluted
     # the metrics that did have data. See `MIN_METRIC_COVERAGE` for why the bar
     # is a share of the pool rather than "any value at all".
-    usable = {
-        c: w
-        for c, w in weights.items()
-        if c in frame.columns
-        and w != 0
-        and frame[c].notna().mean() >= MIN_METRIC_COVERAGE
-    }
+    usable, measured = usable_weights(frame, weights)
 
     # Skipping quietly is how a third of the centre-back defending weight went
     # missing unnoticed: `recoveries_per90` and `recoveries_padj` were weighted
@@ -206,11 +252,8 @@ def _weighted(
     # interceptions and tackles. Name what was dropped and how much weight went
     # with it, once per distinct set rather than once per group.
     dropped = {c: w for c, w in weights.items() if w != 0 and c not in usable}
-    share = 0.0
+    share = 1.0 - measured
     if dropped:
-        share = sum(abs(w) for w in dropped.values()) / sum(
-            abs(w) for w in weights.values() if w != 0
-        )
         _warn_once(
             "Ignoring %d configured metric(s) with no data (%.0f%% of the "
             "weight): %s", len(dropped), 100 * share, ", ".join(sorted(dropped)),
@@ -309,6 +352,9 @@ def rate_players(
     for column in sub_columns:
         work[column] = np.nan
     composites = pd.Series(np.nan, index=work.index)
+    # How much of each role's definition the season actually supports. Carried
+    # to `_blend_with_fifa`, which leans on EA in proportion to what is missing.
+    measured_shares = pd.Series(np.nan, index=work.index)
 
     # Per role *and season*, not per role. `_weighted` drops a metric with no
     # data anywhere in the frame it is handed, and renormalises what is left --
@@ -355,9 +401,18 @@ def rate_players(
         # their rating, which is present and is the better half for a defender
         # anyway. What is left is weaker, visibly so: `sub_defending` comes
         # back blank rather than as a plausible 50.
+        frame = pd.DataFrame(sub_values)
         composite = _weighted(
-            pd.DataFrame(sub_values), spec["sub_rating_weights"], max_missing_weight=1.0
+            frame, spec["sub_rating_weights"], max_missing_weight=1.0
         )
+        # The share of the role's definition that survived, for this pool. A
+        # 2014/15 centre back keeps 38% of his: `defending` is 62% of the
+        # composite and FBref served no `misc` table that season, so what is
+        # left is passing and goals. The composite is still published -- see
+        # the note above on why refusing twice is wrong -- but it is published
+        # with how much of it was measured, and the blend reads that.
+        _, measured = usable_weights(frame, spec["sub_rating_weights"])
+        measured_shares.loc[block.index] = measured
 
         # Discipline only ever costs: a clean player is not rewarded, a
         # frequently sent-off one is penalised.
@@ -390,6 +445,7 @@ def rate_players(
         composites.loc[block.index] = composite.astype(float)
 
     work["composite_raw"] = composites
+    work["measured_share"] = measured_shares
 
     # Credit being outstanding at something, not just being tidy at everything.
     #
@@ -474,7 +530,7 @@ def rate_players(
     # on reputation.
     carried = [
         *sub_columns, "composite_raw", "composite", "performance_rating",
-        "fifa_on_our_scale", "rating",
+        "fifa_on_our_scale", "measured_share", "fifa_weight_used", "rating",
     ]
     for column in carried:
         if column in work.columns:
@@ -494,7 +550,7 @@ def rate_players(
 
 
 def shrink_toward_mean(
-    frame: pd.DataFrame, column: str, by: list[str], k: float
+    frame: pd.DataFrame, column: str, by: list[str], k: float | pd.Series
 ) -> pd.Series:
     """Empirical-Bayes shrinkage of ``column`` toward its group mean.
 
@@ -502,6 +558,10 @@ def shrink_toward_mean(
     player's 90-minute appearances; the rest comes from the mean of his
     ``by`` group. ``k`` is how many nineties of evidence it takes to be
     trusted halfway.
+
+    ``k`` may be a Series indexed like ``frame``, so the bar can be raised for
+    players whose pool measured less of them -- see the unmatched branch of
+    :func:`_blend_with_fifa`.
     """
     prior = frame.groupby(by, observed=True)[column].transform("mean")
     n = frame["nineties"].clip(lower=0)
@@ -556,9 +616,38 @@ def _blend_with_fifa(work: pd.DataFrame, config: dict[str, Any]) -> pd.Series:
     # numbers are on one scale.
     work["fifa_on_our_scale"] = fifa_on_our_scale.where(present)
 
+    # Lean on EA in proportion to how much of the role we actually measured.
+    #
+    # A flat 50/50 asserts that the performance half is worth half, whatever
+    # went into it. For 2014/15 and 2015/16 that is false by a wide margin:
+    # FBref served no `misc` table, so a centre back keeps 38% of his
+    # definition and a full back 62%, and the rating was published as though
+    # the missing part had been weighed and found average. Wes Morgan, an
+    # ever-present title-winning captain, came out at 58 -- ranked on his
+    # passing, because his defending was not in the file.
+    #
+    #     w_eff = weight + (1 - weight) * (1 - measured_share)
+    #
+    # It reduces to the old behaviour at both ends: a fully measured pool gets
+    # `weight` exactly, and a pool with nothing gets 1.0, which is the hollow
+    # rule below arrived at by arithmetic instead of a branch. A 2014/15 centre
+    # back lands on 0.81.
+    share = work["measured_share"] if "measured_share" in work.columns else None
+    if share is None:
+        effective = pd.Series(weight, index=work.index)
+    else:
+        # `fillna(1.0)`, not 0: a role with no config spec never enters the
+        # loop that sets this, and reading its blank as "nothing was measured"
+        # would hand it wholly to EA on the strength of a missing config entry.
+        measured = share.astype(float).fillna(1.0).clip(0.0, 1.0)
+        shift = float(config.get("unmeasured_shift", 1.0))
+        effective = (weight + (1 - weight) * shift * (1 - measured)).clip(weight, 1.0)
+    work["fifa_weight_used"] = effective.where(present)
+
     blended = performance.copy()
     blended[present] = (
-        performance[present] * (1 - weight) + fifa_on_our_scale[present] * weight
+        performance[present] * (1 - effective[present])
+        + fifa_on_our_scale[present] * effective[present]
     )
     # No performance half to blend: the season's source table was missing for
     # this whole group (see `rate_players`). EA's judgement is the entire
@@ -571,11 +660,24 @@ def _blend_with_fifa(work: pd.DataFrame, config: dict[str, Any]) -> pd.Series:
     if k > 0 and (~present).any():
         # The prior is the mean over the whole role-season, matched players
         # included: it is the pool the performance percentile was ranked in.
-        shrunk = shrink_toward_mean(work, "performance_rating", [group, "Season"], k)
+        #
+        # A player with no EA entry cannot lean on EA, so the correction above
+        # cannot reach him -- and he is in the same thin pool, with the same
+        # 38% of a rating. The pool mean is the only other thing to lean on.
+        # `k` is how many nineties it takes to be trusted halfway, so dividing
+        # it by the measured share says it takes proportionally more evidence
+        # to be trusted when less of the role was measured: unchanged at 1.0,
+        # and 4 nineties becomes 10.5 for a 2014/15 centre back.
+        nineties = k
+        if share is not None:
+            nineties = k / share.astype(float).fillna(0.0).clip(lower=0.1)
+        shrunk = shrink_toward_mean(
+            work, "performance_rating", [group, "Season"], nineties
+        )
         blended[~present] = shrunk[~present]
     logger.info(
-        "Blended %d/%d ratings with FIFA at weight %.2f",
-        int(present.sum()), len(work), weight,
+        "Blended %d/%d ratings with FIFA at weight %.2f (mean effective %.2f)",
+        int(present.sum()), len(work), weight, float(effective[present].mean()),
     )
     return blended
 

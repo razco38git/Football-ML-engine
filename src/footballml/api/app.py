@@ -1051,6 +1051,8 @@ def _to_player(row: pd.Series) -> PlayerRating:
         fifa_overall=num("fifa_overall", int),
         performance_rating=num("performance_rating", int),
         fifa_on_our_scale=num("fifa_on_our_scale", int),
+        measured_share=num("measured_share", float),
+        fifa_weight_used=num("fifa_weight_used", float),
         **{f"sub_{name}": num(f"sub_{name}", int) for name in _PLAYER_SUBS},
         **{
             stat: num(stat, int if stat in {"goals", "assists"} else float)

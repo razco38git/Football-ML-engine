@@ -231,6 +231,25 @@ function PlayerDetailPanel({ player, onClose }: { player: PlayerRating; onClose:
   );
 }
 
+/**
+ * How much of the rating EA is carrying, said out loud when it is not half.
+ *
+ * It is half for every season from 2016/17 on, which is why the explainer can
+ * talk about a 50/50 split. It is not half for 2014/15 or 2015/16: FBref
+ * served no `misc` table, so a centre back's defending -- 62% of what the role
+ * means -- could not be computed, and the blend leans on EA in proportion to
+ * what was missing rather than pretending the gap was average. Saying "the
+ * 50/50 blend" on those rows would be a plain untruth, and they are exactly
+ * the rows a reader is most likely to be querying.
+ */
+function eaShare(p: PlayerRating): string {
+  const used = p.fifa_weight_used;
+  if (used == null || Math.abs(used - 0.5) < 0.01) return '';
+  const share = p.measured_share;
+  const measured = share == null ? '' : ` — only ${Math.round(share * 100)}% of what this position is scored on was recorded that season`;
+  return `, at ${Math.round(used * 100)}% EA rather than the usual 50${measured}`;
+}
+
 export default function PlayerDatabase() {
   // Empty means "whatever the server defaults to" -- early in a campaign that
   // is last season, because too few players have the minutes to be rated yet.
@@ -358,6 +377,16 @@ export default function PlayerDatabase() {
             Where the two disagree is the interesting part: well above EA means a
             player is outperforming his reputation this season, well below means
             he is coasting on it.
+            <br /><br />
+            <strong style={{ color: 'var(--foreground)' }}>Half, except where
+            we could not measure our half.</strong> 2014/15 and 2015/16 have no
+            tackles or interceptions in the source at all, and defending is 62%
+            of what a centre back is scored on. Rather than rank him on the
+            passing and goals that happen to be left and call it half the
+            rating, those seasons lean on EA in proportion to what is missing
+            &mdash; a centre back there is 81% EA, a full back 69%. Hovering the
+            EA column on one of those rows says so. Every season from 2016/17
+            on is an even split.
           </div>
         </details>
       </div>
@@ -539,7 +568,7 @@ export default function PlayerDatabase() {
                         style={{ color: 'var(--muted-foreground)' }}
                         title={
                           p.fifa_on_our_scale != null && p.fifa_overall != null
-                            ? `EA rates him ${p.fifa_overall} on their global scale. Among ${p.position}s that season that is worth ${p.fifa_on_our_scale} on ours, and ${p.fifa_on_our_scale} is what the 50/50 blend with the performance rating uses.`
+                            ? `EA rates him ${p.fifa_overall} on their global scale. Among ${p.position}s that season that is worth ${p.fifa_on_our_scale} on ours, and ${p.fifa_on_our_scale} is what the blend with the performance rating uses${eaShare(p)}.`
                             : undefined
                         }
                       >

@@ -568,6 +568,105 @@ def test_the_quality_ratios_are_optional() -> None:
     )
 
 
+# --- how much of a rating was measured, and what the blend does about it ----
+
+
+def test_a_fully_measured_pool_blends_fifty_fifty_as_before() -> None:
+    """The correction must be invisible where nothing is missing.
+
+    Every rating on the site comes through this path, so a change meant for two
+    seasons of defenders has to leave the other ten untouched.
+    """
+    squad = _defenders()
+    squad["fifa_overall"] = np.linspace(60, 90, len(squad))
+
+    rated = rate_players(squad)
+    rated = rated[rated["rated"] & rated["fifa_overall"].notna()]
+
+    assert (rated["measured_share"] == 1.0).all()
+    assert np.allclose(rated["fifa_weight_used"], 0.5)
+    assert np.allclose(
+        rated["rating"],
+        0.5 * rated["performance_rating"] + 0.5 * rated["fifa_on_our_scale"],
+        atol=0.51,  # the published rating is rounded to whole points
+    )
+
+
+def test_a_pool_missing_most_of_its_weight_leans_on_ea() -> None:
+    """2014/15 and 2015/16, where FBref served no `misc` table.
+
+    `defending` is 62% of a centre back, so what was left to rank him on was
+    his passing and his goals -- and a flat 50/50 published that as half the
+    answer. Wes Morgan, an ever-present title-winning captain, came out at 58.
+    """
+    squad = _defenders()
+    squad[["interceptions_padj", "tackles_won_padj"]] = np.nan
+    squad["fifa_overall"] = np.linspace(60, 90, len(squad))
+
+    rated = rate_players(squad)
+    rated = rated[rated["rated"]]
+
+    # defending refused, the rest kept: a centre back keeps 38% of himself.
+    assert rated["sub_defending"].isna().all()
+    assert np.allclose(rated["measured_share"], 0.38, atol=0.01)
+    # weight + (1 - weight) * (1 - share) = 0.5 + 0.5 * 0.62
+    assert np.allclose(rated["fifa_weight_used"], 0.81, atol=0.01)
+
+
+def test_leaning_on_ea_reaches_the_published_rating() -> None:
+    """The arithmetic has to land on the number people read, not just a column.
+
+    Comparing a thin pool against a full one does not test this: the
+    percentiles are ranked within the pool, so both sides move and the
+    difference proves nothing. Assert the formula instead.
+    """
+    squad = _defenders()
+    squad[["interceptions_padj", "tackles_won_padj"]] = np.nan
+    squad["fifa_overall"] = np.linspace(60, 90, len(squad))
+
+    rated = rate_players(squad)
+    rated = rated[rated["rated"] & rated["fifa_overall"].notna()]
+
+    used = rated["fifa_weight_used"]
+    assert np.allclose(
+        rated["rating"],
+        (1 - used) * rated["performance_rating"] + used * rated["fifa_on_our_scale"],
+        atol=0.51,
+    )
+    # And it is genuinely different from what a flat 0.5 would have published.
+    flat = 0.5 * rated["performance_rating"] + 0.5 * rated["fifa_on_our_scale"]
+    assert (rated["rating"] - flat).abs().max() > 1.0
+
+
+def test_an_unmatched_player_in_a_thin_pool_is_shrunk_harder() -> None:
+    """He cannot lean on EA, because there is no EA row to lean on.
+
+    Same thin pool, same 38% of a rating, and the only other thing to lean on
+    is the pool mean. `k` is how many nineties it takes to be trusted halfway,
+    so it rises in proportion to what was *not* measured.
+    """
+    squad = _defenders()
+    # Most of the pool matched -- the blend returns early if none did -- and a
+    # handful did not. It is those the shrinkage is for.
+    squad["fifa_overall"] = np.linspace(60, 90, len(squad))
+    unmatched = squad.index < 10
+    squad.loc[unmatched, "fifa_overall"] = np.nan
+
+    full = rate_players(squad)
+    thin_squad = squad.copy()
+    thin_squad[["interceptions_padj", "tackles_won_padj"]] = np.nan
+    thin = rate_players(thin_squad)
+
+    def spread(rated: pd.DataFrame) -> float:
+        rows = rated[rated["rated"] & rated["fifa_overall"].isna()]
+        mean = rated.loc[rated["rated"], "performance_rating"].mean()
+        return float((rows["rating"] - mean).abs().mean())
+
+    assert spread(thin) < spread(full), (
+        "less measured, less spread: the pool mean should pull harder"
+    )
+
+
 def test_missing_discipline_does_not_unrate_the_whole_pool() -> None:
     """A 3% term must not be able to erase a composite.
 

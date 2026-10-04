@@ -271,6 +271,10 @@ export interface PlayerRating {
    * blending — which is why 63 and 78 can produce 64.
    */
   fifa_on_our_scale: number | null;
+  /** 0-1: how much of the role the season's data supported. Below 1, the blend leans on EA. */
+  measured_share: number | null;
+  /** Where the EA half of the blend landed for this row. 0.5 almost everywhere. */
+  fifa_weight_used: number | null;
 
   sub_finishing: number | null;
   sub_creation: number | null;

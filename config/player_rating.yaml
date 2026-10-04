@@ -61,6 +61,37 @@
 # need retuning.
 fifa_weight: 0.5
 
+# How far that split shifts when a role could not be measured.
+#
+# `fifa_weight` above assumes both halves describe the same player. For a
+# 2014/15 centre back the performance half describes 38% of one: FBref served
+# no `misc` table, so `defending` -- 62% of the composite -- was refused and
+# the rest was renormalised over the hole. Renormalising is right; presenting
+# the result as half the rating is not.
+#
+#   w_eff = fifa_weight + (1 - fifa_weight) * unmeasured_shift * (1 - measured)
+#
+#   role  season     measured  w_eff
+#   CB    1415/1516    0.38     0.81
+#   FB    1415/1516    0.62     0.69
+#   DM    1415/1516    0.80     0.60
+#   MID   1415/1516    0.80     0.60
+#   AMW   1415/1516    0.92     0.54
+#   GK    1415         0.97     0.52
+#   GK    1516         0.00     1.00   (EA alone -- already the behaviour)
+#   everything 1617 on 1.00     0.50   (unchanged, bit for bit)
+#
+# Set to 0 to disable, which reproduces the `fifa_weight` sweep above exactly
+# -- that is what it is for, and it is how this was attributed against the
+# role-stability change rather than measured as one lump.
+#
+# What this is and is not. It is an honesty correction: a number built from a
+# third of a role should not be presented as interchangeable with one built
+# from all of it. It is NOT a rescue for the 2015/16 defender ratings. EA's own
+# view of those squads is modest -- EA ranked Leicester's 18th of 20 -- so
+# Leicester stay 15th either way, and EA-only was measured and is worse.
+unmeasured_shift: 1.0
+
 # Shrinkage for players with no EA entry, in 90-minute appearances.
 #
 # Blending pulls every matched player toward EA's clustered middle, so a player
