@@ -24,12 +24,17 @@ Cross-checked against :func:`footballml.projection.remaining_fixtures`, which
 derives the same thing independently by assuming a double round-robin: both give
 330 (E0), 311 (SP1), 261 (F1), 270 (D1) and 330 (I1) unplayed for 2026/27.
 
-One request per league-season, cached by soccerdata under ``~/soccerdata``.
+One request per league-season, cached by soccerdata under ``~/soccerdata`` --
+but soccerdata will not reuse that cache for a season still in progress, so the
+age of those files is checked here instead. See :data:`SCHEDULE_MAX_AGE`.
 """
 
 from __future__ import annotations
 
 import logging
+import time
+from datetime import timedelta
+from pathlib import Path
 
 import pandas as pd
 
@@ -53,14 +58,66 @@ DEFAULT_HORIZON_DAYS = 10
 #: with about half its usual edge.
 COMPETITION_HORIZON_DAYS = 21
 
+#: How long a cached schedule page may be reused before it is re-scraped.
+#:
+#: soccerdata refuses its own cache for the *current* season -- `read_schedule`
+#: passes `no_cache=not self._is_complete(...)` -- so every call re-downloaded
+#: all five leagues through a headless browser, 7 seconds of enforced rate
+#: limit per page. Measured: 71s for the domestic five, 14s for the Champions
+#: League, and the same again on an immediately repeated call.
+#:
+#: That is the wrong trade for this data. A season schedule is published months
+#: ahead; what changes is the odd postponement and the kick-off times for a
+#: round once broadcasters pick them. Half a day is well inside the window where
+#: a change still reaches the page before the match, and it turns ~90 seconds of
+#: scraping into a disk read for every call but two a day.
+#:
+#: `read_schedule` exposes only `force_cache`, not soccerdata's `max_age`, so
+#: the age test is done here against the files soccerdata writes.
+SCHEDULE_MAX_AGE = timedelta(hours=12)
+
 #: FBref writes scores with an en-dash. A row with no score is unplayed, which
 #: is exactly what this module is for -- but a parse that quietly fails would
 #: mark *every* fixture unplayed, so the dash characters are matched explicitly.
 _SCORE = r"(\d+)\s*[-‐‑‒–—―]\s*(\d+)"
 
 
+def _cache_is_fresh(reader, max_age: timedelta | None) -> bool:
+    """Whether every schedule page this reader needs is cached and young enough.
+
+    All of them, not any: a partial answer is worse than a slow one. If one
+    league's page is stale the whole call re-scrapes, which costs the other four
+    nothing -- soccerdata skips a page it considers current, and `force_cache`
+    is a single flag for the call rather than per page.
+
+    A missing file is not an error here. soccerdata downloads whatever it has no
+    copy of regardless of `force_cache`, so a cold machine still works; it just
+    pays the full scrape once, which is the correct behaviour.
+    """
+    if max_age is None:
+        return False
+    pages = [
+        Path(reader.data_dir) / f"schedule_{league}_{season}.html"
+        for league in reader.leagues
+        for season in reader.seasons
+    ]
+    if not pages:
+        return False
+    cutoff = time.time() - max_age.total_seconds()
+    stale = [p for p in pages if not p.exists() or p.stat().st_mtime < cutoff]
+    if stale:
+        logger.info(
+            "Re-scraping the schedule: %d of %d cached page(s) older than %s",
+            len(stale), len(pages), max_age,
+        )
+        return False
+    return True
+
+
 def fetch_schedule(
-    leagues: list[str] | None = None, seasons: list[str] | None = None
+    leagues: list[str] | None = None,
+    seasons: list[str] | None = None,
+    max_age: timedelta | None = SCHEDULE_MAX_AGE,
 ) -> pd.DataFrame:
     """Every scheduled fixture, played or not, in canonical team names.
 
@@ -69,6 +126,10 @@ def fetch_schedule(
             :data:`footballml.ingest.european.EUROPEAN_LEAGUES` -- ``"UCL"`` and
             friends -- is accepted too. Defaults to the five domestic divisions.
         seasons: Season labels. Defaults to the current one.
+        max_age: Reuse soccerdata's cached pages while they are younger than
+            this. ``None`` forces a fresh scrape -- what the weekly job wants,
+            and roughly 90 seconds for the five leagues. See
+            :data:`SCHEDULE_MAX_AGE` for why the default is not ``None``.
 
     Returns:
         ``League``, ``Season``, ``Date``, ``HomeTeam``, ``AwayTeam`` and
@@ -99,7 +160,8 @@ def fetch_schedule(
         _register(uefa)
 
     reader = sd.FBref(leagues=[known[c] for c in codes], seasons=list(seasons))
-    raw = reader.read_schedule().reset_index()
+    # `force_cache` is all soccerdata offers; the age test is ours.
+    raw = reader.read_schedule(force_cache=_cache_is_fresh(reader, max_age)).reset_index()
     if raw.empty:
         return _empty()
 
@@ -156,23 +218,29 @@ def upcoming_fixtures(
     leagues: list[str] | None = None,
     horizon_days: int = DEFAULT_HORIZON_DAYS,
     today: pd.Timestamp | None = None,
+    max_age: timedelta | None = SCHEDULE_MAX_AGE,
 ) -> pd.DataFrame:
     """Unplayed fixtures kicking off within ``horizon_days``.
 
     An empty result is a legitimate answer, not a failure: at the time of
     writing the big five had no fixture between 20 September and 9 October
     because of an international break.
+
+    ``max_age=None`` re-scrapes rather than reusing soccerdata's cache; see
+    :data:`SCHEDULE_MAX_AGE`.
     """
-    return window_fixtures(fetch_schedule(leagues), horizon_days, today)
+    return window_fixtures(fetch_schedule(leagues, max_age=max_age), horizon_days, today)
 
 
-def next_fixture_date(leagues: list[str] | None = None) -> pd.Timestamp | None:
+def next_fixture_date(
+    leagues: list[str] | None = None, max_age: timedelta | None = SCHEDULE_MAX_AGE
+) -> pd.Timestamp | None:
     """When the next unplayed fixture is, or None if the season is over.
 
     Lets a caller distinguish "nothing scheduled for a fortnight" from "the
     fixture source is broken", which otherwise look identical.
     """
-    schedule = fetch_schedule(leagues)
+    schedule = fetch_schedule(leagues, max_age=max_age)
     pending = schedule[~schedule["played"]] if not schedule.empty else schedule
     return None if pending.empty else pending["Date"].min()
 

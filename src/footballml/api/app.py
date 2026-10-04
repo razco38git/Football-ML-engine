@@ -4,6 +4,11 @@ Read endpoints serve precomputed or cached results. Nothing here scrapes a
 source during a request, and nothing retrains -- the model is loaded once at
 startup from a versioned artifact.
 
+The fixture cache is what keeps the first half of that true. Scoring upcoming
+fixtures needs the season schedule, and fetching that is a scrape; a background
+task refills the cache before it expires so no request ever waits on one. See
+`_warm_upcoming`.
+
 ``POST /predict`` is the one live-inference path: it builds features for an
 arbitrary pairing on demand, which is what makes a "what if these two played?"
 control possible in the UI.
@@ -11,9 +16,11 @@ control possible in the UI.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import threading
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -87,6 +94,24 @@ logger = logging.getLogger(__name__)
 #: Upcoming fixtures change at most a few times a day, and predicting them costs
 #: a feature build over the full history. Cache rather than recompute per request.
 FIXTURE_CACHE_TTL = timedelta(minutes=30)
+
+#: How often the warmer checks whether the fixture cache needs refilling.
+#:
+#: Shorter than `FIXTURE_CACHE_TTL` on purpose, and the gap is the margin: the
+#: cache is refilled within a minute of going stale, so the window in which a
+#: request could find it empty and pay for the rebuild itself is a minute rather
+#: than forever. It also covers `POST /admin/reload`, which drops the cache
+#: deliberately -- the warmer notices on its next tick instead of leaving the
+#: bill for whoever opens the page first after a weekly run.
+FIXTURE_WARM_INTERVAL = timedelta(minutes=1)
+
+#: Serializes rebuilds of the fixture cache.
+#:
+#: Without it the warmer and a request that arrives just as the cache expires
+#: both start a rebuild, and two concurrent scrapes of the same pages is the one
+#: thing a rate-limited source should never see. The second caller waits for the
+#: first and then finds the cache already full.
+_upcoming_lock = threading.Lock()
 
 #: Outcome probability columns, in H/D/A order.
 PROB_COLUMNS = ["prob_home_win", "prob_draw", "prob_away_win"]
@@ -282,9 +307,20 @@ def _load_state(startup: bool = False) -> dict[str, int]:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    """Load the model and history once, at startup."""
+    """Load the model and history once, at startup; warm the cache after.
+
+    The warmer is a task rather than an await: its first pass takes a minute or
+    two, and holding the port closed for that long would turn a restart from
+    "the tab is briefly slow" into "the site is down".
+    """
     _load_state(startup=True)
-    yield
+    warmer = asyncio.create_task(_warm_upcoming())
+    try:
+        yield
+    finally:
+        warmer.cancel()
+        with suppress(asyncio.CancelledError):
+            await warmer
 
 
 app = FastAPI(
@@ -558,10 +594,7 @@ def upcoming(
     Explanations add little to the cost once features are built, and computing
     them eagerly means toggling "show analysis" in the UI is instant.
     """
-    if state.upcoming_is_stale:
-        state._upcoming = _score_upcoming()
-        state._upcoming_at = datetime.now(UTC)
-
+    _refresh_upcoming()
     results = state._upcoming or []
     if league:
         # A European tie carries `league` = the home side's division, because the
@@ -572,6 +605,48 @@ def upcoming(
         # Strip rather than recompute: the caller asked for a lighter payload.
         results = [p.model_copy(update={"drivers_home": [], "drivers_away": []}) for p in results]
     return results
+
+
+def _refresh_upcoming() -> None:
+    """Rebuild the fixture cache if it has expired. Safe to call concurrently.
+
+    The staleness test is repeated inside the lock, which is the point of it:
+    whoever was holding the lock has just refilled the cache, so the caller that
+    was waiting has nothing left to do.
+    """
+    if not state.upcoming_is_stale:
+        return
+    with _upcoming_lock:
+        if not state.upcoming_is_stale:
+            return
+        state._upcoming = _score_upcoming()
+        state._upcoming_at = datetime.now(UTC)
+
+
+async def _warm_upcoming() -> None:
+    """Keep the fixture cache full, so no request pays to build it.
+
+    Scoring upcoming fixtures needs the season schedule, and fetching that goes
+    through soccerdata's FBref reader -- a headless browser with a seven-second
+    rate limit per page, which measured 71s for the five domestic leagues and
+    14s for the Champions League. `SCHEDULE_MAX_AGE` means most calls now read
+    those pages off disk, but the first one after the files age out still pays,
+    and so does every start of this process. Doing it here means it happens with
+    nobody waiting on it.
+
+    Failures are logged and the loop continues. A scraper outage should cost the
+    tab its freshness, not the whole process: `upcoming` still serves whatever
+    was last cached, and `_score_upcoming` falls back to the published fixture
+    file on its own.
+    """
+    while True:
+        try:
+            await asyncio.to_thread(_refresh_upcoming)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - a warmer that dies is worse than one that retries
+            logger.exception("Could not warm the fixture cache; will retry")
+        await asyncio.sleep(FIXTURE_WARM_INTERVAL.total_seconds())
 
 
 def _score_upcoming() -> list[Prediction]:

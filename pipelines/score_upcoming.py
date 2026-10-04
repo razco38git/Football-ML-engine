@@ -105,7 +105,10 @@ def _european_fixtures(leagues: list[str] | None, log: logging.Logger) -> pd.Dat
     from footballml.ingest.european import big_five_only
 
     try:
-        schedule = fetch_schedule(wanted)
+        # `max_age=None`: this is the weekly job, and it is the thing that
+        # refreshes the cache the API then reads. Anywhere else the scrape is a
+        # user waiting; here it is a scheduled task with nobody watching.
+        schedule = fetch_schedule(wanted, max_age=None)
         schedule = window_fixtures(schedule, horizon_days=COMPETITION_HORIZON_DAYS)
     except Exception as exc:  # noqa: BLE001 - one missing source is survivable
         log.warning("No European schedule (%s)", exc)
@@ -151,7 +154,7 @@ def _collect_fixtures(
     Falls back to football-data alone if the schedule is unavailable, so an
     outage at one source degrades coverage instead of stopping the record.
     """
-    schedule = fetch_schedule(leagues)
+    schedule = fetch_schedule(leagues, max_age=None)  # see `_european_fixtures`
     schedule = pd.concat([schedule, _european_fixtures(leagues, log)], ignore_index=True)
     if schedule.empty:
         # The schedule source itself gave us nothing, which is a problem rather

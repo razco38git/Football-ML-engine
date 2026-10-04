@@ -15,10 +15,20 @@ about telling "nothing is scheduled" apart from "no schedule arrived".
 
 from __future__ import annotations
 
+import os
+import time
+from datetime import timedelta
+
 import pandas as pd
 import pytest
 
-from footballml.ingest.schedule import _SCORE, DEFAULT_HORIZON_DAYS, window_fixtures
+from footballml.ingest.schedule import (
+    _SCORE,
+    DEFAULT_HORIZON_DAYS,
+    SCHEDULE_MAX_AGE,
+    _cache_is_fresh,
+    window_fixtures,
+)
 
 
 def _schedule(rows: list[tuple[str, str, str, str, bool]]) -> pd.DataFrame:
@@ -109,3 +119,69 @@ def test_scores_parse_whatever_dash_the_source_used(score):
 
 def test_a_fixture_with_no_score_is_unplayed():
     assert pd.Series(["", "nan", "None"]).str.extract(_SCORE)[0].isna().all()
+
+
+class _Reader:
+    """Stands in for a soccerdata reader: `_cache_is_fresh` reads three fields."""
+
+    def __init__(self, data_dir, leagues, seasons):
+        self.data_dir = data_dir
+        self.leagues = leagues
+        self.seasons = seasons
+
+
+def _page(tmp_path, league, season, age=timedelta()):
+    path = tmp_path / f"schedule_{league}_{season}.html"
+    path.write_text("<html></html>", encoding="utf-8")
+    when = time.time() - age.total_seconds()
+    os.utime(path, (when, when))
+    return path
+
+
+def test_a_young_cache_is_reused(tmp_path):
+    """The whole point: no scrape when the pages on disk are current.
+
+    soccerdata refuses its own cache for a season in progress, which made every
+    call a ~90s headless-browser fetch of pages that had not changed.
+    """
+    _page(tmp_path, "ENG-Premier League", "2627", age=timedelta(hours=1))
+    reader = _Reader(tmp_path, ["ENG-Premier League"], ["2627"])
+    assert _cache_is_fresh(reader, SCHEDULE_MAX_AGE)
+
+
+def test_an_aged_cache_is_refetched(tmp_path):
+    _page(tmp_path, "ENG-Premier League", "2627", age=SCHEDULE_MAX_AGE + timedelta(minutes=1))
+    reader = _Reader(tmp_path, ["ENG-Premier League"], ["2627"])
+    assert not _cache_is_fresh(reader, SCHEDULE_MAX_AGE)
+
+
+def test_one_stale_league_refetches_the_call(tmp_path):
+    """All pages or none. `force_cache` is per call, not per page.
+
+    Returning True here would serve a league whose schedule had aged out, and
+    the fixture it was missing would simply not appear on the page.
+    """
+    _page(tmp_path, "ENG-Premier League", "2627", age=timedelta(hours=1))
+    _page(tmp_path, "ESP-La Liga", "2627", age=SCHEDULE_MAX_AGE + timedelta(hours=1))
+    reader = _Reader(tmp_path, ["ENG-Premier League", "ESP-La Liga"], ["2627"])
+    assert not _cache_is_fresh(reader, SCHEDULE_MAX_AGE)
+
+
+def test_a_missing_page_is_not_fresh(tmp_path):
+    """A cold machine must still fetch. soccerdata downloads what it lacks
+    whatever `force_cache` says, so this only decides whether the *other* pages
+    are reused -- and with one missing there is a scrape to pay for anyway."""
+    reader = _Reader(tmp_path, ["ENG-Premier League"], ["2627"])
+    assert not _cache_is_fresh(reader, SCHEDULE_MAX_AGE)
+
+
+def test_max_age_none_always_refetches(tmp_path):
+    """What the weekly job passes: it is the thing that refreshes the cache."""
+    _page(tmp_path, "ENG-Premier League", "2627")
+    reader = _Reader(tmp_path, ["ENG-Premier League"], ["2627"])
+    assert not _cache_is_fresh(reader, None)
+
+
+def test_a_reader_with_no_leagues_is_not_fresh(tmp_path):
+    """Vacuous truth would claim a cache hit for pages that do not exist."""
+    assert not _cache_is_fresh(_Reader(tmp_path, [], []), SCHEDULE_MAX_AGE)
