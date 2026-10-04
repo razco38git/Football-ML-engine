@@ -242,6 +242,17 @@ positions:
         interceptions_padj: 2.5
         tackles_won_padj: 2.5
         fouls_per90: -0.5
+        # Quality beside volume. The volume terms answer "how much defending
+        # did he do", which a centre back at a dominant side does little of --
+        # Van Dijk sits at the 3rd to 11th percentile for it in every Liverpool
+        # season. These two ask how good the defending was: what share of his
+        # challenges ended with the ball rather than a free kick, and how much
+        # he wins per foul given away. On those he is 70th to 97th percentile.
+        #
+        # FBref strips tackle attempts from player rows, so a true success rate
+        # is out of reach; fouls stand in for failed challenges.
+        clean_challenge_rate: 1.0
+        ball_won_per_foul: 1.0
       creation:
         crosses_per90: 2.0
         xa_per90: 2.0
@@ -295,6 +306,17 @@ positions:
         interceptions_padj: 3.0
         tackles_won_padj: 2.5
         fouls_per90: -0.5
+        # Quality beside volume. The volume terms answer "how much defending
+        # did he do", which a centre back at a dominant side does little of --
+        # Van Dijk sits at the 3rd to 11th percentile for it in every Liverpool
+        # season. These two ask how good the defending was: what share of his
+        # challenges ended with the ball rather than a free kick, and how much
+        # he wins per foul given away. On those he is 70th to 97th percentile.
+        #
+        # FBref strips tackle attempts from player rows, so a true success rate
+        # is out of reach; fouls stand in for failed challenges.
+        clean_challenge_rate: 1.0
+        ball_won_per_foul: 1.0
       involvement:
         xg_buildup_share: 1.5
         xg_buildup_per90: 1.5

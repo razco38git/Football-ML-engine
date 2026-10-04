@@ -290,6 +290,22 @@ def fetch_player_seasons(
         except FifaDataMissingError as exc:
             logger.warning("%s", exc)
 
+    # Quality per defensive action, not volume of them.
+    #
+    # FBref strips tackle *attempts* from the player rows, so a success rate is
+    # not directly available -- but fouls are served, and a foul is what a
+    # failed challenge usually looks like. These ask how often a challenge ends
+    # with the ball rather than a free kick, which is the question a defender
+    # who rarely needs to tackle should be judged on.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        won = out.get("tackles_won_per90")
+        ints = out.get("interceptions_per90")
+        fouls = out.get("fouls_per90")
+        if won is not None and fouls is not None:
+            out["clean_challenge_rate"] = won.div((won + fouls).replace(0, np.nan))
+        if won is not None and ints is not None and fouls is not None:
+            out["ball_won_per_foul"] = (won + ints).div(fouls.replace(0, np.nan))
+
     # Possession adjustment runs last, once every defensive metric has arrived.
     # Placed before the FBref merges it silently produced nothing at all: the
     # clearances and blocks it needs did not exist yet, and neither did the
