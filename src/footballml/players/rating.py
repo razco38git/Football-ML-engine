@@ -373,7 +373,19 @@ def rate_players(
             if not penalties.empty:
                 score = _weighted(penalties, discipline["metrics"])
                 weight = float(discipline["weight"])
-                composite = composite * (1 - weight) + score * weight
+                # Guarded like the peak blend below, and for the same reason.
+                # `_weighted` returns all-NaN when the cards are missing or
+                # cover less than half the pool, and an unguarded blend would
+                # multiply every composite in the block by that -- unrating a
+                # whole role-season over a 3% term. Cards are served for every
+                # season in this dataset, so this has never fired; it is the
+                # kind of thing that fires the first time a source changes.
+                composite = np.where(
+                    score.notna(),
+                    composite * (1 - weight) + score * weight,
+                    composite,
+                )
+                composite = pd.Series(composite, index=block.index)
 
         composites.loc[block.index] = composite.astype(float)
 

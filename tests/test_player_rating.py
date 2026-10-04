@@ -566,3 +566,20 @@ def test_the_quality_ratios_are_optional() -> None:
     assert done["sub_defending"].notna().any(), (
         "defending collapsed when the quality ratios were absent from the frame"
     )
+
+
+def test_missing_discipline_does_not_unrate_the_whole_pool() -> None:
+    """A 3% term must not be able to erase a composite.
+
+    The peak blend guards against exactly this; the discipline blend did not.
+    Cards are served for every season in this dataset, so it has never fired --
+    which is why it would have gone unnoticed the first time a source changed.
+    """
+    squad = _defenders()
+    squad[["yellow_cards_per90", "red_cards_per90"]] = np.nan
+    squad["fifa_overall"] = np.nan
+
+    rated = rate_players(squad)
+
+    assert rated["rated"].all(), "cards went missing and took the pool with them"
+    assert rated["rating"].notna().all()
