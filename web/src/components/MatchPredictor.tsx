@@ -9,6 +9,7 @@ import {
 } from '../api/client';
 import { confidence, formatDate, mean, pct, shortName, teamColor, verdict } from '../api/display';
 import { useAsync } from '../api/hooks';
+import { CallVersusResult, FinalScore, OutcomeBar, OutcomeSplit, ResultBadge } from './MatchOutcome';
 
 function FormBadge({ result }: { result: string }) {
   const cls = result === 'W' ? 'form-w' : result === 'D' ? 'form-d' : 'form-l';
@@ -27,22 +28,6 @@ function XGBar({ values, color }: { values: number[]; color: string }) {
             style={{ height: `${(v / max) * 36}px`, background: color, opacity: 0.85, minHeight: 4 }}
           />
         </div>
-      ))}
-    </div>
-  );
-}
-
-/** Probability split across the three outcomes, as one stacked bar. */
-function OutcomeBar({ p }: { p: Prediction }) {
-  const segments = [
-    { value: p.prob_home_win, color: '#00e676' },
-    { value: p.prob_draw, color: '#64748b' },
-    { value: p.prob_away_win, color: '#3b82f6' },
-  ];
-  return (
-    <div className="flex h-2 rounded-full overflow-hidden" style={{ background: 'var(--secondary)' }}>
-      {segments.map((s, i) => (
-        <div key={i} style={{ width: `${s.value * 100}%`, background: s.color }} />
       ))}
     </div>
   );
@@ -398,15 +383,128 @@ function SquadStrength({ p }: { p: Prediction }) {
  *  and needs no override, but a hypothetical pairing can cross borders, and the
  *  prediction carries only the league it was *scored* in -- which would label
  *  Man City "LaLiga" in a Real Madrid tie. */
+/**
+ * What the model said would happen: likeliest exact score, the scores either
+ * side of it, a verdict and a confidence.
+ *
+ * Its own component because a settled match shows it somewhere else. Before
+ * kick-off this is the headline; afterwards the headline is the result, and
+ * this moves into the analysis panel beside the score grid that explains it.
+ * A card that leads with its own forecast and footnotes the final score is
+ * answering a question nobody has once the match has been played.
+ */
+function ForecastSummary({ p }: { p: Prediction }) {
+  const { label: outcomeLabel, color: outcomeColor, decisive } = verdict(p);
+  const conf = confidence(p);
+  return (
+    <div className="flex flex-col items-center gap-2">
+      {/*
+        Coloured by the scoreline itself, not by `predicted_outcome`.
+        They answer different questions and often disagree: Roma v Inter
+        is a 50% Roma win whose single most likely exact score is 1-1,
+        and painting that 1-1 with the home-win colour made the card look
+        self-contradictory.
+      */}
+      <div className="flex items-center gap-1">
+        <span
+          className="overall-badge"
+          style={{
+            background: p.modal_score_home > p.modal_score_away ? '#00e676' : 'var(--secondary)',
+            color: p.modal_score_home > p.modal_score_away ? '#000' : 'var(--foreground)',
+            width: 52, height: 52, fontSize: 22, borderRadius: 10,
+          }}
+        >
+          {p.modal_score_home}
+        </span>
+        <span className="font-display font-bold text-lg" style={{ color: 'var(--muted-foreground)' }}>-</span>
+        <span
+          className="overall-badge"
+          style={{
+            background: p.modal_score_away > p.modal_score_home ? '#3b82f6' : 'var(--secondary)',
+            color: p.modal_score_away > p.modal_score_home ? '#000' : 'var(--foreground)',
+            width: 52, height: 52, fontSize: 22, borderRadius: 10,
+          }}
+        >
+          {p.modal_score_away}
+        </span>
+      </div>
+      <div className="text-xs text-center" style={{ color: 'var(--muted-foreground)' }}>
+        likeliest exact score
+        {p.prob_modal_score != null && ` · ${pct(p.prob_modal_score)}`}
+      </div>
+      {/*
+        One line to settle the apparent contradiction without making the
+        reader open the panel. "1-1" above "Villarreal win" looks like the
+        card arguing with itself, and the answer is not subtle once said
+        out loud: a draw has to land on one of six exact scores, a home
+        win can arrive by any of fifteen. The grid under "Show analysis"
+        is the same statement as a picture.
+      */}
+      {p.prob_modal_score != null && <ScoreVersusOutcome p={p} />}
+
+      {/*
+        The runners-up, which are the point. The leader clears them by
+        about a percentage point, so showing one score alone invites the
+        reader to treat a ~10% event as the forecast — and since a draw's
+        mass sits on the diagonal while a win is spread across many
+        scorelines, that leader is a draw in 63% of matches even when a
+        side is a clear favourite. Seeing 1-1 11% · 2-1 10% · 2-0 9%
+        settles the apparent contradiction without changing a number.
+      */}
+      {p.likely_scores?.length > 1 && (
+        <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+          {p.likely_scores.slice(1).map(s => (
+            <span
+              key={`${s.home}-${s.away}`}
+              className="px-1.5 py-0.5 rounded font-data"
+              style={{ background: 'var(--secondary)', border: '1px solid var(--border)' }}
+              title={`${s.home}-${s.away} in ${pct(s.probability)} of simulations`}
+            >
+              {s.home}-{s.away} <span style={{ opacity: 0.7 }}>{pct(s.probability)}</span>
+            </span>
+          ))}
+        </div>
+      )}
+      <div
+        className="text-xs font-display font-bold px-2 py-0.5 rounded-full tracking-wide text-center"
+        style={{ background: outcomeColor + '22', color: outcomeColor, border: `1px solid ${outcomeColor}44` }}
+      >
+        {outcomeLabel}
+      </div>
+      <div className="text-center">
+        <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+          xG: {p.expected_goals_home.toFixed(2)} – {p.expected_goals_away.toFixed(2)}
+        </div>
+        {/*
+          "38% confidence" reads as confidence in a named winner. Where
+          there is no favourite there is no winner to be confident about,
+          so show what the model actually thinks: all three numbers.
+        */}
+        {decisive ? (
+          <div
+            className="text-xs font-display font-bold mt-1"
+            style={{ color: conf >= 60 ? '#00e676' : conf >= 45 ? '#ffea00' : '#ff9100' }}
+          >
+            {conf}% confidence
+          </div>
+        ) : (
+          <div className="text-xs font-data mt-1" style={{ color: '#94a3b8' }}>
+            {pct(p.prob_home_win)} / {pct(p.prob_draw)} / {pct(p.prob_away_win)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function MatchCard({ p, leagues }: {
   p: Prediction;
   leagues?: { home: string; away: string };
 }) {
   const [expanded, setExpanded] = useState(false);
 
-  // `verdict` decides whether naming a winner is honest here; see display.ts.
-  const { label: outcomeLabel, color: outcomeColor, decisive } = verdict(p);
-  const conf = confidence(p);
+  // `verdict` and `confidence` moved with the forecast block into
+  // `ForecastSummary`; nothing in the card itself needs them now.
   const settled = p.actual_result !== null;
   const correct = settled && p.actual_result === p.predicted_outcome;
 
@@ -423,18 +521,9 @@ export function MatchCard({ p, leagues }: {
         <span className="text-xs font-medium tracking-widest uppercase" style={{ color: 'var(--muted-foreground)' }}>
           {competitionLabel(p.competition && p.competition !== 'domestic' ? p.competition : p.league)}
         </span>
-        <div className="flex items-center gap-3">
-          {settled && (
-            <span
-              className="text-xs font-display font-bold px-2 py-0.5 rounded"
-              style={{
-                background: correct ? 'rgba(0,230,118,0.15)' : 'rgba(244,67,54,0.15)',
-                color: correct ? '#00e676' : '#f44336',
-              }}
-            >
-              {p.actual_home_goals}–{p.actual_away_goals} {correct ? '✓' : '✗'}
-            </span>
-          )}
+        <div className="flex items-center gap-2">
+          {/* Just the tick. The score itself is now the headline below. */}
+          {settled && <ResultBadge correct={correct} />}
           <span className="text-xs font-data" style={{ color: 'var(--muted-foreground)' }}>
             {formatDate(p.date)}
           </span>
@@ -450,114 +539,52 @@ export function MatchCard({ p, leagues }: {
         <div className="grid items-center gap-4 grid-cols-1 sm:grid-cols-[1fr_auto_1fr]">
           <TeamSide team={p.home_team} form={p.form_home} league={leagues?.home ?? p.league} align="left" />
 
-          <div className="flex flex-col items-center gap-2">
-            {/*
-              Coloured by the scoreline itself, not by `predicted_outcome`.
-              They answer different questions and often disagree: Roma v Inter
-              is a 50% Roma win whose single most likely exact score is 1-1,
-              and painting that 1-1 with the home-win colour made the card look
-              self-contradictory.
-            */}
-            <div className="flex items-center gap-1">
-              <span
-                className="overall-badge"
-                style={{
-                  background: p.modal_score_home > p.modal_score_away ? '#00e676' : 'var(--secondary)',
-                  color: p.modal_score_home > p.modal_score_away ? '#000' : 'var(--foreground)',
-                  width: 52, height: 52, fontSize: 22, borderRadius: 10,
-                }}
-              >
-                {p.modal_score_home}
-              </span>
-              <span className="font-display font-bold text-lg" style={{ color: 'var(--muted-foreground)' }}>-</span>
-              <span
-                className="overall-badge"
-                style={{
-                  background: p.modal_score_away > p.modal_score_home ? '#3b82f6' : 'var(--secondary)',
-                  color: p.modal_score_away > p.modal_score_home ? '#000' : 'var(--foreground)',
-                  width: 52, height: 52, fontSize: 22, borderRadius: 10,
-                }}
-              >
-                {p.modal_score_away}
-              </span>
+          {/*
+            Before kick-off, the forecast. Afterwards, what actually happened
+            -- with the forecast kept as the small line underneath, because
+            this page's whole claim is that the two can be compared.
+          */}
+          {settled ? (
+            <div className="flex flex-col items-center flex-shrink-0" style={{ minWidth: 104 }}>
+              <FinalScore
+                homeGoals={p.actual_home_goals!}
+                awayGoals={p.actual_away_goals!}
+                expectedHome={p.expected_goals_home}
+                expectedAway={p.expected_goals_away}
+              />
             </div>
-            <div className="text-xs text-center" style={{ color: 'var(--muted-foreground)' }}>
-              likeliest exact score
-              {p.prob_modal_score != null && ` · ${pct(p.prob_modal_score)}`}
-            </div>
-            {/*
-              One line to settle the apparent contradiction without making the
-              reader open the panel. "1-1" above "Villarreal win" looks like the
-              card arguing with itself, and the answer is not subtle once said
-              out loud: a draw has to land on one of six exact scores, a home
-              win can arrive by any of fifteen. The grid under "Show analysis"
-              is the same statement as a picture.
-            */}
-            {p.prob_modal_score != null && <ScoreVersusOutcome p={p} />}
-
-            {/*
-              The runners-up, which are the point. The leader clears them by
-              about a percentage point, so showing one score alone invites the
-              reader to treat a ~10% event as the forecast — and since a draw's
-              mass sits on the diagonal while a win is spread across many
-              scorelines, that leader is a draw in 63% of matches even when a
-              side is a clear favourite. Seeing 1-1 11% · 2-1 10% · 2-0 9%
-              settles the apparent contradiction without changing a number.
-            */}
-            {p.likely_scores?.length > 1 && (
-              <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                {p.likely_scores.slice(1).map(s => (
-                  <span
-                    key={`${s.home}-${s.away}`}
-                    className="px-1.5 py-0.5 rounded font-data"
-                    style={{ background: 'var(--secondary)', border: '1px solid var(--border)' }}
-                    title={`${s.home}-${s.away} in ${pct(s.probability)} of simulations`}
-                  >
-                    {s.home}-{s.away} <span style={{ opacity: 0.7 }}>{pct(s.probability)}</span>
-                  </span>
-                ))}
-              </div>
-            )}
-            <div
-              className="text-xs font-display font-bold px-2 py-0.5 rounded-full tracking-wide text-center"
-              style={{ background: outcomeColor + '22', color: outcomeColor, border: `1px solid ${outcomeColor}44` }}
-            >
-              {outcomeLabel}
-            </div>
-            <div className="text-center">
-              <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-                xG: {p.expected_goals_home.toFixed(2)} – {p.expected_goals_away.toFixed(2)}
-              </div>
-              {/*
-                "38% confidence" reads as confidence in a named winner. Where
-                there is no favourite there is no winner to be confident about,
-                so show what the model actually thinks: all three numbers.
-              */}
-              {decisive ? (
-                <div
-                  className="text-xs font-display font-bold mt-1"
-                  style={{ color: conf >= 60 ? '#00e676' : conf >= 45 ? '#ffea00' : '#ff9100' }}
-                >
-                  {conf}% confidence
-                </div>
-              ) : (
-                <div className="text-xs font-data mt-1" style={{ color: '#94a3b8' }}>
-                  {pct(p.prob_home_win)} / {pct(p.prob_draw)} / {pct(p.prob_away_win)}
-                </div>
-              )}
-            </div>
-          </div>
+          ) : (
+            <ForecastSummary p={p} />
+          )}
 
           <TeamSide team={p.away_team} form={p.form_away} league={leagues?.away ?? p.league} align="right" />
         </div>
 
         <div className="mt-4">
-          <OutcomeBar p={p} />
-          <div className="flex justify-between mt-1 text-xs" style={{ color: 'var(--muted-foreground)' }}>
-            <span>Home {pct(p.prob_home_win)}</span>
-            <span>Draw {pct(p.prob_draw)}</span>
-            <span>Away {pct(p.prob_away_win)}</span>
-          </div>
+          <OutcomeBar home={p.prob_home_win} draw={p.prob_draw} away={p.prob_away_win} />
+          {/*
+            Named, not "Home / Draw / Away". The reader had to map two of the
+            three onto clubs himself, and on a settled card nothing said which
+            one had happened -- which is the only question he arrived with.
+          */}
+          <OutcomeSplit
+            home={p.home_team}
+            away={p.away_team}
+            probHome={p.prob_home_win}
+            probDraw={p.prob_draw}
+            probAway={p.prob_away_win}
+            actual={p.actual_result}
+            pct={pct}
+          />
+          {settled && (
+            <CallVersusResult
+              predicted={p.predicted_outcome}
+              actual={p.actual_result!}
+              home={p.home_team}
+              away={p.away_team}
+              correct={correct}
+            />
+          )}
         </div>
 
         {p.market_prob_home !== null && (
@@ -580,6 +607,26 @@ export function MatchCard({ p, leagues }: {
 
       {expanded && (
         <div className="px-5 pb-5" style={{ borderTop: '1px solid var(--border)' }}>
+          {/*
+            What we had said, for a match that has been played. It is the first
+            thing in the panel because it is what the rest of the panel is
+            evidence for, and it sits directly above the score grid, which is
+            the same statement as a picture.
+          */}
+          {settled && (
+            <div
+              className="pt-4 flex flex-col items-center"
+              style={{ borderBottom: '1px solid var(--border)', paddingBottom: 16 }}
+            >
+              <div
+                className="uppercase tracking-wider mb-2"
+                style={{ color: 'var(--muted-foreground)', fontSize: 9 }}
+              >
+                What we forecast
+              </div>
+              <ForecastSummary p={p} />
+            </div>
+          )}
           <div className="pt-4 grid gap-4" style={{ gridTemplateColumns: '1fr 1fr' }}>
             <div>
               <div className="text-xs font-display font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--muted-foreground)' }}>

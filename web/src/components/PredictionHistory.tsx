@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api, COMPETITION_NAMES, LEAGUE_NAMES, competitionLabel, type Accuracy, type MatchResult } from '../api/client';
 import { formatDate, pct, teamColor } from '../api/display';
 import { useAsync } from '../api/hooks';
+import { CallVersusResult, FinalScore, OutcomeBar, OutcomeSplit, ResultBadge } from './MatchOutcome';
 
 type Source = 'live' | 'backtest';
 
@@ -27,39 +28,7 @@ const SOURCES: Record<Source, { label: string; blurb: string }> = {
   },
 };
 
-function ResultBadge({ correct }: { correct: boolean }) {
-  return (
-    <span
-      className="text-xs font-display font-bold px-2 py-0.5 rounded"
-      style={{
-        background: correct ? 'rgba(0,230,118,0.15)' : 'rgba(244,67,54,0.15)',
-        color: correct ? '#00e676' : '#f44336',
-      }}
-    >
-      {correct ? '✓' : '✗'}
-    </span>
-  );
-}
-
-function OutcomeBar({ m }: { m: MatchResult }) {
-  const segments = [
-    { value: m.prob_home_win, color: '#00e676' },
-    { value: m.prob_draw, color: '#64748b' },
-    { value: m.prob_away_win, color: '#3b82f6' },
-  ];
-  return (
-    <div className="flex h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--secondary)' }}>
-      {segments.map((s, i) => (
-        <div key={i} style={{ width: `${s.value * 100}%`, background: s.color }} />
-      ))}
-    </div>
-  );
-}
-
 function ResultRow({ m }: { m: MatchResult }) {
-  const label = (o: string, home: string, away: string) =>
-    o === 'H' ? home : o === 'A' ? away : 'Draw';
-
   return (
     <div
       className="rounded-xl p-4"
@@ -100,24 +69,12 @@ function ResultRow({ m }: { m: MatchResult }) {
           about scoring that forecast.
         */}
         <div className="flex flex-col items-center flex-shrink-0" style={{ minWidth: 104 }}>
-          <div
-            className="text-xs uppercase tracking-wider"
-            style={{ color: 'var(--muted-foreground)', fontSize: 9 }}
-          >
-            final score
-          </div>
-          <div className="font-display font-black text-xl" style={{ color: 'var(--foreground)' }}>
-            {m.actual_home_goals}–{m.actual_away_goals}
-          </div>
-          {m.expected_goals_home != null && (
-            <div
-              className="text-xs font-data"
-              style={{ color: 'var(--muted-foreground)' }}
-              title="Goals the model expected each side to score, from before kick-off. Not the chances they actually created."
-            >
-              we forecast {m.expected_goals_home.toFixed(2)}–{m.expected_goals_away?.toFixed(2)}
-            </div>
-          )}
+          <FinalScore
+            homeGoals={m.actual_home_goals}
+            awayGoals={m.actual_away_goals}
+            expectedHome={m.expected_goals_home}
+            expectedAway={m.expected_goals_away}
+          />
         </div>
 
         <div className="flex items-center gap-2 justify-end" style={{ flex: '1 1 0', minWidth: 0 }}>
@@ -132,41 +89,29 @@ function ResultRow({ m }: { m: MatchResult }) {
       </div>
 
       <div className="mt-3">
-        <OutcomeBar m={m} />
         {/*
           All three, as the Match Predictor shows them. "Predicted Villarreal at
           59%" alone leaves the other 41% unaccounted for, and whether the model
           thought the danger was a draw or an away win is the more interesting
           half of a wrong call.
         */}
-        <div
-          className="flex justify-between mt-1.5 text-xs font-data"
-          style={{ color: 'var(--muted-foreground)' }}
-        >
-          <span style={{ color: m.actual_result === 'H' ? 'var(--foreground)' : undefined }}>
-            {m.home_team} {pct(m.prob_home_win)}
-          </span>
-          <span style={{ color: m.actual_result === 'D' ? 'var(--foreground)' : undefined }}>
-            Draw {pct(m.prob_draw)}
-          </span>
-          <span style={{ color: m.actual_result === 'A' ? 'var(--foreground)' : undefined }}>
-            {m.away_team} {pct(m.prob_away_win)}
-          </span>
-        </div>
-        <div className="flex justify-between mt-1 text-xs" style={{ color: 'var(--muted-foreground)' }}>
-          <span>
-            We said{' '}
-            <span style={{ color: m.correct ? '#00e676' : '#f44336', fontWeight: 500 }}>
-              {label(m.predicted_outcome, m.home_team, m.away_team)}
-            </span>
-          </span>
-          <span>
-            It was{' '}
-            <span style={{ color: 'var(--foreground)' }}>
-              {label(m.actual_result, m.home_team, m.away_team)}
-            </span>
-          </span>
-        </div>
+        <OutcomeBar home={m.prob_home_win} draw={m.prob_draw} away={m.prob_away_win} />
+        <OutcomeSplit
+          home={m.home_team}
+          away={m.away_team}
+          probHome={m.prob_home_win}
+          probDraw={m.prob_draw}
+          probAway={m.prob_away_win}
+          actual={m.actual_result}
+          pct={pct}
+        />
+        <CallVersusResult
+          predicted={m.predicted_outcome}
+          actual={m.actual_result}
+          home={m.home_team}
+          away={m.away_team}
+          correct={m.correct}
+        />
       </div>
     </div>
   );
