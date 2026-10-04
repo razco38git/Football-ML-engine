@@ -288,11 +288,19 @@ def predict_with(features: pd.DataFrame, model, league_code_from: str = "home") 
     frame["league_code"] = frame[column].map(LEAGUE_CODES).astype("float64")
 
     predicted = model.predict_frame(frame[model.feature_names_])
+    # Squad strength travels with the prediction, because the site reads these
+    # rows back. `/matches?league=UCL` serves this file directly -- European
+    # results are deliberately kept out of the match history, so the API cannot
+    # rebuild the features for them -- and without these columns every
+    # Champions League card under "Recent results" came back with no squad
+    # strength at all, while the identical domestic card showed it.
+    strength = [c for c in frame.columns if "_strength_" in c]
     keep = [
         c
         for c in [
             "competition", "Season", "Date", "HomeTeam", "AwayTeam",
             "FTHG", "FTAG", "FTR", "Round", "home_league", "away_league",
+            *strength,
         ]
         if c in frame.columns
     ]
