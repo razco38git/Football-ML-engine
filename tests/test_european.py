@@ -263,3 +263,43 @@ def test_an_unknown_round_is_labelled_not_silently_counted_as_normal() -> None:
 
     assert classify_round("League phase play-in") == "unclassified"
     assert classify_round(None) == "unclassified"
+
+
+# --- registering a competition after a reader already exists ----------------
+
+
+def test_registering_works_even_after_a_reader_has_been_built() -> None:
+    """The reason the site showed no Champions League matches at all.
+
+    `BaseReader._all_leagues` snapshots `LEAGUE_DICT` onto the *class* the
+    first time any reader is built, and every caller builds a domestic reader
+    first -- `score_upcoming` fetches the five leagues' schedule before the
+    European one. So by the time `_register` ran, the snapshot already existed
+    without a UEFA entry and the registration had no effect. soccerdata then
+    raised "Invalid league 'UEFA-Champions League'", which was caught, logged
+    at warning level and turned into zero fixtures.
+    """
+    sd = pytest.importorskip("soccerdata")
+    from footballml.ingest.european import _register
+
+    # Stand in for the domestic reader that always comes first.
+    sd.FBref._all_leagues()
+    assert "_all_leagues_dict" in vars(sd.FBref), "test no longer reproduces the setup"
+    assert "UEFA-Champions League" not in sd.FBref._all_leagues()
+
+    _register(["UCL"])
+    assert "UEFA-Champions League" in sd.FBref._all_leagues(), (
+        "registration after the first reader still does not take effect"
+    )
+
+
+def test_registering_is_idempotent() -> None:
+    """It runs on every `fetch_schedule` call, so it must not accumulate or
+    thrash the snapshot into uselessness."""
+    sd = pytest.importorskip("soccerdata")
+    from footballml.ingest.european import _register
+
+    _register(["UCL", "UEL"])
+    first = dict(sd.FBref._all_leagues())
+    _register(["UCL", "UEL"])
+    assert sd.FBref._all_leagues() == first

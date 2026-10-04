@@ -145,12 +145,42 @@ def _register(competitions: list[str]) -> None:
     hand-written config file before the pipeline will run.
     """
     from soccerdata import _config
+    from soccerdata._common import BaseReader
 
     for code in competitions:
         _config.LEAGUE_DICT.setdefault(
             EUROPEAN_LEAGUES[code],
             {"FBref": _FBREF_NAMES[code], "season_start": "Aug", "season_end": "May"},
         )
+
+    # Updating the dict is not enough on its own. `BaseReader._all_leagues`
+    # snapshots it onto the *class* the first time any reader is built:
+    #
+    #     if not hasattr(cls, "_all_leagues_dict"):
+    #         cls._all_leagues_dict = {...LEAGUE_DICT...}
+    #
+    # Every caller here builds a domestic reader first -- `score_upcoming`
+    # fetches the five leagues' schedule before the European one -- so by the
+    # time this function ran, the snapshot already existed without any UEFA
+    # entry and this registration had no effect at all. The symptom was
+    # "Invalid league 'UEFA-Champions League'", caught, logged at warning and
+    # turned into zero fixtures: the site simply showed no Champions League
+    # matches, and nothing on it said why.
+    #
+    # Dropping the snapshot makes it rebuild on next use, so registration works
+    # whenever it happens rather than only before the first reader.
+    for cls in (BaseReader, *_subclasses(BaseReader)):
+        if "_all_leagues_dict" in vars(cls):
+            delattr(cls, "_all_leagues_dict")
+
+
+def _subclasses(cls: type) -> list[type]:
+    """Every subclass, however deep. soccerdata nests FBref under a reader."""
+    out = []
+    for sub in cls.__subclasses__():
+        out.append(sub)
+        out.extend(_subclasses(sub))
+    return out
 
 
 def fetch_european_matches(

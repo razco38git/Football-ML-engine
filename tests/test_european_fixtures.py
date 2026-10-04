@@ -223,3 +223,54 @@ def _restore_state():
     original = api.state.tmh
     yield
     api.state.tmh = original
+
+
+# --- the scoreline grid -----------------------------------------------------
+#
+# The card shows a likeliest exact score and a likeliest outcome, and they
+# disagree often enough to look like a bug: a draw's mass sits on the diagonal,
+# so the single brightest scoreline is a draw in 63% of matches even when one
+# side is a clear favourite. The grid is the reconciliation, so it has to add
+# up to the 1X2 split it is explaining.
+
+
+def test_the_grid_regions_match_the_published_outcome_probabilities() -> None:
+    """If these drifted apart the picture would quietly contradict the numbers
+    printed beside it, which is worse than showing no picture."""
+    import numpy as np
+
+    from footballml.models.dixon_coles import outcome_probs, score_matrix
+
+    mu_home, mu_away, rho = 1.62, 1.08, -0.05
+    full = score_matrix(np.array([mu_home]), np.array([mu_away]), rho=rho, max_goals=10)
+    home, draw, away = outcome_probs(full)[0]
+
+    # The same small grid the endpoint publishes, built here without a model.
+    size = api.SCORE_GRID_MAX + 1
+    small = [[float(full[0][h][a]) for a in range(size)] for h in range(size)]
+
+    got_home = sum(small[h][a] for h in range(size) for a in range(size) if h > a)
+    got_draw = sum(small[h][h] for h in range(size))
+    got_away = sum(small[h][a] for h in range(size) for a in range(size) if a > h)
+
+    # The grid stops at 5-5, so each region is slightly short of the full
+    # figure -- but only by the tail, and the ordering must survive.
+    assert got_home == pytest.approx(home, abs=0.01)
+    assert got_draw == pytest.approx(draw, abs=0.01)
+    assert got_away == pytest.approx(away, abs=0.01)
+    assert got_home + got_draw + got_away > 0.98, "the grid hides too much mass"
+
+
+def test_the_likeliest_score_can_be_a_draw_in_a_match_the_home_side_wins() -> None:
+    """The case the whole explanation exists for. Not hypothetical: it is the
+    most common shape on the page."""
+    import numpy as np
+
+    from footballml.models.dixon_coles import most_likely_score, outcome_probs, score_matrix
+
+    full = score_matrix(np.array([1.62]), np.array([1.08]), rho=-0.05, max_goals=10)
+    home, draw, away = outcome_probs(full)[0]
+    modal = most_likely_score(full)[0]
+
+    assert home > draw and home > away, "home is the likeliest outcome"
+    assert modal[0] == modal[1], "yet the likeliest single scoreline is a draw"
