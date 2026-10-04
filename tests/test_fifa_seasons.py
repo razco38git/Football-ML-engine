@@ -26,6 +26,7 @@ from footballml.players.fifa import (
     _strip_foreign_script,
     attach_fifa,
     load_fifa,
+    primary_role,
 )
 
 
@@ -808,3 +809,106 @@ def test_the_position_check_still_applies_to_this_tier():
     )
     assert pd.isna(_overall(attach_fifa(players, export),
                             "kylian mbappe-lottin", "Barcelona"))
+
+
+# --- a role must not follow EA's position ordering --------------------------
+
+
+def _kante(orderings: dict[str, str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """One player across several seasons, with EA's position string per season."""
+    export = pd.DataFrame(
+        [
+            {
+                "fifa_name": "ngolo kante",
+                "_norm": "ngolo kante",
+                "fifa_overall": 80.0,
+                "fifa_positions": positions,
+                "role": primary_role(positions),
+                "Season": season,
+            }
+            for season, positions in orderings.items()
+        ]
+    )
+    players = pd.DataFrame(
+        {
+            "Player": ["ngolo kante"] * len(orderings),
+            "Season": list(orderings),
+            "season_position": ["M"] * len(orderings),
+            "position_group": ["M"] * len(orderings),
+        }
+    )
+    return players, export
+
+
+def test_reordering_the_same_positions_does_not_change_the_role():
+    """Kanté is a defensive midfielder for nine straight seasons at one club.
+
+    EA writes him "CM, CDM" through FC17 and "CDM, CM" after. `primary_role`
+    takes the first token, so the pool he is ranked in changed from central
+    midfielders to defensive ones in the middle of his Chelsea career -- on an
+    ordering EA re-sorts between releases, with no transfer and no conversion.
+    640 player-seasons flipped this way.
+    """
+    players, export = _kante(
+        {
+            "1516": "CM, CDM",
+            "1617": "CM, CDM",
+            "1718": "CDM, CM",
+            "1819": "CDM, CM",
+            "1920": "CDM, CM",
+        }
+    )
+
+    roles = attach_fifa(players, export)["role"]
+
+    assert set(roles) == {"DM"}, "one position set, one role"
+
+
+def test_a_genuine_position_change_still_moves_the_role():
+    """The guard must be narrow enough to let a real conversion through.
+
+    A winger who becomes a full back carries a *different* EA position set, and
+    a rule keyed on the set leaves him alone. The wider rules measured against
+    this one -- one role per career, or the set deciding globally -- froze
+    3,490 seasons that belong to conversions like this.
+    """
+    players, export = _kante(
+        {"1819": "LW, LM", "1920": "LW, LM", "2021": "LB, LWB", "2122": "LB, LWB"}
+    )
+
+    roles = attach_fifa(players, export).set_index("Season")["role"]
+
+    assert roles["1819"] == "AMW"
+    assert roles["2122"] == "FB"
+
+
+def test_a_tie_takes_the_later_seasons_reading():
+    """Two seasons each way is EA changing its mind, not noise.
+
+    Spelled out in the code rather than left to `value_counts` tie ordering,
+    which is not a documented guarantee -- so it is pinned here.
+    """
+    players, export = _kante(
+        {"1819": "CM, CDM", "1920": "CM, CDM", "2021": "CDM, CM", "2122": "CDM, CM"}
+    )
+
+    roles = attach_fifa(players, export)["role"]
+
+    assert set(roles) == {"DM"}
+
+
+def test_a_player_with_no_ea_entry_is_left_to_the_fallback():
+    """No position set, nothing to settle. The Understat fallback still rules."""
+    export = _export(
+        [{"fifa_name": "someone else", "fifa_overall": 70.0, "Season": "2526"}]
+    )
+    players = pd.DataFrame(
+        {
+            "Player": ["unmatched player"],
+            "Season": ["2526"],
+            "season_position": ["D"],
+            "position_group": ["D"],
+        }
+    )
+
+    assert attach_fifa(players, export)["role"].iloc[0] == "CB"

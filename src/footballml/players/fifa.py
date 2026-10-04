@@ -981,4 +981,85 @@ def attach_fifa(players: pd.DataFrame, fifa: pd.DataFrame) -> pd.DataFrame:
     if "season_position" in merged.columns:
         fallback = merged["season_position"].fillna(fallback)
     merged["role"] = merged["role"].fillna(fallback.map(FALLBACK_ROLE))
+    merged = _settle_reordered_roles(merged)
     return merged.drop(columns=["_norm"])
+
+
+def _settle_reordered_roles(merged: pd.DataFrame) -> pd.DataFrame:
+    """One role per player per EA position *set*, whatever order EA wrote it in.
+
+    :func:`primary_role` takes EA's first token because EA lists positions
+    best-first, and across one edition that is right. Across twelve it makes a
+    player's role depend on an ordering EA re-sorts between releases. N'Golo
+    Kanté reads ``"CM, CDM"`` through FC17 and ``"CDM, CM"`` after -- the same
+    two positions, never a transfer or a conversion -- and the rating pool he
+    is ranked in changes with it, from central midfielders to defensive ones,
+    in the middle of his Chelsea career.
+
+    Measured over the built file: 2,494 season-to-season role changes, of which
+    **640 carry an identical position set**, merely reordered. MID<->DM is 249
+    of them and FB<->CB 91.
+
+    So: group a player's seasons by the *set* of positions EA gave him, and
+    within each group use the role he holds in most of them. Ties go to the
+    later season, on the grounds that EA's more recent judgement of the same
+    set is the better one.
+
+    Deliberately narrow. It only acts where EA said literally the same thing
+    twice and we answered differently, which is 933 player-seasons (2.9%) over
+    678 players. Two wider rules were measured and rejected: one role per
+    player for his whole career rewrites 3,773 seasons and flattens 3,490 that
+    belong to genuine conversions, and letting the position set decide the role
+    globally rewrites 4,231. Neither fixes Kanté any better than this one, and
+    a winger who really does become a full back -- a *different* set -- still
+    moves under this rule and is frozen under those.
+    """
+    if not {"Player", "Season", "role", "fifa_positions"} <= set(merged.columns):
+        return merged
+
+    positions = merged["fifa_positions"]
+    # The set, not the string: "CM, CDM" and "CDM, CM" must land on one key.
+    key = positions.map(
+        lambda v: frozenset(t.strip().upper() for t in str(v).split(",") if t.strip())
+        if isinstance(v, str) and v.strip()
+        else None
+    )
+    known = key.notna() & merged["role"].notna()
+    if not known.any():
+        return merged
+
+    work = merged.loc[known, ["Player", "Season", "role"]].copy()
+    work["_key"] = key[known]
+    # Sorted by season, which the tie-break below relies on: it takes the last
+    # row, meaning EA's most recent reading of the same set.
+    work = work.sort_values("Season")
+
+    def _settle(block: pd.DataFrame) -> str:
+        # One vote per season, not per row. A player who moves club in January
+        # has two rows for that season, and counting rows would let one season
+        # outvote two -- which is the sort of thing that decides a career role
+        # on a transfer window.
+        counts = block.drop_duplicates("Season")["role"].value_counts()
+        top = counts[counts == counts.max()].index
+        if len(top) == 1:
+            return str(top[0])
+        # Tied: take the latest season's answer. Spelled out rather than left
+        # to `value_counts` tie ordering, which is not a documented guarantee
+        # and would silently re-file every affected player if it ever moved.
+        return str(block.loc[block["role"].isin(top), "role"].iloc[-1])
+
+    chosen = (
+        work.groupby(["Player", "_key"], sort=False)[["Season", "role"]]
+        .apply(_settle, include_groups=False)
+        .rename("settled")
+    )
+    settled = work.join(chosen, on=["Player", "_key"])["settled"]
+
+    changed = int((settled != work["role"]).sum())
+    if changed:
+        logger.info(
+            "Settled %d player-season role(s) where EA reordered the same positions",
+            changed,
+        )
+    merged.loc[settled.index, "role"] = settled
+    return merged
