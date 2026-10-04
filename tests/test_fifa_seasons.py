@@ -741,3 +741,70 @@ def test_the_goalkeeper_boundary_is_the_only_total_one():
     for group, allowed in COMPATIBLE_ROLES.items():
         if group != "GK":
             assert "GK" not in allowed, f"{group} should never reach a goalkeeper"
+
+
+# --- containment, the other way round ---------------------------------------
+#
+# Every tier asks whether our tokens appear in EA's. None asked the reverse, so
+# an EA entry that is a *shorter* form of our name was unreachable however
+# plainly it was the same man.
+
+
+def test_an_ea_name_inside_ours_is_matched():
+    """Understat writes Kylian Mbappe as "Mbappe-Lottin"; EA's FC24 and FC25
+    exports say "Kylian Mbappe". Right player, right club, right position, and
+    not one key reached him -- so the league's best player carried no EA rating
+    in two seasons out of three.
+    """
+    players, export = _with_clubs(
+        [{"fifa_name": "kylian mbappe", "fifa_club": "Real Madrid CF",
+          "fifa_overall": 91.0, "role": "FWD", "Season": "2526"}],
+        [{"Player": "kylian mbappe-lottin", "Team": "Barcelona", "position_group": "F"}],
+    )
+    # The club deliberately does not agree: he had just moved, which is exactly
+    # when EA's snapshot is stale and the name is all there is to go on.
+    matched = attach_fifa(players, export)
+    assert _overall(matched, "kylian mbappe-lottin", "Barcelona") == 91.0
+
+
+def test_a_one_token_ea_name_does_not_reach_through_this_tier():
+    """Two tokens minimum, because one inside ours is a much weaker claim.
+
+    A lone *given* name is the clear case: "Thiago" sits inside "Thiago Silva"
+    and inside every other Thiago in the database, and unlike a lone surname it
+    has no tier of its own that could weigh it. (A lone surname does -- the
+    surname tier, which accepts a strict subset deliberately, so that EA's
+    bare "Alena" still reaches Carles Alena.)
+    """
+    players, export = _with_clubs(
+        [{"fifa_name": "thiago", "fifa_club": "FC St.Gallen 1879",
+          "fifa_overall": 62.0, "role": "MID", "Season": "2526"}],
+        [{"Player": "thiago silva", "Team": "Barcelona", "position_group": "D"}],
+    )
+    assert pd.isna(_overall(attach_fifa(players, export), "thiago silva", "Barcelona"))
+
+
+def test_two_shorter_ea_names_inside_ours_need_the_club():
+    """Ambiguity is refused here as everywhere else."""
+    players, export = _with_clubs(
+        [{"fifa_name": "carlos vinicius", "fifa_club": "Aston Villa",
+          "fifa_overall": 74.0, "role": "FWD", "Season": "2526"},
+         {"fifa_name": "vinicius santos", "fifa_club": "Kilmarnock FC",
+          "fifa_overall": 66.0, "role": "FWD", "Season": "2526"}],
+        [{"Player": "carlos vinicius santos", "Team": "Aston Villa",
+          "position_group": "F"}],
+    )
+    # Both are subsets of ours; the club picks the right one.
+    assert _overall(attach_fifa(players, export),
+                    "carlos vinicius santos", "Aston Villa") == 74.0
+
+
+def test_the_position_check_still_applies_to_this_tier():
+    """A shorter name is no reason to skip the guard the other tiers use."""
+    players, export = _with_clubs(
+        [{"fifa_name": "kylian mbappe", "fifa_club": "Real Madrid CF",
+          "fifa_overall": 91.0, "role": "GK", "Season": "2526"}],
+        [{"Player": "kylian mbappe-lottin", "Team": "Barcelona", "position_group": "F"}],
+    )
+    assert pd.isna(_overall(attach_fifa(players, export),
+                            "kylian mbappe-lottin", "Barcelona"))

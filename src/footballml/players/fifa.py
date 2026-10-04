@@ -613,6 +613,40 @@ def _match_loosely(
             elif candidates:
                 hit = at_club(candidates, team)
 
+        if hit is None and len(parts) > 1:
+            # Containment the other way round: EA's name inside *ours*.
+            #
+            # Every tier above asks whether our tokens are present in EA's, and
+            # none of them asks the reverse, so an EA entry that is a shorter
+            # form of our name is unreachable however obvious it looks.
+            # Understat writes Kylian Mbappe as "Mbappe-Lottin" and EA's FC24
+            # and FC25 exports simply say "Kylian Mbappe" -- the right player,
+            # at the right club, with the right position, and not one key
+            # reaches him:
+            #
+            #     ours   {kylian, mbappe, lottin}
+            #     theirs {kylian, mbappe}        ours <= theirs  False
+            #                                    theirs <= ours  True
+            #
+            # So the best player in the league carried no EA rating in two
+            # seasons out of three. Fabian Ruiz fails the same way.
+            #
+            # Two tokens minimum, because a one-token EA name inside ours is a
+            # much weaker claim -- a bare "Silva" sits inside "Thiago Silva"
+            # and inside two dozen others. Those are already served by the
+            # surname tier, which has the guards for them.
+            ours = frozenset(parts)
+            by_row = {
+                row.name: row
+                for tokens, row in token_sets
+                if len(tokens) > 1 and tokens <= ours
+            }
+            candidates = possible(list(by_row.values()))
+            if len(candidates) == 1:
+                hit = candidates[0]
+            elif candidates:
+                hit = at_club(candidates, team)
+
         if hit is None and len(parts) > 1 and parts[0]:
             # Diminutives and accent differences: "Ollie Watkins" against
             # "Oliver George Arthur Watkins", "Djordje" against "Đorđe". Safe
