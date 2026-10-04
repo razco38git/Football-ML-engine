@@ -137,6 +137,176 @@ function TeamSide({ team, form, league, align }: {
  * These are last season's ratings, which is what the model was given: current
  * ratings do not exist until players have enough minutes to be rated.
  */
+/**
+ * The scoreline distribution, as a grid.
+ *
+ * It exists to settle one apparent contradiction that no amount of text
+ * settles: the single likeliest score is a draw in 63% of matches, including
+ * matches with a clear favourite, so a card can read "1-1" and "Villarreal win
+ * 59%" at once and look like it is arguing with itself.
+ *
+ * Both are true, and the grid shows why in one glance. Every cell is one exact
+ * score. The diagonal is every draw; the triangle below it is every home win;
+ * above it, every away win. The brightest single *cell* can sit on the diagonal
+ * while the triangle around it holds far more total probability, because a draw
+ * has six ways to happen and a home win has fifteen.
+ */
+/**
+ * Why the likeliest exact score and the likeliest outcome can disagree.
+ *
+ * They answer different questions. The exact score is one cell of the
+ * distribution; the outcome sums a whole region of it. A draw's mass sits on
+ * the diagonal -- six scorelines inside 0-5 -- while a home win is spread over
+ * fifteen, so the single brightest cell is a draw in 63% of matches, including
+ * matches with a clear favourite.
+ */
+function ScoreVersusOutcome({ p }: { p: Prediction }) {
+  const modalIsDraw = p.modal_score_home === p.modal_score_away;
+  const best = Math.max(p.prob_home_win, p.prob_draw, p.prob_away_win);
+  const outcomeIsDraw = best === p.prob_draw;
+  // Nothing to reconcile when the two already agree.
+  if (modalIsDraw === outcomeIsDraw) return null;
+
+  const winner = p.prob_home_win > p.prob_away_win ? p.home_team : p.away_team;
+  return (
+    <div
+      className="text-xs text-center leading-snug px-2"
+      style={{ color: 'var(--muted-foreground)', maxWidth: 230 }}
+    >
+      {modalIsDraw ? (
+        <>
+          a draw lands on one of {DRAW_SCORELINES} scores, a win on{' '}
+          {WIN_SCORELINES} — so {winner} is likelier overall at {pct(best)}
+        </>
+      ) : (
+        <>
+          no single score is likely, but the draws together reach {pct(p.prob_draw)}
+        </>
+      )}
+    </div>
+  );
+}
+
+//: Scorelines of each kind inside the 0-5 grid the card reasons about: six
+//: draws (0-0 up to 5-5) against fifteen of each win.
+const DRAW_SCORELINES = 6;
+const WIN_SCORELINES = 15;
+
+function ScoreGrid({ p }: { p: Prediction }) {
+  const grid = p.score_grid;
+  if (!grid?.length) return null;
+
+  const size = grid.length;
+  const peak = Math.max(...grid.flat());
+  let home = 0, draw = 0, away = 0, homeCells = 0, drawCells = 0, awayCells = 0;
+  for (let h = 0; h < size; h++) {
+    for (let a = 0; a < size; a++) {
+      if (h > a) { home += grid[h][a]; homeCells++; }
+      else if (h === a) { draw += grid[h][a]; drawCells++; }
+      else { away += grid[h][a]; awayCells++; }
+    }
+  }
+  const covered = home + draw + away;
+  const region = (h: number, a: number) => (h > a ? '#00e676' : h === a ? '#94a3b8' : '#3b82f6');
+  const modal = { h: p.modal_score_home, a: p.modal_score_away };
+  const outcomeWord = p.prob_home_win >= p.prob_draw && p.prob_home_win >= p.prob_away_win
+    ? `a ${p.home_team} win`
+    : p.prob_away_win >= p.prob_draw
+      ? `a ${p.away_team} win`
+      : 'a draw';
+  const modalWord = modal.h > modal.a ? `a ${p.home_team} win`
+    : modal.h === modal.a ? 'a draw' : `a ${p.away_team} win`;
+
+  return (
+    <div className="mt-5">
+      <div className="text-xs font-display font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--muted-foreground)' }}>
+        Every scoreline, and how the outcome adds up
+      </div>
+
+      <div className="flex flex-wrap gap-5 items-start">
+        <div>
+          <div className="flex">
+            <div style={{ width: 26 }} />
+            <div className="text-xs text-center" style={{ color: 'var(--muted-foreground)', width: size * 30, fontSize: 10 }}>
+              {p.away_team} goals →
+            </div>
+          </div>
+          <div className="flex">
+            <div
+              className="text-xs flex items-center"
+              style={{ color: 'var(--muted-foreground)', fontSize: 10, width: 26, writingMode: 'vertical-rl', transform: 'rotate(180deg)', justifyContent: 'center' }}
+            >
+              {p.home_team} goals →
+            </div>
+            <div>
+              <div className="flex">
+                <div style={{ width: 22 }} />
+                {Array.from({ length: size }, (_, a) => (
+                  <div key={a} className="text-center font-data" style={{ width: 30, fontSize: 10, color: 'var(--muted-foreground)' }}>{a}</div>
+                ))}
+              </div>
+              {grid.map((row, h) => (
+                <div key={h} className="flex items-center">
+                  <div className="text-center font-data" style={{ width: 22, fontSize: 10, color: 'var(--muted-foreground)' }}>{h}</div>
+                  {row.map((value, a) => {
+                    const isModal = h === modal.h && a === modal.a;
+                    return (
+                      <div
+                        key={a}
+                        title={`${h}-${a} · ${(value * 100).toFixed(1)}%`}
+                        className="flex items-center justify-center font-data"
+                        style={{
+                          width: 28, height: 24, margin: 1, borderRadius: 3, fontSize: 9,
+                          background: region(h, a) + Math.round(18 + (value / peak) * 220).toString(16).padStart(2, '0'),
+                          color: value / peak > 0.45 ? '#000' : 'var(--muted-foreground)',
+                          outline: isModal ? '2px solid var(--foreground)' : undefined,
+                          outlineOffset: -2,
+                        }}
+                      >
+                        {value >= 0.01 ? (value * 100).toFixed(0) : ''}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="text-xs" style={{ color: 'var(--muted-foreground)', maxWidth: 300 }}>
+          {([['#00e676', `${p.home_team} win`, home, homeCells],
+             ['#94a3b8', 'Draw', draw, drawCells],
+             ['#3b82f6', `${p.away_team} win`, away, awayCells]] as const).map(
+            ([colour, name, total, cells]) => (
+              <div key={name} className="flex items-center gap-2 mb-1.5">
+                <span style={{ width: 10, height: 10, borderRadius: 2, background: colour, flexShrink: 0 }} />
+                <span style={{ flex: 1 }}>{name}</span>
+                <span className="font-data" style={{ color: 'var(--foreground)' }}>{(total * 100).toFixed(0)}%</span>
+                <span style={{ fontSize: 10, opacity: 0.7, width: 70, textAlign: 'right' }}>
+                  over {cells} scores
+                </span>
+              </div>
+            ),
+          )}
+          <p className="mt-3 leading-relaxed">
+            The outlined cell is the single likeliest exact score,{' '}
+            <strong style={{ color: 'var(--foreground)' }}>{modal.h}–{modal.a}</strong>
+            {p.prob_modal_score != null && <> at {pct(p.prob_modal_score)}</>} — {modalWord}.
+            The most likely <em>outcome</em> is {outcomeWord}, because it adds up{' '}
+            {modal.h > modal.a ? homeCells : modal.h === modal.a ? drawCells : awayCells}{' '}
+            different scorelines against the one cell.
+          </p>
+          <p className="mt-2 leading-relaxed" style={{ opacity: 0.75 }}>
+            These {size * size} scorelines cover {pct(covered)} of outcomes; the rest is
+            higher-scoring tail the model still counts.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 function SquadStrength({ p }: { p: Prediction }) {
   const rows = [
     ['Overall', p.strength_home_overall, p.strength_away_overall],
@@ -315,6 +485,15 @@ export function MatchCard({ p, leagues }: {
               likeliest exact score
               {p.prob_modal_score != null && ` · ${pct(p.prob_modal_score)}`}
             </div>
+            {/*
+              One line to settle the apparent contradiction without making the
+              reader open the panel. "1-1" above "Villarreal win" looks like the
+              card arguing with itself, and the answer is not subtle once said
+              out loud: a draw has to land on one of six exact scores, a home
+              win can arrive by any of fifteen. The grid under "Show analysis"
+              is the same statement as a picture.
+            */}
+            {p.prob_modal_score != null && <ScoreVersusOutcome p={p} />}
 
             {/*
               The runners-up, which are the point. The leader clears them by
@@ -419,6 +598,8 @@ export function MatchCard({ p, leagues }: {
           </div>
 
           <SquadStrength p={p} />
+
+          <ScoreGrid p={p} />
 
           {/* SHAP drivers: the model's actual reasoning, not a summary of it. */}
           {!!p.drivers_home.length && (

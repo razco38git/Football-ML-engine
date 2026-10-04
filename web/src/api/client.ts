@@ -76,6 +76,14 @@ export interface Prediction {
    * draw in 63% of matches. Empty for predictions stored before this existed.
    */
   likely_scores: LikelyScore[];
+  /**
+   * The whole scoreline distribution, `score_grid[homeGoals][awayGoals]`, 0–5
+   * each way. The top scorelines answer "which exact score" and the 1X2 split
+   * answers "who wins", and a reader given both still has to take on trust
+   * that 1-1 at 11% and a 57% home win are consistent. This is the proof: the
+   * diagonal is every draw, the triangle below it every home win.
+   */
+  score_grid: number[][];
   prob_over_2_5: number;
   prob_btts: number;
 
@@ -256,6 +264,13 @@ export interface PlayerRating {
    */
   fifa_overall: number | null;
   performance_rating: number | null;
+  /**
+   * EA's overall put on *our* scale, which is what the blend uses.
+   * The printed EA number is a global scale and ours is a rank within
+   * position and season, so they are mapped onto one scale before
+   * blending — which is why 63 and 78 can produce 64.
+   */
+  fifa_on_our_scale: number | null;
 
   sub_finishing: number | null;
   sub_creation: number | null;

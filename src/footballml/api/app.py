@@ -66,6 +66,7 @@ from footballml.labels import humanise
 from footballml.league_adjust import adjust as adjust_for_league
 from footballml.league_adjust import fitted_model_version
 from footballml.league_adjust import load as load_league_adjustment
+from footballml.models.dixon_coles import score_matrix
 from footballml.models.evaluate import (
     base_rate_probs,
     calibration_table,
@@ -331,6 +332,35 @@ def _likely_scores(row: pd.Series) -> list[LikelyScore]:
     return out
 
 
+#: How many goals each way the published scoreline grid covers.
+#:
+#: 0-5 is 36 cells and holds ~99.5% of the mass at typical goal rates. The
+#: model's own matrix runs to 10 so the tail is not discarded from any
+#: probability; it is only the *picture* that stops at 5, because a 11x11 grid
+#: of mostly-zero cells is harder to read and says less.
+SCORE_GRID_MAX = 5
+
+
+def _score_grid(mu_home: float, mu_away: float) -> list[list[float]]:
+    """The scoreline distribution behind one prediction, as a small grid.
+
+    Rebuilt from the two goal rates rather than carried through the frame: the
+    rates are what every caller already has, including a prediction stored
+    months ago, and 36 numbers in every row of every response would be a lot of
+    payload for something only the expanded card draws.
+    """
+    model = state.model
+    if model is None or not np.isfinite([mu_home, mu_away]).all():
+        return []
+    matrix = score_matrix(
+        np.array([mu_home]), np.array([mu_away]),
+        rho=getattr(model, "rho_", 0.0),
+        max_goals=getattr(model, "max_goals", 10),
+    )[0]
+    size = SCORE_GRID_MAX + 1
+    return [[round(float(matrix[h][a]), 5) for a in range(size)] for h in range(size)]
+
+
 def _to_predictions(
     frame: pd.DataFrame, drivers: list[dict] | None = None, with_form: bool = True
 ) -> list[Prediction]:
@@ -360,6 +390,9 @@ def _to_predictions(
                 else None
             ),
             likely_scores=_likely_scores(r),
+            score_grid=_score_grid(
+                float(r["expected_goals_home"]), float(r["expected_goals_away"])
+            ),
             prob_over_2_5=round(float(r["prob_over_2_5"]), 4),
             prob_btts=round(float(r["prob_btts"]), 4),
         )
@@ -720,7 +753,13 @@ def _european_matches(competition: str, limit: int, offset: int) -> list[Predict
         League=frame["home_division"],
         league_adjusted=frame["home_division"] != frame["away_division"],
     )
-    return _to_predictions(frame, with_form=False)
+    # Form is attached, unlike before. It is drawn from `state.form_index`,
+    # which is built from the *domestic* match history -- and that is exactly
+    # the right window for a European tie: the last five league matches each
+    # club played before it. Every one of the 72 clubs in this file is in that
+    # index, since the ties are filtered to big-five clubs on both sides, so
+    # nothing here is reaching for a team it cannot find.
+    return _to_predictions(frame)
 
 
 def _canonical_team(name: str, known: set[str]) -> str:
@@ -936,6 +975,7 @@ def _to_player(row: pd.Series) -> PlayerRating:
         ),
         fifa_overall=num("fifa_overall", int),
         performance_rating=num("performance_rating", int),
+        fifa_on_our_scale=num("fifa_on_our_scale", int),
         **{f"sub_{name}": num(f"sub_{name}", int) for name in _PLAYER_SUBS},
         **{
             stat: num(stat, int if stat in {"goals", "assists"} else float)
@@ -1023,7 +1063,26 @@ def players(
             f"{', '.join(sorted(SORTABLE))}",
         )
     if sort in rows.columns:
-        rows = rows.sort_values(sort, ascending=not descending, na_position="last")
+        # Explicit tie-breakers, and a stable sort under them.
+        #
+        # Hundreds of players share a rating, and `sort_values` defaults to
+        # quicksort, which is not stable -- so the order *within* a rating was
+        # whatever the partitioning happened to produce, and changing the
+        # minutes filter reshuffled players the filter had not touched. It
+        # looked like the filter was reordering the table, which it was, just
+        # not deliberately.
+        #
+        # Minutes then name is a real ordering rather than a tidier accident:
+        # among equally rated players the one who played more is the more
+        # established answer, and the name settles the rest. Both are present
+        # for every row, so the result does not depend on the file's order.
+        tie_breaks = [c for c in ("minutes", "Player") if c in rows.columns and c != sort]
+        rows = rows.sort_values(
+            [sort, *tie_breaks],
+            ascending=[not descending, *(c != "Player" for c in tie_breaks)],
+            na_position="last",
+            kind="stable",
+        )
 
     return PlayerPage(
         total=len(rows),

@@ -106,6 +106,14 @@ class Prediction(BaseModel):
     #: outcome sums a whole triangle of scorelines while a draw's mass sits on
     #: the diagonal. Empty for predictions stored before this existed.
     likely_scores: list[LikelyScore] = Field(default_factory=list)
+    #: The whole scoreline distribution, ``grid[home goals][away goals]``, up to
+    #: `SCORE_GRID_MAX` each way. The top three scorelines answer "which exact
+    #: score" and the 1X2 answers "who wins", and a reader given both still has
+    #: to take on trust that 1-1 at 11% and a 57% home win are consistent. The
+    #: grid is the proof: the diagonal is every draw, the triangle below it is
+    #: every home win, and one glance shows the brightest *cell* sitting on a
+    #: diagonal that the triangle around it outweighs.
+    score_grid: list[list[float]] = Field(default_factory=list)
     prob_over_2_5: float
     prob_btts: float
 
@@ -163,6 +171,13 @@ class PlayerRating(BaseModel):
     #: entry; `performance_rating` is ours, from per-90 output alone.
     fifa_overall: int | None = None
     performance_rating: int | None = None
+    #: EA's overall put on *our* scale, which is what the blend actually uses.
+    #: The two scales are not comparable as printed -- EA's is global, ours is
+    #: a rank within position and season -- so EA's number is first mapped by
+    #: percentile. Without this the arithmetic looks broken: EA 63 and
+    #: performance 78 produce a rating of 64, because 63 is the 1st percentile
+    #: among that season's defensive midfielders and maps to 49.4.
+    fifa_on_our_scale: int | None = None
 
     #: Populated per position group; a forward has no defending sub-rating.
     sub_finishing: int | None = None

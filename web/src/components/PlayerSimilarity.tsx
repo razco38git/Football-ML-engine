@@ -191,6 +191,50 @@ function RadarChart({
   );
 }
 
+/** Full names, for the one-line reason under each score. "PAC" is fine inside
+ *  a dense gap chip and useless in a sentence. */
+const ATTRIBUTE_WORDS: Record<string, string> = {
+  pace: 'pace', shooting: 'shooting', passing: 'passing', dribbling: 'dribbling',
+  defending: 'defending', physical: 'physicality',
+  gk_diving: 'diving', gk_handling: 'handling', gk_kicking: 'kicking',
+  gk_positioning: 'positioning', gk_reflexes: 'reflexes',
+};
+
+/**
+ * Why a score is what it is, in one line.
+ *
+ * The expander already shows every gap, but a reader should not have to open
+ * it to learn what a 78 is made of. Two attributes the pair agree on and the
+ * one they do not covers the shape of almost every comparison: "alike on pace
+ * and dribbling, apart on physicality" is the sentence a scout would say.
+ */
+function reason(
+  names: string[],
+  subject: Record<string, number>,
+  candidate: Record<string, number>,
+  words: Record<string, string>,
+): string | null {
+  const shared = names.filter(n => subject[n] !== undefined && candidate[n] !== undefined);
+  if (shared.length < 2) return null;
+  const byGap = [...shared].sort(
+    (a, b) => Math.abs(candidate[a] - subject[a]) - Math.abs(candidate[b] - subject[b]),
+  );
+  const alike = byGap.slice(0, 2).map(n => words[n] ?? n);
+  const apart = byGap[byGap.length - 1];
+  const apartGap = Math.abs(candidate[apart] - subject[apart]);
+  const tail = apartGap >= 5 ? `, apart on ${words[apart] ?? apart}` : '';
+  return `alike on ${alike.join(' and ')}${tail}`;
+}
+
+function ScoreReason({ text }: { text: string | null }) {
+  if (!text) return null;
+  return (
+    <div className="text-xs leading-snug" style={{ color: 'var(--muted-foreground)' }}>
+      {text}
+    </div>
+  );
+}
+
 /** The attribute-by-attribute gaps, so a score can be checked rather than trusted. */
 function Gaps({
   names,
@@ -271,21 +315,26 @@ function ResultCard({
 
         <div className="flex items-center gap-3 flex-shrink-0">
           <Score
-            label="EA"
+            label="EA score"
             value={match.fifa_similarity}
             hint={
               match.fifa_similarity === null
                 ? 'No EA entry for this player, so the attribute axis cannot be measured.'
-                : "Similarity across EA's attributes."
+                : "How alike the two are across EA's attributes — pace, shooting, "
+                  + 'passing, dribbling, defending, physical. 50 means no more alike '
+                  + 'than two players picked at random in this position; 100 is identical.'
             }
           />
           <Score
-            label="Pctile"
+            label="Percentile"
             value={match.percentile_similarity}
             hint={
               match.percentile_similarity === null
                 ? 'Our sub-ratings are ranked within a position, so they are not compared across positions.'
-                : 'Similarity across our own percentile sub-ratings.'
+                : 'How alike the two are across our own sub-ratings — defending, '
+                  + 'creation, build-up, finishing — each a rank against players in the '
+                  + 'same position. 50 means no more alike than two players picked at '
+                  + 'random; 100 is identical.'
             }
           />
           <SimilarityCircle score={match.combined} />
@@ -298,6 +347,41 @@ function ResultCard({
           </button>
         </div>
       </div>
+
+      {/*
+        One line per axis, without opening anything. The expander already shows
+        every gap, but a reader should not have to open it to learn what a 78
+        is made of -- and a bare number beside a name is exactly what the page
+        was being asked to justify.
+      */}
+      {!expanded && (
+        <div className="mt-2 flex flex-col gap-0.5">
+          {match.fifa_similarity !== null && (
+            <ScoreReason
+              text={(() => {
+                const why = reason(
+                  data.attribute_names, data.player_attributes, match.attributes,
+                  ATTRIBUTE_WORDS,
+                );
+                return why && `EA score ${match.fifa_similarity.toFixed(0)} — ${why}`;
+              })()}
+            />
+          )}
+          {match.percentile_similarity !== null && (
+            <ScoreReason
+              text={(() => {
+                const why = reason(
+                  subLabels, data.player_sub_ratings, match.sub_ratings,
+                  Object.fromEntries(
+                    Object.entries(SUB_LABELS).map(([k, v]) => [k, v.toLowerCase()]),
+                  ),
+                );
+                return why && `Percentile ${match.percentile_similarity.toFixed(0)} — ${why}`;
+              })()}
+            />
+          )}
+        </div>
+      )}
 
       {expanded && (
         <div className="mt-4 pt-4 grid gap-4" style={{ borderTop: '1px solid var(--border)', gridTemplateColumns: 'auto 1fr' }}>
@@ -453,12 +537,24 @@ export default function PlayerSimilarity() {
         style={{ background: 'rgba(0,176,255,0.06)', border: '1px solid rgba(0,176,255,0.25)', color: 'var(--foreground)' }}
       >
         <strong style={{ color: CANDIDATE_COLOR }}>How to read the scores.</strong>{' '}
-        <strong>50 means &ldquo;no more alike than two random players in this position&rdquo;</strong> —
-        the scale is pinned to the typical gap between two players, not to the range of the
-        numbers. The <strong>EA</strong> score compares EA&rsquo;s attributes, which share one
-        scale across outfield positions. The <strong>Pctile</strong> score compares our own
-        sub-ratings, which are ranks <em>within</em> a position, so it is blank whenever the
-        comparison crosses one. A blank is &ldquo;not measured&rdquo;, never &ldquo;nothing alike&rdquo;.
+        Each is 0–100, and <strong>50 means &ldquo;no more alike than two random players in
+        this position&rdquo;</strong> — the scale is pinned to the typical gap between two
+        players, not to the range of the numbers. So 50 is unremarkable, 70 is a genuine
+        resemblance and 90 is a close stylistic match. Below 50 means <em>less</em> alike
+        than two players picked at random.
+        <br />
+        <strong>EA score</strong> compares EA&rsquo;s six attributes — pace, shooting,
+        passing, dribbling, defending, physical — which share one scale across outfield
+        positions, so it works between a winger and a full back.
+        <br />
+        <strong>Percentile</strong> compares our own sub-ratings — defending, creation,
+        build-up, finishing — built from what players actually did on the pitch. Each is a
+        rank <em>within</em> a position, so the score is blank whenever the comparison
+        crosses one: a centre back&rsquo;s defending rank and a striker&rsquo;s are not the
+        same measurement. A blank is &ldquo;not measured&rdquo;, never &ldquo;nothing
+        alike&rdquo;.
+        <br />
+        The big circle is the two combined, which is why it can sit between them.
       </div>
 
       {loading && !data && (

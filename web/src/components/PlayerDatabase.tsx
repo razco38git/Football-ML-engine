@@ -326,6 +326,40 @@ export default function PlayerDatabase() {
             </>
           )}
         </p>
+
+        {/*
+          How OVR is made, stated once. The table prints EA, Perf and OVR side
+          by side and OVR is plainly not the average of the other two -- 63 and
+          78 give 64 -- which reads as a broken sum until you know the two
+          scales are not the same measurement.
+        */}
+        <details className="mt-3 text-sm" style={{ color: 'var(--muted-foreground)' }}>
+          <summary className="cursor-pointer" style={{ color: 'var(--muted-foreground)' }}>
+            How OVR is built from EA and Perf
+          </summary>
+          <div className="mt-2 leading-relaxed rounded-xl p-4"
+               style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+            <strong style={{ color: 'var(--foreground)' }}>OVR is half EA, half us</strong> —
+            but the two are not on the same scale, so they are put on one before
+            being averaged. EA&rsquo;s number is global: a 63 means the same thing
+            to EA whoever it belongs to. Ours is a <em>rank against positional
+            peers in that season</em>, so it spreads across the whole 0–99 range
+            by construction while EA&rsquo;s clusters in the sixties and
+            seventies.
+            <br /><br />
+            Averaging them raw would let whichever is wider dominate, so EA&rsquo;s
+            overall is first converted to its percentile within the player&rsquo;s
+            position and season, then mapped onto our scale, and it is that
+            converted number the blend uses — not the EA score in the table.
+            A 63 among 181 defensive midfielders is the 1st percentile, which is
+            49 on our scale, so 49 and 78 average to 64. Hover the EA column to
+            see what any row&rsquo;s score converts to.
+            <br /><br />
+            Where the two disagree is the interesting part: well above EA means a
+            player is outperforming his reputation this season, well below means
+            he is coasting on it.
+          </div>
+        </details>
       </div>
 
       <div className="flex flex-wrap gap-3 mb-5 items-center">
@@ -420,7 +454,7 @@ export default function PlayerDatabase() {
                   </th>
                   <SortHeader col="position_group" label="Pos" />
                   <SortHeader col="rating" label="OVR" />
-                  <SortHeader col="fifa_overall" label="EA" />
+                  <SortHeader col="fifa_overall" label="EA score" />
                   <SortHeader col="performance_rating" label="Perf" />
                   <SortHeader col="minutes" label="Min" />
                   {/*
@@ -492,7 +526,23 @@ export default function PlayerDatabase() {
                         would leave a reader unsure which one the site means.
                         A dash where EA has no entry, which is under 2% of the current season.
                       */}
-                      <td className="px-2 py-2 text-center text-xs font-data" style={{ color: 'var(--muted-foreground)' }}>
+                      {/*
+                        EA's own number, and only that. The blend does not use
+                        it directly -- it uses the positional percentile it maps
+                        to -- so a row can read EA 63, Perf 78, OVR 64 and look
+                        like bad arithmetic. The conversion is on hover and in
+                        the explainer above rather than in the cell, which the
+                        second number made unreadable.
+                      */}
+                      <td
+                        className="px-2 py-2 text-center text-xs font-data"
+                        style={{ color: 'var(--muted-foreground)' }}
+                        title={
+                          p.fifa_on_our_scale != null && p.fifa_overall != null
+                            ? `EA rates him ${p.fifa_overall} on their global scale. Among ${p.position}s that season that is worth ${p.fifa_on_our_scale} on ours, and ${p.fifa_on_our_scale} is what the 50/50 blend with the performance rating uses.`
+                            : undefined
+                        }
+                      >
                         {p.fifa_overall ?? '—'}
                       </td>
                       <td className="px-2 py-2 text-center text-xs font-data" style={{ color: 'var(--muted-foreground)' }}>

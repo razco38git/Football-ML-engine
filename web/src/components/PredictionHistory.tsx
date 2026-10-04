@@ -91,13 +91,31 @@ function ResultRow({ m }: { m: MatchResult }) {
           <span className="text-sm truncate" style={{ color: 'var(--foreground)' }}>{m.home_team}</span>
         </div>
 
-        <div className="flex flex-col items-center flex-shrink-0" style={{ minWidth: 86 }}>
+        {/*
+          Two numbers from opposite sides of kick-off, stacked. The big one is
+          what happened; the small one is what the model expected *before* it.
+          Unlabelled, "3-1" above "xG 2.10-1.06" reads as one claim about the
+          match, and a reader cannot tell whether the xG is the forecast or the
+          chances actually created -- it is the forecast, and the whole page is
+          about scoring that forecast.
+        */}
+        <div className="flex flex-col items-center flex-shrink-0" style={{ minWidth: 104 }}>
+          <div
+            className="text-xs uppercase tracking-wider"
+            style={{ color: 'var(--muted-foreground)', fontSize: 9 }}
+          >
+            final score
+          </div>
           <div className="font-display font-black text-xl" style={{ color: 'var(--foreground)' }}>
             {m.actual_home_goals}–{m.actual_away_goals}
           </div>
           {m.expected_goals_home != null && (
-            <div className="text-xs font-data" style={{ color: 'var(--muted-foreground)' }}>
-              xG {m.expected_goals_home.toFixed(2)}–{m.expected_goals_away?.toFixed(2)}
+            <div
+              className="text-xs font-data"
+              style={{ color: 'var(--muted-foreground)' }}
+              title="Goals the model expected each side to score, from before kick-off. Not the chances they actually created."
+            >
+              we forecast {m.expected_goals_home.toFixed(2)}–{m.expected_goals_away?.toFixed(2)}
             </div>
           )}
         </div>
@@ -115,16 +133,35 @@ function ResultRow({ m }: { m: MatchResult }) {
 
       <div className="mt-3">
         <OutcomeBar m={m} />
-        <div className="flex justify-between mt-1.5 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+        {/*
+          All three, as the Match Predictor shows them. "Predicted Villarreal at
+          59%" alone leaves the other 41% unaccounted for, and whether the model
+          thought the danger was a draw or an away win is the more interesting
+          half of a wrong call.
+        */}
+        <div
+          className="flex justify-between mt-1.5 text-xs font-data"
+          style={{ color: 'var(--muted-foreground)' }}
+        >
+          <span style={{ color: m.actual_result === 'H' ? 'var(--foreground)' : undefined }}>
+            {m.home_team} {pct(m.prob_home_win)}
+          </span>
+          <span style={{ color: m.actual_result === 'D' ? 'var(--foreground)' : undefined }}>
+            Draw {pct(m.prob_draw)}
+          </span>
+          <span style={{ color: m.actual_result === 'A' ? 'var(--foreground)' : undefined }}>
+            {m.away_team} {pct(m.prob_away_win)}
+          </span>
+        </div>
+        <div className="flex justify-between mt-1 text-xs" style={{ color: 'var(--muted-foreground)' }}>
           <span>
-            Predicted{' '}
+            We said{' '}
             <span style={{ color: m.correct ? '#00e676' : '#f44336', fontWeight: 500 }}>
               {label(m.predicted_outcome, m.home_team, m.away_team)}
-            </span>{' '}
-            at {m.confidence.toFixed(0)}%
+            </span>
           </span>
           <span>
-            Actual{' '}
+            It was{' '}
             <span style={{ color: 'var(--foreground)' }}>
               {label(m.actual_result, m.home_team, m.away_team)}
             </span>
