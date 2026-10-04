@@ -204,6 +204,41 @@ def _collect_fixtures(
     return merged
 
 
+def _restore_fixture_columns(
+    frame: pd.DataFrame, fixtures: pd.DataFrame
+) -> tuple[pd.DataFrame, list[str]]:
+    """Put back what the feature build dropped, and say which columns to store.
+
+    `build_upcoming_features` rebuilds every column from the match history plus
+    a placeholder row per fixture, and the history has no notion of a
+    competition or of bookmaker odds. So whatever `_collect_fixtures` attached
+    is gone by the time the scored frame exists -- while `OUTPUT_COLUMNS` still
+    asks for `competition`, and the store writes exactly those columns.
+
+    That went unnoticed because the column was unreachable: until UEFA
+    registration was fixed, `_european_fixtures` returned nothing, so there was
+    never a `competition` to lose. The first run with eleven Champions League
+    ties in it died with ``KeyError: "['competition'] not in index"``.
+
+    `api/app.py::_score_upcoming` does the same merge for the same reason.
+    """
+    key = ["League", "Date", "HomeTeam", "AwayTeam"]
+    odds_cols = [c for c in ODDS_COLUMNS if c in fixtures.columns]
+    extras = [c for c in ("competition", *odds_cols) if c in fixtures.columns]
+    if extras:
+        frame = frame.merge(
+            fixtures[[*key, *extras]].assign(Date=pd.to_datetime(fixtures["Date"])),
+            on=key,
+            how="left",
+        )
+    # A domestic fixture has no competition of its own, and the store's
+    # convention is an explicit label rather than a blank.
+    if "competition" not in frame.columns:
+        frame["competition"] = store.DOMESTIC
+    frame["competition"] = frame["competition"].fillna(store.DOMESTIC)
+    return frame, [*OUTPUT_COLUMNS, *odds_cols]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -255,16 +290,7 @@ def main() -> None:
     preds = model.predict_frame(scored[metadata.feature_names])
     frame = pd.concat([scored.reset_index(drop=True), preds.reset_index(drop=True)], axis=1)
 
-    odds_cols = [c for c in ODDS_COLUMNS if c in fixtures.columns]
-    columns = [*OUTPUT_COLUMNS]
-    if odds_cols:
-        key = ["League", "Date", "HomeTeam", "AwayTeam"]
-        frame = frame.merge(
-            fixtures[[*key, *odds_cols]].assign(Date=pd.to_datetime(fixtures["Date"])),
-            on=key,
-            how="left",
-        )
-        columns += odds_cols
+    frame, columns = _restore_fixture_columns(frame, fixtures)
 
     added = store.append(frame[columns], metadata.version)
     log.info("Stored %d new predictions", added)
