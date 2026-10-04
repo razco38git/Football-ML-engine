@@ -76,6 +76,42 @@ fifa_weight: 0.5
 # Set to 0 to leave unmatched players unblended and unshrunk.
 unmatched_shrinkage_nineties: 4
 
+# How much of the composite is the player's single best sub-rating.
+#
+# A weighted mean of percentiles rewards all-rounders and punishes specialists
+# from both ends, and the two ends arrived as the same complaint on the same
+# day. Mane scored 22 in 2018/19 with one assist -- 97th percentile finishing,
+# 36th creation -- and winger weights put creation at 0.34 against finishing's
+# 0.28, so the rating was effectively tracking his assists: a 22-goal season
+# rated below an 11-goal one. Van Dijk is the mirror image, elite at a job the
+# data cannot see and dragged by tackle counts he has no need to accumulate.
+#
+# Pulling the composite toward the best sub-rating credits being outstanding at
+# something. Swept over all 23,847 rated player-seasons, against the NEXT
+# season's outcome:
+#
+#   k      atk>GF   ovr>pts   def>GA
+#   0.00   0.6909    0.6770   -0.4400    <- weighted mean alone
+#   0.10   0.6924    0.6797   -0.4451
+#   0.15   0.6939    0.6807   -0.4474    <- this
+#   0.20   0.6883    0.6812   -0.4454
+#   0.30   0.6930    0.6803   -0.4476
+#   0.40   0.6892    0.6825   -0.4483
+#
+# Every setting is inside noise of every other on these correlations, so they
+# do not pick the number -- the backtest does. 0.30 was tried first and failed
+# the gate: all three correlations improved while walk-forward five-league RPS
+# regressed 0.2003 to 0.2008. That is the whole reason this is swept against a
+# held-out metric and not against the table above.
+#
+# 0.15 holds the RPS and still moves the ratings the complaints were about:
+# Mane 1819 76 -> 78, Van Dijk 1920 63 -> 66 and 2122 62 -> 65, Busquets 1920
+# 84 -> 88. Modric 1718 loses a point, 82 -> 81, which is the trade: a player
+# who is good at everything and best at nothing gives way slightly.
+#
+# Set to 0 to score on the weighted mean alone.
+peak_weight: 0.15
+
 # Minimum minutes before a player is rated. Below this the sample is too thin
 # for percentiles to mean anything, however hard shrinkage works.
 min_minutes: 450

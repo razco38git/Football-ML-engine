@@ -451,3 +451,118 @@ def test_one_season_missing_a_metric_does_not_borrow_another_seasons() -> None:
     done = rated[rated["rated"]]
     assert done.loc[done["Season"].eq("1415"), "sub_defending"].isna().all()
     assert done.loc[done["Season"].eq("2425"), "sub_defending"].notna().all()
+
+
+# --- rewarding a player's best attribute ------------------------------------
+#
+# A weighted mean of percentiles ranks a tidy all-rounder above a player who is
+# 97th percentile at the thing his position exists for. Mane's 22-goal 2018/19
+# rated below his 11-goal 2020/21, because winger weights put creation above
+# finishing and he had one assist.
+
+
+def test_a_specialist_gains_on_an_all_rounder() -> None:
+    """The property the peak term exists for, stated as an ordering.
+
+    Two forwards with the same weighted mean: one outstanding at finishing and
+    poor at creating, one middling at both. Without the peak term they score
+    the same; with it the specialist is ahead.
+    """
+    squad = _squad(n=120, seed=3)
+    # Give two players deliberately constructed profiles at the same mean.
+    squad.loc[0, ["np_xg_per90", "np_goals_per90", "shots_per90"]] = [1.4, 1.4, 6.0]
+    squad.loc[0, ["xa_per90", "key_passes_per90", "assists_per90"]] = [0.02, 0.2, 0.02]
+    squad.loc[1, ["np_xg_per90", "np_goals_per90", "shots_per90"]] = [0.45, 0.45, 2.4]
+    squad.loc[1, ["xa_per90", "key_passes_per90", "assists_per90"]] = [0.18, 1.3, 0.14]
+    squad.loc[[0, 1], "minutes"] = 3000
+    squad.loc[[0, 1], "nineties"] = 3000 / 90
+
+    config = load_config()
+    flat = dict(config, peak_weight=0.0)
+    peaked = dict(config, peak_weight=0.30)
+
+    def gap(cfg: dict) -> float:
+        rated = rate_players(squad.copy(), cfg).set_index("Player")
+        return float(rated.loc["P0", "composite_raw"] - rated.loc["P1", "composite_raw"])
+
+    assert gap(peaked) > gap(flat), (
+        "the peak term did not move the specialist toward the all-rounder"
+    )
+
+
+def test_the_peak_term_can_be_switched_off() -> None:
+    """`peak_weight: 0` has to reproduce the plain weighted mean exactly, or
+    the sweep behind the chosen value cannot be re-run."""
+    squad = _squad(seed=4)
+    config = load_config()
+    off = rate_players(squad.copy(), dict(config, peak_weight=0.0))
+    assert off["composite_raw"].notna().any()
+    # Recomputing the weighted mean by hand is the point: no peak, no change.
+    again = rate_players(squad.copy(), {k: v for k, v in config.items() if k != "peak_weight"})
+    pd.testing.assert_series_equal(
+        off["composite_raw"], again["composite_raw"], check_names=False
+    )
+
+
+def test_a_player_with_no_sub_ratings_is_not_pulled_toward_nothing() -> None:
+    """`max` of an all-empty row is NaN, and blending that in would unrate a
+    player the rest of the pipeline went to some trouble to keep."""
+    squad = _defenders()
+    for column in _NO_PERFORMANCE:
+        squad[column] = np.nan
+    squad["fifa_overall"] = np.linspace(60, 90, len(squad))
+
+    rated = rate_players(squad, dict(load_config(), peak_weight=0.30))
+    assert rated["rated"].all()
+    assert rated["rating"].notna().all()
+
+
+# --- quality per defensive action, not volume of it -------------------------
+#
+# `defending` asked how *much* defending a player did, which a centre back at a
+# dominant side does little of: Van Dijk sat at the 3rd to 11th percentile for
+# defensive-action volume in every Liverpool season. Across 5,177 rated
+# defender-seasons the score correlated -0.0023 with whether his team actually
+# prevented chances -- it was not a crude measure of defending, it was
+# uninformative about it.
+
+
+def test_a_clean_tackler_outranks_a_busy_fouler() -> None:
+    """The property the ratios exist for.
+
+    Two defenders winning the ball equally often, one giving away three times
+    the fouls doing it. On volume alone they are identical.
+    """
+    squad = _defenders(n=120, seed=7)
+    squad.loc[0, ["tackles_won_per90", "interceptions_per90", "fouls_per90"]] = [1.0, 1.0, 0.3]
+    squad.loc[1, ["tackles_won_per90", "interceptions_per90", "fouls_per90"]] = [1.0, 1.0, 1.5]
+    for i in (0, 1):
+        squad.loc[i, "clean_challenge_rate"] = (
+            squad.loc[i, "tackles_won_per90"]
+            / (squad.loc[i, "tackles_won_per90"] + squad.loc[i, "fouls_per90"])
+        )
+        squad.loc[i, "ball_won_per_foul"] = (
+            (squad.loc[i, "tackles_won_per90"] + squad.loc[i, "interceptions_per90"])
+            / squad.loc[i, "fouls_per90"]
+        )
+    squad.loc[[0, 1], ["interceptions_padj", "tackles_won_padj"]] = [0.15, 0.10]
+
+    config = load_config()
+    rated = rate_players(squad, config).set_index("Player")
+    assert rated.loc["2425-P0", "sub_defending"] > rated.loc["2425-P1", "sub_defending"], (
+        "the cleaner defender did not rank above the one who fouls five times as often"
+    )
+
+
+def test_the_quality_ratios_are_optional() -> None:
+    """A season without them -- 2014/15 has no FBref misc table at all -- must
+    still produce a defending score from what is there."""
+    import copy
+
+    squad = _defenders(n=120, seed=8)
+    config = copy.deepcopy(load_config())
+    rated = rate_players(squad, config)
+    done = rated[rated["rated"]]
+    assert done["sub_defending"].notna().any(), (
+        "defending collapsed when the quality ratios were absent from the frame"
+    )

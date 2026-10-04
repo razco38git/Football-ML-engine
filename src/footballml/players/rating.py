@@ -66,6 +66,30 @@ Everything debatable is a number in the YAML, not a decision buried in code.
     is the data. Aerial duels would settle it and FBref no longer publishes
     them -- see :data:`footballml.players.fbref.MISC_COLUMNS`.
 
+    Partly addressed, and worth knowing how far. `defending` now carries two
+    *quality* terms beside the volume ones -- what share of a player's
+    challenges ended with the ball rather than a free kick, and how much he
+    wins per foul given away. Van Dijk is 3rd to 11th percentile on volume and
+    70th to 97th on those, which is the whole complaint in two numbers, and his
+    published rating moves 79 to 82 across his Liverpool seasons.
+
+    It is a proxy, not the measurement anyone would choose. FBref strips tackle
+    *attempts* from player rows, so a true success rate is out of reach and a
+    foul stands in for a failed challenge. Three things that would settle it
+    outright are not available at player level in any of the 65 cached
+    league-seasons: tackle success rate, passing accuracy and clearances are
+    served at 4% -- the squad summary rows only -- and aerial duels and
+    recoveries are absent from the HTML entirely.
+
+    The `playing_time` table was probed for the same reason and rejected on
+    measurement. It *is* served, with goals conceded on the pitch and an
+    On-Off column, but neither works: on-pitch goals conceded varies nearly
+    twice as much between clubs as within them, so it says which side a player
+    turns out for, and On-Off is wildest for exactly the ever-presents it would
+    need to judge -- a median absolute value of 1.25 for players who sat out
+    fewer than four matches, against 0.44 for those who sat out fourteen, with
+    one reading of 30.29.
+
     Where a metric is missing rather than merely crude, the rating now says
     so instead of filling the gap: see :data:`MIN_METRIC_COVERAGE` and
     :data:`MAX_MISSING_WEIGHT`. 2014/15 centre-backs carry no defending score
@@ -355,6 +379,29 @@ def rate_players(
 
     work["composite_raw"] = composites
 
+    # Credit being outstanding at something, not just being tidy at everything.
+    #
+    # A weighted mean of percentiles cannot distinguish a player who is 97th
+    # percentile at the thing his position exists for from one who is middling
+    # across the board, and it ranks the second above the first whenever the
+    # weights happen to favour what the specialist does not do. Mane's 22-goal
+    # 2018/19 rated below his 11-goal 2020/21 for exactly that reason. See
+    # `peak_weight` in the config for the sweep behind the number.
+    peak_weight = float(config.get("peak_weight", 0.0))
+    if peak_weight > 0 and sub_columns:
+        present = [c for c in sub_columns if c in work.columns]
+        # Sub-ratings are 0-1 here -- they are only scaled to 0-99 at the very
+        # end -- so the peak is already on the composite's own scale.
+        peak = work[present].astype(float).max(axis=1)
+        # A row with no sub-rating at all keeps its composite rather than being
+        # pulled toward a NaN: `max` of an empty row is NaN, and blending that
+        # in would silently unrate the player.
+        work["composite_raw"] = np.where(
+            peak.notna(),
+            (1 - peak_weight) * work["composite_raw"] + peak_weight * peak,
+            work["composite_raw"],
+        )
+
     # A group whose sub-ratings could not be computed at all -- every 2015/16
     # goalkeeper, because FBref served no `keeper` table that season -- must
     # not come back as a rated player with a blank rating, which is the one
@@ -413,7 +460,10 @@ def rate_players(
     # the two can be compared. Where they disagree is the interesting part: a
     # player well above their EA overall is in form, one well below is coasting
     # on reputation.
-    carried = [*sub_columns, "composite_raw", "composite", "performance_rating", "rating"]
+    carried = [
+        *sub_columns, "composite_raw", "composite", "performance_rating",
+        "fifa_on_our_scale", "rating",
+    ]
     for column in carried:
         if column in work.columns:
             df.loc[work.index, column] = work[column]
@@ -486,6 +536,13 @@ def _blend_with_fifa(work: pd.DataFrame, config: dict[str, Any]) -> pd.Series:
         pct=True
     )
     fifa_on_our_scale = _to_scale(fifa_percentile, config["scale"])
+    # Kept, not just used. Published as `fifa_on_our_scale`, because without it
+    # the page shows three numbers that cannot be reconciled: Chema Andres is
+    # EA 63, performance 78, rating 64, and no reader can get 64 out of 63 and
+    # 78. The blend is of 78.5 and *49.4* -- EA's 63 is the 1st percentile
+    # among 181 defensive midfielders, and that is what 63 means once both
+    # numbers are on one scale.
+    work["fifa_on_our_scale"] = fifa_on_our_scale.where(present)
 
     blended = performance.copy()
     blended[present] = (
