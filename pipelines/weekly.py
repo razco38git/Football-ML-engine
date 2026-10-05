@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import subprocess
 import sys
 import time
@@ -153,6 +154,12 @@ def run_step(step: Step) -> float:
     # stderr, its prints to stdout, and its dependencies choose for themselves;
     # keeping them apart meant guessing which one carried the sentence that
     # said what actually happened.
+    # The child has to agree with the `encoding="utf-8"` we decode it with.
+    # Without this it encodes stdout with `locale.getpreferredencoding()` --
+    # cp1255 on this machine -- and `pipelines/__init__.py` has to rescue it by
+    # replacing every accented character with a question mark. Saying utf-8 on
+    # both sides keeps the real names in the log.
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     completed = subprocess.run(
         [sys.executable, "-m", f"pipelines.{step.name}", *step.args],
         cwd=ROOT,
@@ -161,6 +168,7 @@ def run_step(step: Step) -> float:
         text=True,
         encoding="utf-8",
         errors="replace",
+        env=env,
         check=False,
     )
     elapsed = time.monotonic() - started
