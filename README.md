@@ -1,6 +1,12 @@
 # Football-ML-engine
 Machine learning system for football match prediction, player analytics, and real-time football intelligence
 
+## Understanding it
+
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) is the guide: how the five
+stages fit together, what each tab does, why the model predicts goal rates
+rather than outcomes, and how a change is measured before it ships.
+
 ## Running it
 
 The site is two processes and needs both — the page is served by Vite on
