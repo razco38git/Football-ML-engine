@@ -275,6 +275,18 @@ export interface PlayerRating {
    * blending — which is why 63 and 78 can produce 64.
    */
   fifa_on_our_scale: number | null;
+  /**
+   * EA's own attributes on EA's global scale — pace, shooting, passing,
+   * dribbling, defending, physical, or the five keeper ones. An 82 means the
+   * same thing for a full back as for a winger, which our percentile
+   * sub-ratings deliberately cannot do.
+   */
+  fifa_attributes: Record<string, number>;
+  /**
+   * Where the raw per-90 output ranks among the same position in the same
+   * season, 0-100. Only the per-player endpoint fills this.
+   */
+  stat_percentiles: Record<string, number>;
   /** 0-1: how much of the role the season's data supported. Below 1, the blend leans on EA. */
   measured_share: number | null;
   /** Where the EA half of the blend landed for this row. 0.5 almost everywhere. */

@@ -174,9 +174,91 @@ function Underlying({ player }: { player: PlayerRating }) {
   );
 }
 
+/**
+ * EA's attributes, on EA's own scale.
+ *
+ * Kept visually distinct from our percentile bars below, because they are a
+ * different kind of number and conflating them is the single easiest way to
+ * misread this card. EA's 82 pace means the same thing for a full back as for a
+ * winger; our 82 defending means "better than 82% of other players in this
+ * position this season" and says nothing across positions.
+ */
+function EaAttributes({ values }: { values: Record<string, number> }) {
+  const entries = Object.entries(values);
+  if (entries.length === 0) return null;
+  const label = (k: string) =>
+    k.startsWith('gk_') ? k.slice(3).replace(/^\w/, c => c.toUpperCase()) : k.replace(/^\w/, c => c.toUpperCase());
+
+  return (
+    <div className="grid gap-2 mb-6" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+      {entries.map(([key, value]) => (
+        <div
+          key={key}
+          className="rounded-lg px-3 py-2 flex items-center justify-between"
+          style={{ background: 'var(--secondary)', border: '1px solid var(--border)' }}
+        >
+          <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>{label(key)}</span>
+          <span className="font-data font-bold text-sm" style={{ color: getRatingBg(value) }}>
+            {Math.round(value)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * What the player actually did, ranked against his own position and season.
+ *
+ * The raw numbers are already on this card, and almost nobody has a feel for
+ * them: 0.68 non-penalty xG per 90 is either excellent or ordinary depending on
+ * whether you happen to know the distribution. The percentile is the part a
+ * reader can act on, so it gets the bar and the number gets the caption.
+ */
+function PerformancePercentiles({ values }: { values: Record<string, number> }) {
+  const entries = Object.entries(values).sort((a, b) => b[1] - a[1]);
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-1.5 mb-6">
+      {entries.map(([label, value]) => (
+        <div key={label} className="flex items-center gap-2">
+          <span className="text-xs w-40 shrink-0" style={{ color: 'var(--muted-foreground)' }}>
+            {label}
+          </span>
+          <div className="flex-1 h-1.5 rounded-full" style={{ background: 'var(--secondary)' }}>
+            <div
+              className="h-full rounded-full"
+              style={{ width: `${value}%`, background: getRatingBg(value) }}
+            />
+          </div>
+          <span
+            className="text-xs font-data font-bold w-10 text-right"
+            style={{ color: getRatingBg(value) }}
+            title={`Better than ${value.toFixed(0)}% of players in this position and season`}
+          >
+            {value.toFixed(0)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function PlayerDetailPanel({ player, onClose }: { player: PlayerRating; onClose: () => void }) {
   const attributes = ATTRIBUTES[player.position] ?? [];
   const color = teamColor(player.team);
+
+  // The table row has no EA attributes or percentiles — only the per-player
+  // endpoint computes those — so the panel fetches the player's whole career
+  // and picks out the season that was clicked. The rest of it becomes the
+  // rating history.
+  const { data: history } = useAsync(() => api.playerHistory(player.player), [player.player]);
+  const detail = history?.find(h => h.season === player.season && h.team === player.team) ?? null;
+  const career = (history ?? [])
+    .filter(h => h.rating != null)
+    .slice()
+    .sort((a, b) => a.season.localeCompare(b.season));
 
   return (
     <div
@@ -224,14 +306,80 @@ function PlayerDetailPanel({ player, onClose }: { player: PlayerRating; onClose:
         </div>
 
         <div className="p-6">
+          {career.length > 1 && (
+            <>
+              <div className="text-xs font-display font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--muted-foreground)' }}>
+                Career · {career[0].season.slice(0, 2)}/{career[0].season.slice(2)} to{' '}
+                {career[career.length - 1].season.slice(0, 2)}/{career[career.length - 1].season.slice(2)}
+              </div>
+              {/*
+                Scaled to this player's own range, not to 0-99. A career that
+                runs 85 to 92 is a flat wall of identical bars against the full
+                scale, and the shape is the entire point of showing it. The
+                number is in the tooltip for anyone who wants the level rather
+                than the trend.
+              */}
+              <div className="flex items-end gap-1 mb-6" style={{ height: 56 }}>
+                {career.map(h => {
+                  const value = h.rating as number;
+                  const here = h.season === player.season && h.team === player.team;
+                  const ratings = career.map(c => c.rating as number);
+                  const low = Math.min(...ratings);
+                  const span = Math.max(...ratings) - low || 1;
+                  return (
+                    <div key={`${h.season}-${h.team}`} className="flex-1 flex flex-col items-center gap-1">
+                      <div
+                        className="w-full rounded-sm"
+                        style={{
+                          height: 8 + ((value - low) / span) * 32,
+                          background: getRatingBg(value),
+                          opacity: here ? 1 : 0.45,
+                          outline: here ? '1px solid var(--foreground)' : undefined,
+                        }}
+                        title={`${h.season.slice(0, 2)}/${h.season.slice(2)} · ${h.team} · ${value}`}
+                      />
+                      <span style={{ fontSize: 8, color: 'var(--muted-foreground)' }}>
+                        {h.season.slice(2)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
           <div className="text-xs font-display font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--muted-foreground)' }}>
-            Rating breakdown
+            Rating breakdown · ranked against {POSITIONS[player.position]?.toLowerCase()}s
           </div>
           <div className="flex flex-col gap-2 mb-6">
             {attributes.map(a => (
               <StatBar key={String(a.key)} label={a.label} value={player[a.key] as number | null} />
             ))}
           </div>
+
+          {detail && Object.keys(detail.stat_percentiles).length > 0 && (
+            <>
+              <div className="text-xs font-display font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--muted-foreground)' }}>
+                What he actually did
+              </div>
+              <div className="text-xs mb-3" style={{ color: 'var(--muted-foreground)', opacity: 0.8 }}>
+                Each per-90 rate ranked against the same position in the same season
+              </div>
+              <PerformancePercentiles values={detail.stat_percentiles} />
+            </>
+          )}
+
+          {detail && Object.keys(detail.fifa_attributes).length > 0 && (
+            <>
+              <div className="text-xs font-display font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--muted-foreground)' }}>
+                EA attributes
+              </div>
+              <div className="text-xs mb-3" style={{ color: 'var(--muted-foreground)', opacity: 0.8 }}>
+                EA&rsquo;s own scale, comparable across positions &mdash; unlike the bars above
+              </div>
+              <EaAttributes values={detail.fifa_attributes} />
+            </>
+          )}
 
           <div className="text-xs font-display font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--muted-foreground)' }}>
             Underlying numbers

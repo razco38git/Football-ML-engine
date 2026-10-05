@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import Discover from './components/Discover';
 import MatchPredictor from './components/MatchPredictor';
 import PlayerDatabase from './components/PlayerDatabase';
 import PlayerSimilarity from './components/PlayerSimilarity';
@@ -7,10 +8,11 @@ import PredictionHistory from './components/PredictionHistory';
 import SeasonProjection from './components/SeasonProjection';
 import WhatIf from './components/WhatIf';
 
-type Tab = 'predictor' | 'whatif' | 'players' | 'similarity' | 'teams' | 'projection' | 'history';
+type Tab = 'predictor' | 'discover' | 'whatif' | 'players' | 'similarity' | 'teams' | 'projection' | 'history';
 
 const tabs: { id: Tab; label: string; icon: string; badge?: string }[] = [
   { id: 'predictor', label: 'Match Predictor', icon: '⚡' },
+  { id: 'discover', label: 'Discover', icon: '✨' },
   { id: 'players', label: 'Player Ratings', icon: '👤', badge: 'EA FC' },
   { id: 'similarity', label: 'Player Similarity', icon: '🔍' },
   { id: 'teams', label: 'Team Strength', icon: '🏆' },
@@ -96,6 +98,7 @@ export default function App() {
       {/* Main content */}
       <main className="max-w-7xl mx-auto px-6 py-8">
         {activeTab === 'predictor' && <MatchPredictor />}
+        {activeTab === 'discover' && <Discover />}
         {activeTab === 'whatif' && <WhatIf />}
         {activeTab === 'players' && <PlayerDatabase />}
         {activeTab === 'similarity' && <PlayerSimilarity />}

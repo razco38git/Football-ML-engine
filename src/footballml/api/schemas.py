@@ -188,6 +188,23 @@ class PlayerRating(BaseModel):
     #: everywhere; 0.81 for a 2014/15 centre back.
     fifa_weight_used: float | None = None
 
+    #: EA's own attributes for this player -- pace, shooting, passing,
+    #: dribbling, defending, physical for an outfielder, the five keeper ones
+    #: for a goalkeeper. On EA's global scale, not ours: an 82 here means the
+    #: same thing for a full back as for a winger, which is exactly what our
+    #: own percentile sub-ratings cannot do.
+    fifa_attributes: dict[str, float] = Field(default_factory=dict)
+
+    #: Where this player's raw per-90 output ranks among the same position in
+    #: the same season, 0-100. The sub-ratings are built from these, but the
+    #: sub-rating is a weighted blend -- this is the underlying number on its
+    #: own, so "0.68 non-penalty xG per 90" can be read as "96th percentile"
+    #: rather than left as a figure nobody has a feel for.
+    #:
+    #: Only populated by the per-player endpoint: ranking every row of a
+    #: 2,000-row page against its pool would be work nobody asked for.
+    stat_percentiles: dict[str, float] = Field(default_factory=dict)
+
     #: Populated per position group; a forward has no defending sub-rating.
     sub_finishing: int | None = None
     sub_creation: int | None = None

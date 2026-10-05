@@ -39,6 +39,64 @@ function Badge({ value, size = 34 }: { value: number | null; size?: number }) {
   );
 }
 
+/**
+ * Elo, match by match.
+ *
+ * The only rating here that moves *within* a season. The squad rating beside it
+ * is a whole-season number, fixed from one August to the next, so charting that
+ * would draw a staircase with one step a year. Elo updates on every result,
+ * which is what makes a trend line mean something — and it is also the single
+ * largest input to the match model, so this is the closest thing the site has
+ * to "what does the model currently think of this team".
+ */
+function EloTrend({ team }: { team: string }) {
+  const { data } = useAsync(() => api.teamElo(team, 3), [team]);
+  if (!data || data.points.length < 3) return null;
+
+  const values = data.points.map(p => p.elo);
+  const low = Math.min(...values);
+  const high = Math.max(...values);
+  const first = values[0];
+  const change = data.current - first;
+
+  return (
+    <div className="mb-6">
+      <div className="flex items-baseline justify-between mb-2">
+        <div className="text-xs font-display font-bold uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
+          Elo · last {data.points.length} matches
+        </div>
+        <div className="flex items-baseline gap-2">
+          <span className="font-data font-bold text-sm" style={{ color: 'var(--foreground)' }}>
+            {Math.round(data.current)}
+          </span>
+          <span
+            className="font-data text-xs"
+            style={{ color: change >= 0 ? '#00e676' : '#f44336' }}
+          >
+            {change >= 0 ? '+' : '−'}{Math.abs(Math.round(change))}
+          </span>
+        </div>
+      </div>
+      <svg width="100%" height={70} viewBox={`0 0 ${data.points.length} 70`} preserveAspectRatio="none">
+        <polyline
+          points={values
+            .map((v, i) => `${i},${68 - ((v - low) / (high - low || 1)) * 64}`)
+            .join(' ')}
+          fill="none"
+          stroke={change >= 0 ? '#00e676' : '#f44336'}
+          strokeWidth={0.6}
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
+      <div className="flex justify-between" style={{ fontSize: 9, color: 'var(--muted-foreground)' }}>
+        <span>{data.points[0].date}</span>
+        <span>a rating only moves when a result surprises it</span>
+        <span>{data.points[data.points.length - 1].date}</span>
+      </div>
+    </div>
+  );
+}
+
 function SquadPanel({ team, onClose }: { team: TeamStrength; onClose: () => void }) {
   // The season the row came from, not whatever the player file's newest is:
   // those differ, and the panel header and the squad under it disagreed.
@@ -91,6 +149,8 @@ function SquadPanel({ team, onClose }: { team: TeamStrength; onClose: () => void
         </div>
 
         <div className="p-6">
+          <EloTrend team={team.team} />
+
           <div className="text-xs font-display font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--muted-foreground)' }}>
             Squad by minutes played
           </div>

@@ -59,6 +59,7 @@ from footballml.api.schemas import (
 from footballml.data import (
     ODDS_COLUMNS,
     PROCESSED_DIR,
+    load_raw_odds,
     load_team_match_history,
     load_team_strength,
 )
@@ -210,6 +211,23 @@ def _load_state(startup: bool = False) -> dict[str, int]:
     tmh = load_team_match_history(path)
     strength = load_team_strength()
     features = build_match_features(tmh, strength=strength)
+
+    # Bookmaker odds, joined for display only -- never for prediction. They are
+    # excluded from the feature set on purpose (`feature_columns` says why), but
+    # the site has always meant to show the market beside our own number, and
+    # the Bookmaker row on a match card had quietly never rendered: the frame it
+    # reads is built from the team-match history, which carries no odds. The
+    # backtest has been joining them on the same three keys all along.
+    try:
+        odds = load_raw_odds()
+        if not odds.empty:
+            features = features.merge(
+                odds, on=["Date", "HomeTeam", "AwayTeam"], how="left", suffixes=("", "_odds")
+            )
+            priced = features[list(ODDS_COLUMNS)].notna().all(axis=1).sum()
+            logger.info("Odds joined to %d of %d matches", int(priced), len(features))
+    except Exception:  # noqa: BLE001 - a display extra must not stop the server
+        logger.exception("Could not load bookmaker odds; the market row will be absent")
 
     missing = [c for c in metadata.feature_names if c not in features.columns]
     if missing and not startup:
@@ -1009,8 +1027,69 @@ _PLAYER_STATS = (
     "interceptions_per90", "tackles_won_per90", "save_pct", "goals_against_per90",
 )
 
+#: EA's attributes, without the `fifa_` prefix the CSV carries.
+_EA_OUTFIELD = ("pace", "shooting", "passing", "dribbling", "defending", "physical")
+_EA_KEEPER = ("gk_diving", "gk_handling", "gk_kicking", "gk_positioning", "gk_reflexes")
 
-def _to_player(row: pd.Series) -> PlayerRating:
+#: Per-90 rates worth ranking a player on, and what to call them.
+#:
+#: Rates, not totals: a substitute with four goals in 600 minutes and a starter
+#: with four in 3,000 are not the same player, and a percentile over totals
+#: would say they were. `goals_against_per90` is inverted at the point of use --
+#: conceding fewer is better, and a raw percentile would rank the worst keeper
+#: first.
+_STAT_PERCENTILES = {
+    "np_goals_per90": "Non-penalty goals",
+    "np_xg_per90": "Non-penalty xG",
+    "assists_per90": "Assists",
+    "xa_per90": "Expected assists",
+    "key_passes_per90": "Key passes",
+    "shots_per90": "Shots",
+    "xg_buildup_per90": "Build-up involvement",
+    "interceptions_per90": "Interceptions",
+    "tackles_won_per90": "Tackles won",
+    "save_pct": "Save percentage",
+}
+
+
+def _stat_percentiles(row: pd.Series) -> dict[str, float]:
+    """Rank this player's raw output against his own position and season.
+
+    The sub-ratings already do this and then blend several metrics together
+    under a weight from the config. This is the step before that blend: one
+    number, one rank, so a reader can see that 0.68 non-penalty xG per 90 is not
+    merely a figure but the 96th percentile among that season's wingers.
+
+    Ranked within `(role, Season)` for the same reason everything else here is:
+    a centre back's tackle rate against other centre backs, never against the
+    whole league.
+    """
+    pool = state.players
+    if pool.empty or pd.isna(row.get("role")):
+        return {}
+    peers = pool[(pool["role"] == row["role"]) & (pool["Season"] == row["Season"])]
+    if len(peers) < 20:  # too thin for a percentile to mean anything
+        return {}
+
+    out: dict[str, float] = {}
+    for column, label in _STAT_PERCENTILES.items():
+        if column not in peers.columns or pd.isna(row.get(column)):
+            continue
+        values = peers[column].dropna()
+        if len(values) < 20:
+            continue
+        rank = float((values < row[column]).mean())
+        # Conceding fewer is better, so the raw rank would put the worst
+        # goalkeeper top.
+        if column == "goals_against_per90":
+            rank = 1.0 - rank
+        out[label] = round(rank * 100, 1)
+    return out
+
+
+def _to_player(
+    row: pd.Series, percentiles: dict[str, float] | None = None
+) -> PlayerRating:
     """Convert one rating row into an API response."""
 
     def num(column: str, cast: type) -> int | float | None:
@@ -1036,6 +1115,12 @@ def _to_player(row: pd.Series) -> PlayerRating:
         fifa_on_our_scale=num("fifa_on_our_scale", int),
         measured_share=num("measured_share", float),
         fifa_weight_used=num("fifa_weight_used", float),
+        fifa_attributes={
+            name: float(row[f"fifa_{name}"])
+            for name in (_EA_KEEPER if row.get("role") == "GK" else _EA_OUTFIELD)
+            if f"fifa_{name}" in row.index and pd.notna(row.get(f"fifa_{name}"))
+        },
+        stat_percentiles=percentiles or {},
         **{f"sub_{name}": num(f"sub_{name}", int) for name in _PLAYER_SUBS},
         **{
             stat: num(stat, int if stat in {"goals", "assists"} else float)
@@ -1165,7 +1250,7 @@ def player_history(name: str) -> list[PlayerRating]:
         raise HTTPException(404, f"Unknown player {name!r}")
 
     rows = rows.sort_values("Season", ascending=False)
-    return [_to_player(r) for _, r in rows.iterrows()]
+    return [_to_player(r, percentiles=_stat_percentiles(r)) for _, r in rows.iterrows()]
 
 
 @app.get("/players/{name}/similar", response_model=SimilarPlayers)
