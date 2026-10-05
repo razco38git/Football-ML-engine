@@ -48,6 +48,47 @@ the training set, not the feature -- which means the remaining ~92% of the gap
 needs either European matches in training, or a correction applied outside the
 model, where the 822-match measurement can be used directly.
 
+**MEASURED (2026-10-05): the three constants below are already right, and a
+better-posed rating adds nothing.** `elo_diff` carries 18% of the match model's
+attributed movement -- eight times the next feature -- so the numbers under it
+were worth checking. 150 combinations, scored on Elo's own Brier over 2016/17
+onward with 2024/25-2025/26 held out:
+
+    K    10=.15684  15=.15534  20=.15498  25=.15516  30=.15563  40=.15703
+    HA   40=.15558  50=.15510  60=.15498  70=.15521  80=.15577
+    SR   0.0=.15491 0.15=.15467 0.25=.15498 0.35=.15554 0.5=.15673
+
+`K` and `HOME_ADVANTAGE` sit exactly on the grid minimum. Only
+`SEASON_REGRESSION` moved, 0.25 -> 0.15, worth -0.0003 Brier and confirmed
+held-out -- and it **did not survive the backtest**: pooled walk-forward RPS
+0.2003 -> 0.2005, +0.00018 [-0.00018, +0.00053]. A better rating is not
+automatically a better feature when the model has 234 others to lean on.
+
+An attack/defence rating was then built and rejected the same way. It updates on
+goals rather than results -- `lambda = exp(base + edge + attack - opponent
+defence)`, then the Poisson score function -- which is the question the model is
+actually fitted to, and it separates a side winning 4-3 from one winning 1-0.
+Its constants swept to K=0.02 and edge=0.23 (nll 1.4579 against 1.4654 for the
+obvious first guess of 0.04). The ratings were plainly sensible: Bayern the best
+attack, Arsenal the best defence, Pisa bottom.
+
+The booster took to them immediately -- ranks 2, 3, 4 and 8 of 241, **9.4% of
+attributed movement**, with `elo_diff` falling 17.9% to 16.0% to make room --
+and predicted exactly as well as before: **RPS 0.2004 against 0.2003, +0.00003
+[-0.00036, +0.00041]**. It reorganised a tenth of its reasoning around the new
+ratings and gained nothing, because they are built from the same match results
+as everything else.
+
+Dropping the 34 features with a near-twin above |r| 0.95 -- all xG against
+non-penalty xG -- is the same story from the other end: 0.2006, +0.00025
+[-0.00011, +0.00059]. Neither adding a better-posed view of the results nor
+removing a redundant one moves the model.
+
+**So feature engineering on top of results has hit its ceiling here.** The model
+is well calibrated but under-discriminating: where the market says 80-90% the
+truth is 85.3% and we say 79.2%. That gap is missing information -- team news,
+lineups, injuries -- not a missing way of rearranging goals and shots.
+
 **Leak-safety.** Each match records the ratings the two sides carried *going
 in*, and only then applies the update. A match never sees its own result, which
 is the same discipline as the ``.shift(1)`` in the rolling features and is
