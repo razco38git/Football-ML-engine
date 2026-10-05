@@ -399,57 +399,94 @@ function ForecastSummary({ p }: { p: Prediction }) {
   return (
     <div className="flex flex-col items-center gap-2">
       {/*
-        Coloured by the scoreline itself, not by `predicted_outcome`.
-        They answer different questions and often disagree: Roma v Inter
-        is a 50% Roma win whose single most likely exact score is 1-1,
-        and painting that 1-1 with the home-win colour made the card look
-        self-contradictory.
+        The call comes first and biggest, because it is what the model is
+        actually for. The exact score used to hold this spot in 52px badges,
+        which made a ~10% event look like the forecast while the thing the
+        model is confident about -- a one-in-three to four-in-five call on the
+        outcome -- sat underneath it in 12px.
       */}
-      <div className="flex items-center gap-1">
-        <span
-          className="overall-badge"
-          style={{
-            background: p.modal_score_home > p.modal_score_away ? '#00e676' : 'var(--secondary)',
-            color: p.modal_score_home > p.modal_score_away ? '#000' : 'var(--foreground)',
-            width: 52, height: 52, fontSize: 22, borderRadius: 10,
-          }}
+      <div className="text-center">
+        <div
+          className="font-display font-black leading-none tracking-wide"
+          style={{ color: outcomeColor, fontSize: 24 }}
         >
-          {p.modal_score_home}
-        </span>
-        <span className="font-display font-bold text-lg" style={{ color: 'var(--muted-foreground)' }}>-</span>
-        <span
-          className="overall-badge"
-          style={{
-            background: p.modal_score_away > p.modal_score_home ? '#3b82f6' : 'var(--secondary)',
-            color: p.modal_score_away > p.modal_score_home ? '#000' : 'var(--foreground)',
-            width: 52, height: 52, fontSize: 22, borderRadius: 10,
-          }}
-        >
-          {p.modal_score_away}
-        </span>
+          {outcomeLabel}
+        </div>
+        {/*
+          "38% confidence" reads as confidence in a named winner. Where there
+          is no favourite there is no winner to be confident about, so show
+          what the model actually thinks: all three numbers.
+        */}
+        {decisive ? (
+          <div
+            className="font-display font-bold mt-1"
+            style={{
+              fontSize: 15,
+              color: conf >= 60 ? '#00e676' : conf >= 45 ? '#ffea00' : '#ff9100',
+            }}
+          >
+            {conf}% confidence
+          </div>
+        ) : (
+          <div className="font-data mt-1" style={{ fontSize: 13, color: '#94a3b8' }}>
+            {pct(p.prob_home_win)} / {pct(p.prob_draw)} / {pct(p.prob_away_win)}
+          </div>
+        )}
       </div>
-      <div className="text-xs text-center" style={{ color: 'var(--muted-foreground)' }}>
-        likeliest exact score
-        {p.prob_modal_score != null && ` · ${pct(p.prob_modal_score)}`}
+
+      {/*
+        Secondary, and sized to say so. Still coloured by the scoreline itself
+        rather than by `predicted_outcome`: they answer different questions and
+        often disagree -- Roma v Inter is a 50% Roma win whose single most
+        likely exact score is 1-1 -- and painting that 1-1 with the home-win
+        colour made the card look self-contradictory.
+      */}
+      <div className="flex flex-col items-center gap-1 pt-1">
+        <div className="text-xs" style={{ color: 'var(--muted-foreground)', fontSize: 10 }}>
+          likeliest exact score
+          {p.prob_modal_score != null && ` · ${pct(p.prob_modal_score)}`}
+        </div>
+        <div className="flex items-center gap-1">
+          <span
+            className="overall-badge"
+            style={{
+              background: p.modal_score_home > p.modal_score_away ? '#00e676' : 'var(--secondary)',
+              color: p.modal_score_home > p.modal_score_away ? '#000' : 'var(--foreground)',
+              width: 30, height: 30, fontSize: 14, borderRadius: 7,
+            }}
+          >
+            {p.modal_score_home}
+          </span>
+          <span className="font-display font-bold text-xs" style={{ color: 'var(--muted-foreground)' }}>-</span>
+          <span
+            className="overall-badge"
+            style={{
+              background: p.modal_score_away > p.modal_score_home ? '#3b82f6' : 'var(--secondary)',
+              color: p.modal_score_away > p.modal_score_home ? '#000' : 'var(--foreground)',
+              width: 30, height: 30, fontSize: 14, borderRadius: 7,
+            }}
+          >
+            {p.modal_score_away}
+          </span>
+        </div>
       </div>
+
       {/*
         One line to settle the apparent contradiction without making the
-        reader open the panel. "1-1" above "Villarreal win" looks like the
-        card arguing with itself, and the answer is not subtle once said
-        out loud: a draw has to land on one of six exact scores, a home
-        win can arrive by any of fifteen. The grid under "Show analysis"
-        is the same statement as a picture.
+        reader open the panel. "1-1" under "Villarreal win" still looks like
+        the card arguing with itself, and the answer is not subtle once said
+        out loud: a draw has to land on one of six exact scores, a home win can
+        arrive by any of fifteen. The grid under "Show analysis" is the same
+        statement as a picture.
       */}
       {p.prob_modal_score != null && <ScoreVersusOutcome p={p} />}
 
       {/*
-        The runners-up, which are the point. The leader clears them by
-        about a percentage point, so showing one score alone invites the
-        reader to treat a ~10% event as the forecast — and since a draw's
-        mass sits on the diagonal while a win is spread across many
-        scorelines, that leader is a draw in 63% of matches even when a
-        side is a clear favourite. Seeing 1-1 11% · 2-1 10% · 2-0 9%
-        settles the apparent contradiction without changing a number.
+        The runners-up, which are the point. The leader clears them by about a
+        percentage point, so showing one score alone invites the reader to
+        treat a ~10% event as the forecast -- and since a draw's mass sits on
+        the diagonal while a win is spread across many scorelines, that leader
+        is a draw in 63% of matches even when a side is a clear favourite.
       */}
       {p.likely_scores?.length > 1 && (
         <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--muted-foreground)' }}>
@@ -465,33 +502,9 @@ function ForecastSummary({ p }: { p: Prediction }) {
           ))}
         </div>
       )}
-      <div
-        className="text-xs font-display font-bold px-2 py-0.5 rounded-full tracking-wide text-center"
-        style={{ background: outcomeColor + '22', color: outcomeColor, border: `1px solid ${outcomeColor}44` }}
-      >
-        {outcomeLabel}
-      </div>
-      <div className="text-center">
-        <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-          xG: {p.expected_goals_home.toFixed(2)} – {p.expected_goals_away.toFixed(2)}
-        </div>
-        {/*
-          "38% confidence" reads as confidence in a named winner. Where
-          there is no favourite there is no winner to be confident about,
-          so show what the model actually thinks: all three numbers.
-        */}
-        {decisive ? (
-          <div
-            className="text-xs font-display font-bold mt-1"
-            style={{ color: conf >= 60 ? '#00e676' : conf >= 45 ? '#ffea00' : '#ff9100' }}
-          >
-            {conf}% confidence
-          </div>
-        ) : (
-          <div className="text-xs font-data mt-1" style={{ color: '#94a3b8' }}>
-            {pct(p.prob_home_win)} / {pct(p.prob_draw)} / {pct(p.prob_away_win)}
-          </div>
-        )}
+
+      <div className="text-xs text-center" style={{ color: 'var(--muted-foreground)' }}>
+        xG: {p.expected_goals_home.toFixed(2)} – {p.expected_goals_away.toFixed(2)}
       </div>
     </div>
   );

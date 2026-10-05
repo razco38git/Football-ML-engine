@@ -389,6 +389,51 @@ export default function PlayerDatabase() {
             on is an even split.
           </div>
         </details>
+
+        {/*
+          The limit that matters most, stated on the page rather than left for
+          a reader to discover by disagreeing with a defender's rating.
+          Measuring it was the point: whether the rating is weaker for
+          defenders is not a matter of opinion, and the number says it is.
+        */}
+        <details className="mt-2 text-sm" style={{ color: 'var(--muted-foreground)' }}>
+          <summary className="cursor-pointer" style={{ color: 'var(--muted-foreground)' }}>
+            Why defenders and midfielders are rated less well than attackers
+          </summary>
+          <div className="mt-2 leading-relaxed rounded-xl p-4"
+               style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+            <strong style={{ color: 'var(--foreground)' }}>This rating is better
+            at attackers, because the data is.</strong> Our source publishes
+            full shooting and chance-creation numbers for every player, but
+            serves its tackling, possession and passing tables with the player
+            rows stripped out &mdash; headers present, cells empty. What
+            survives for a defender is interceptions, tackles won, fouls and
+            crosses. There is no passing accuracy, no duels, no recoveries, no
+            clearances, and no aerials.
+            <br /><br />
+            So a striker is judged on most of his job and a centre back on a
+            corner of his. That is measurable rather than arguable. Scoring each
+            season against how EA moved the player&rsquo;s rating the following
+            year &mdash; a fair proxy for &ldquo;did he have a good season&rdquo;
+            &mdash; our rating tracks it like this, for players with 1,500+
+            minutes since 2016/17:
+            <div className="mt-3 font-data text-xs" style={{ color: 'var(--foreground)' }}>
+              <div>Goalkeepers&nbsp;&nbsp;&nbsp;&nbsp;0.23</div>
+              <div>Forwards&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;0.15</div>
+              <div style={{ opacity: 0.75 }}>Full backs&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;0.07</div>
+              <div style={{ opacity: 0.75 }}>Midfielders&nbsp;&nbsp;&nbsp;&nbsp;0.05&ndash;0.07</div>
+              <div style={{ opacity: 0.75 }}>Centre backs&nbsp;&nbsp;&nbsp;0.05</div>
+            </div>
+            <br />
+            Three times better at the positions the data covers. Read a
+            defender&rsquo;s rating as a decent guide to what he did on the ball
+            and a weak one to how well he defended &mdash; and lean on the EA
+            half of his OVR, which is set by people who watch him.
+            <br /><br />
+            Two seasons are worse still. 2014/15 and 2015/16 carry no tackling
+            data at all, which is what the previous note is about.
+          </div>
+        </details>
       </div>
 
       <div className="flex flex-wrap gap-3 mb-5 items-center">
