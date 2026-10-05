@@ -69,6 +69,22 @@ const ATTRIBUTES: Record<string, { key: keyof PlayerRating; label: string; short
 
 const SLOTS = [0, 1, 2, 3];
 
+/**
+ * Seasons whose source file carried no defensive data at all.
+ *
+ * FBref served no `misc` table for either, so tackles, interceptions and
+ * crosses are absent for every player in four of the five leagues. Defending
+ * is the *leading* attribute for a centre back, full back and holding
+ * midfielder, so the first bar on the row is empty for all of them, and in
+ * 2015/16 the keeper table is missing too, which empties all four.
+ *
+ * That is 65% of rated players in those seasons against 0% in every other one.
+ * At that scale an unexplained dash reads as a broken page rather than as an
+ * absent measurement, which is why the table says so above itself rather than
+ * leaving it to a tooltip nobody hovers.
+ */
+const SEASONS_WITHOUT_DEFENSIVE_DATA = new Set(['1415', '1516']);
+
 function RatingBadge({ value, size = 'sm' }: { value: number | null; size?: 'sm' | 'md' | 'lg' }) {
   const dims =
     size === 'lg' ? { w: 52, h: 44, fs: 20 } : size === 'md' ? { w: 44, h: 36, fs: 16 } : { w: 36, h: 28, fs: 13 };
@@ -77,6 +93,7 @@ function RatingBadge({ value, size = 'sm' }: { value: number | null; size?: 'sm'
     return (
       <span
         className="inline-flex items-center justify-center font-display rounded"
+        title="Not measured this season — the source published no data for it"
         style={{
           background: 'var(--secondary)', color: 'var(--muted-foreground)',
           width: dims.w, height: dims.h, fontSize: dims.fs, flexShrink: 0,
@@ -286,6 +303,10 @@ export default function PlayerDatabase() {
     data?.season && data.seasons.length > 0 && data.seasons[0] !== data.season,
   );
 
+  const defensiveDataMissing = Boolean(
+    data?.season && SEASONS_WITHOUT_DEFENSIVE_DATA.has(String(data.season)),
+  );
+
   // Empty while "All positions" is selected, which is what makes the attribute
   // headers unsortable there.
   const selectedAttributes = position === 'All' ? [] : (ATTRIBUTES[position] ?? []);
@@ -434,6 +455,34 @@ export default function PlayerDatabase() {
             data at all, which is what the previous note is about.
           </div>
         </details>
+
+        {/*
+          Loud, because it affects two thirds of the rows below. Left as bare
+          dashes it reads as a broken table; two thirds of a page of missing
+          numbers is not something a tooltip can carry.
+        */}
+        {defensiveDataMissing && (
+          <div
+            className="mt-3 rounded-xl px-4 py-3 text-sm leading-relaxed"
+            style={{
+              background: 'rgba(255,145,0,0.08)',
+              border: '1px solid rgba(255,145,0,0.3)',
+              color: 'var(--foreground)',
+            }}
+          >
+            <strong>No defensive data exists for this season.</strong>{' '}
+            <span style={{ color: 'var(--muted-foreground)' }}>
+              Our source published no tackles, interceptions or crosses for
+              {' '}{seasonLabel(String(data?.season))}, so every centre back, full back
+              and midfielder has an empty Defending bar
+              {String(data?.season) === '1516' && ', and goalkeepers have no bars at all'}.
+              Those players are rated from what is left plus their EA rating,
+              which carries more of the total here than it does in a normal
+              season &mdash; hover the EA score to see how much. Attackers are
+              unaffected.
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-3 mb-5 items-center">
