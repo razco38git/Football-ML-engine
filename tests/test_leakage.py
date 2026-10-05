@@ -18,6 +18,7 @@ import pytest
 from footballml.data import PROCESSED_DIR, load_team_match_history
 from footballml.features.build import build_match_features
 from footballml.features.rolling import add_team_form, prepare_team_match
+from footballml.models.match_model import feature_columns
 
 
 @pytest.fixture(scope="module")
@@ -143,3 +144,36 @@ def test_features_are_finite(features: pd.DataFrame) -> None:
     numeric = features[_feature_cols(features)]
     infinite = numeric.columns[np.isinf(numeric.to_numpy(dtype="float64")).any(axis=0)]
     assert len(infinite) == 0, f"infinite values in {list(infinite)}"
+
+
+def test_bookmaker_odds_can_never_become_features() -> None:
+    """The market is a benchmark, never an input.
+
+    `feature_columns` has always said so in its docstring, but it used to rely
+    on odds not being in the frame it was handed -- true only because nothing
+    joined them. When the API joined them to show the market beside our own
+    number, every odds column silently became a model feature, and the next
+    prediction died with `KeyError: ['B365H', 'B365D', 'B365A']` because an
+    unplayed fixture has no price yet.
+
+    That failure was loud and therefore lucky. The quiet version is a model
+    that has been reading the market all along and looks excellent for it.
+    """
+    frame = pd.DataFrame(
+        {
+            "Date": [pd.Timestamp("2026-01-01")],
+            "HomeTeam": ["A"],
+            "AwayTeam": ["B"],
+            "FTHG": [1],
+            "FTAG": [0],
+            "FTR": ["H"],
+            "home_elo": [1500.0],
+            "B365H": [1.8],
+            "B365D": [3.5],
+            "B365A": [4.2],
+        }
+    )
+
+    cols = feature_columns(frame)
+
+    assert cols == ["home_elo"], f"odds leaked into the feature set: {cols}"

@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 
+from footballml.data import ODDS_COLUMNS
 from footballml.models.dixon_coles import (
     DEFAULT_MAX_GOALS,
     both_teams_score,
@@ -283,10 +284,22 @@ def feature_columns(df: pd.DataFrame) -> list[str]:
     single predictor available and using them would inflate every metric, but a
     model that predicts the market by reading the market has learned nothing.
     Odds are kept strictly as an evaluation benchmark.
+
+    **Enforced here, not merely intended.** This used to rely on odds never
+    being in the frame it was handed, which held only because nothing joined
+    them. The moment the API joined them for display -- the market row beside
+    our own number on a match card -- every odds column silently became a model
+    feature, and the next prediction died with ``KeyError: ['B365H', 'B365D',
+    'B365A'] not in index`` because an unplayed fixture has no price yet.
+
+    That failure was loud, and therefore lucky. The quiet version of the same
+    mistake is a model that has been reading the market all along and looks
+    excellent for it.
     """
     excluded = {
         "League", "Season", "Date", "HomeTeam", "AwayTeam",
         "FTHG", "FTAG", "FTR",
+        *ODDS_COLUMNS,
     }
     return [
         c
