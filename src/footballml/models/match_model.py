@@ -37,13 +37,41 @@ from footballml.models.dixon_coles import (
     top_scores,
 )
 
-#: Conservative defaults for a few thousand training rows. Deliberately *not*
-#: using early stopping: its validation split is random, which on time-ordered
-#: football data means training against future matches. The walk-forward
-#: backtest is the honest way to choose ``max_iter``.
+#: Deliberately *not* using early stopping: its validation split is random,
+#: which on time-ordered football data means training against future matches.
+#: The walk-forward backtest is the honest way to choose these, and it is what
+#: chose them.
+#:
+#: **MEASURED (2026-10-05).** These had never been swept -- the note here used
+#: to call them "conservative defaults for a few thousand training rows", and
+#: the model trains on 29,143. The expectation was that they were too small.
+#: They were too *large*: every capacity axis preferred less, and the model was
+#: mildly over-trained.
+#:
+#: What matters is the product of `learning_rate` and `max_iter` -- one quantity
+#: between them, the total learning budget. Across a 24-point grid scored by a
+#: four-fold walk-forward:
+#:
+#:     budget   3.0    4.5    6.0    9.0   12.0   15.0   18.0   27.0   45.0
+#:     RPS    .19825 .19801 .19798 .19802 .19817 .19827 .19845 .19889 .19961
+#:
+#: A flat bottom at 4.5-9 rising monotonically after it, with the old 0.05x300
+#: sitting at 15, on the rising side. 0.02x300 is budget 6, the minimum of that
+#: curve and interior to the grid on every axis -- 0.03x150 scored a hair
+#: better pooled but is at the edge of the iteration axis, which is where a
+#: selection artefact would hide.
+#:
+#: Confirmed on the full 20,013-match walk-forward, paired bootstrap against
+#: the previous settings: **RPS 0.2003 -> 0.1991**, -0.00124 [-0.00158,
+#: -0.00090], and better on 2025/26 alone as well. Log loss 0.9847 -> 0.9807,
+#: Brier 0.5867 -> 0.5838, accuracy 52.69% -> 52.99%. All four moved together,
+#: which the three feature experiments that failed the same week did not.
+#:
+#: `max_leaf_nodes`, `min_samples_leaf` and `l2_regularization` were swept too
+#: and are left alone: each is at or within noise of its own optimum.
 DEFAULT_GBM_PARAMS: dict[str, Any] = {
     "loss": "poisson",
-    "learning_rate": 0.05,
+    "learning_rate": 0.02,
     "max_iter": 300,
     "max_leaf_nodes": 15,
     "min_samples_leaf": 40,
