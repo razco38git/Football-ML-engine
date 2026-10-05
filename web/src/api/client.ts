@@ -197,6 +197,10 @@ export const api = {
   history: (source: 'live' | 'backtest', league?: string, limit = 50) =>
     fetchHistory(source, league, limit),
 
+  /** How a team's Elo has moved, match by match. */
+  teamElo: (team: string, seasons = 3) =>
+    get<EloHistory>(`/teams/${encodeURIComponent(team)}/elo?seasons=${seasons}`),
+
   /** Projected final table for one league. */
   projection: (league: string) => fetchProjection(league),
 
@@ -500,6 +504,27 @@ export interface CompetitionAccuracy {
   rps_base_rate: number;
 }
 
+export interface EloPoint {
+  date: string;
+  season: string;
+  elo: number;
+  opponent: string;
+  venue: string;
+}
+
+/**
+ * A team's rating over time.
+ *
+ * Elo is the only rating here that moves *within* a season — player ratings and
+ * squad strength are whole-season numbers, fixed until August — so it is the
+ * one series where a trend line means anything.
+ */
+export interface EloHistory {
+  team: string;
+  current: number;
+  points: EloPoint[];
+}
+
 export interface Accuracy {
   n: number;
   accuracy: number;
@@ -512,7 +537,15 @@ export interface Accuracy {
   accuracy_base_rate: number;
   /** How often the bookmakers' shortest price won, where odds exist. */
   accuracy_market: number | null;
-  by_league_accuracy: Record<string, number>;
+  /**
+   * Share of settled matches whose single likeliest scoreline was exactly
+   * right. Expect roughly one in eight: the leader in a scoreline distribution
+   * typically carries only 10-13%, so this is a far harder bar than the
+   * outcome and is published to keep that distinction visible.
+   */
+  exact_score: number | null;
+  /** Accuracy, RPS and base rate per league — the same block, never pooled. */
+  by_league: Record<string, CompetitionAccuracy>;
   /**
    * Per competition, kept apart rather than pooled. Measured skill over a base
    * rate is 12.8% on domestic matches against 6.2% on cross-league ones, so one

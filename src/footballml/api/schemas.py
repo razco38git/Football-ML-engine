@@ -318,6 +318,29 @@ class MatchResult(BaseModel):
     confidence: float
 
 
+class EloPoint(BaseModel):
+    """One team's Elo rating going into one match."""
+
+    date: str
+    season: str
+    elo: float
+    opponent: str
+    venue: str
+
+
+class EloHistory(BaseModel):
+    """A team's rating over time.
+
+    Elo is the only rating in the project that moves *within* a season: player
+    ratings and squad strength are whole-season numbers, fixed until August. So
+    this is the one honest answer to "how has this team's rating changed".
+    """
+
+    team: str
+    current: float
+    points: list[EloPoint]
+
+
 class MatchResultPage(BaseModel):
     """A page of settled matches plus the summary for the same filters."""
 
@@ -380,8 +403,15 @@ class Accuracy(BaseModel):
         description="How often the bookmakers' shortest price won, where odds exist",
     )
 
-    by_league_accuracy: dict[str, float] = Field(
-        default_factory=dict, description="Accuracy per league"
+    #: Share of settled matches whose single likeliest scoreline was exactly
+    #: right. Expect roughly one in ten: the leader in a scoreline distribution
+    #: typically carries only 10-13%, so this is a much harder bar than picking
+    #: the outcome and is published to keep that distinction visible.
+    exact_score: float | None = None
+
+    by_league: dict[str, CompetitionAccuracy] = Field(
+        default_factory=dict,
+        description="Accuracy, RPS and base rate per league, not pooled",
     )
     by_competition: dict[str, CompetitionAccuracy] = Field(
         default_factory=dict,

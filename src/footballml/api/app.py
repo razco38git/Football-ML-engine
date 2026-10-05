@@ -36,6 +36,8 @@ from footballml.api.schemas import (
     CalibrationBin,
     CompetitionAccuracy,
     Driver,
+    EloHistory,
+    EloPoint,
     Health,
     LeagueStrength,
     LikelyScore,
@@ -73,7 +75,7 @@ from footballml.labels import humanise
 from footballml.league_adjust import adjust as adjust_for_league
 from footballml.league_adjust import fitted_model_version
 from footballml.league_adjust import load as load_league_adjustment
-from footballml.models.dixon_coles import score_matrix
+from footballml.models.dixon_coles import most_likely_score, score_matrix
 from footballml.models.evaluate import (
     base_rate_probs,
     calibration_table,
@@ -950,19 +952,9 @@ def _by_competition(rows: pd.DataFrame) -> dict[str, CompetitionAccuracy]:
     """
     if rows.empty or "competition" not in rows.columns:
         return {}
-    out = {}
-    for name, block in rows.groupby(rows["competition"].fillna(store.DOMESTIC)):
-        actual = block["actual_result"]
-        metrics = evaluate(actual, block[PROB_COLUMNS].to_numpy())
-        out[str(name)] = CompetitionAccuracy(
-            n=metrics["n"],
-            accuracy=round(metrics["accuracy"], 4),
-            rps=round(metrics["rps"], 4),
-            rps_base_rate=round(
-                evaluate(actual, base_rate_probs(actual, len(block)))["rps"], 4
-            ),
-        )
-    return out
+    return _per_group(
+        rows, rows["competition"].fillna(store.DOMESTIC), PROB_COLUMNS, "actual_result"
+    )
 
 
 @app.get("/accuracy", response_model=Accuracy)
@@ -992,12 +984,8 @@ def accuracy(league: str | None = Query(None)) -> Accuracy:
         brier=round(metrics["brier"], 4),
         rps_base_rate=round(evaluate(actual, base_rate_probs(actual, len(rows)))["rps"], 4),
         accuracy_base_rate=round(float(actual.value_counts(normalize=True).max()), 4),
-        by_league_accuracy={
-            str(lg): round(
-                evaluate(g["actual_result"], g[PROB_COLUMNS].to_numpy())["accuracy"], 4
-            )
-            for lg, g in rows.groupby("League")
-        },
+        exact_score=_exact_score_rate(rows),
+        by_league=_per_group(rows, rows["League"], PROB_COLUMNS, "actual_result"),
         by_competition=_by_competition(rows),
         calibration=[
             CalibrationBin(**row)
@@ -1007,12 +995,7 @@ def accuracy(league: str | None = Query(None)) -> Accuracy:
         ],
     )
 
-    if all(c in rows.columns for c in ODDS_COLUMNS):
-        with_odds = rows[rows[list(ODDS_COLUMNS)].notna().all(axis=1)]
-        if not with_odds.empty:
-            market = odds_implied_probs(with_odds, ODDS_COLUMNS)
-            result.rps_market = round(evaluate(with_odds["actual_result"], market)["rps"], 4)
-
+    result.rps_market = _market_rps(rows, "actual_result")
     return result
 
 
@@ -1350,6 +1333,53 @@ def league_strength(
     return sorted(out, key=lambda x: x.mean_strength, reverse=True)
 
 
+@app.get("/teams/{name}/elo", response_model=EloHistory)
+def team_elo(name: str, seasons: int = Query(3, ge=1, le=12)) -> EloHistory:
+    """How a team's Elo rating has moved, match by match.
+
+    The only rating in the project that moves *within* a season. Player ratings
+    and squad strength are whole-season numbers, fixed from one August to the
+    next, so a chart of either would be a staircase with one step a year. Elo
+    updates on every result, which is what makes a trend line honest here.
+
+    Each point is the rating the side carried *into* that match, which is the
+    same number the model was given -- never one that has seen its own result.
+    """
+    features = state.features
+    if features.empty:
+        raise HTTPException(503, "Feature table not loaded")
+
+    home = features["HomeTeam"] == name
+    away = features["AwayTeam"] == name
+    if not (home | away).any():
+        raise HTTPException(404, f"No matches found for {name}")
+
+    played = features[home | away].sort_values("Date")
+    if "Season" in played.columns:
+        wanted = sorted(played["Season"].astype(str).unique())[-seasons:]
+        played = played[played["Season"].astype(str).isin(wanted)]
+
+    points = []
+    for _, row in played.iterrows():
+        at_home = row["HomeTeam"] == name
+        rating = row.get("home_elo") if at_home else row.get("away_elo")
+        if pd.isna(rating):
+            continue
+        points.append(
+            EloPoint(
+                date=str(pd.Timestamp(row["Date"]).date()),
+                season=str(row.get("Season", "")),
+                elo=round(float(rating), 1),
+                opponent=str(row["AwayTeam"] if at_home else row["HomeTeam"]),
+                venue="H" if at_home else "A",
+            )
+        )
+    if not points:
+        raise HTTPException(404, f"No rated matches for {name}")
+
+    return EloHistory(team=name, current=points[-1].elo, points=points)
+
+
 @app.get("/teams/{name}/squad", response_model=list[PlayerRating])
 def team_squad(
     name: str,
@@ -1454,6 +1484,79 @@ def _to_match_result(row: pd.Series, source: str, columns: dict[str, str]) -> Ma
     )
 
 
+def _exact_score_rate(rows: pd.DataFrame) -> float | None:
+    """How often the single likeliest scoreline was exactly right.
+
+    A much harder bar than picking the outcome, and worth publishing precisely
+    because it is: the leader in a scoreline distribution usually carries only
+    10-13%, so a reader who sees "2-1" on a card should know how often that
+    lands. Roughly one in ten.
+
+    The two sources store it differently. Live predictions were committed to
+    before kickoff and carry the scoreline they named; backtest rows carry the
+    two goal rates, from which the same scoreline is recovered.
+    """
+    if {"modal_score_home", "modal_score_away"}.issubset(rows.columns):
+        predicted = rows[["modal_score_home", "modal_score_away"]].to_numpy()
+        actual = rows[["actual_home_goals", "actual_away_goals"]].to_numpy()
+    elif {"mu_home", "mu_away"}.issubset(rows.columns):
+        # Through the Dixon-Coles matrix, not straight off the two rates. `rho`
+        # moves exactly the low-score cells -- 0-0, 1-0, 0-1, 1-1 -- which is
+        # where the mode almost always sits, so ignoring it would name a
+        # different scoreline from the one the site showed at the time.
+        rho = state.metadata.rho if state.metadata else 0.0
+        matrix = score_matrix(
+            rows["mu_home"].to_numpy(dtype=float),
+            rows["mu_away"].to_numpy(dtype=float),
+            rho=rho,
+        )
+        predicted = most_likely_score(matrix)
+        actual = rows[["FTHG", "FTAG"]].to_numpy()
+    else:
+        return None
+
+    usable = ~pd.isna(predicted).any(axis=1) & ~pd.isna(actual).any(axis=1)
+    if not usable.any():
+        return None
+    hit = (predicted[usable] == actual[usable]).all(axis=1)
+    return round(float(hit.mean()), 4)
+
+
+def _market_rps(rows: pd.DataFrame, actual_col: str) -> float | None:
+    """The bookmakers' RPS on whichever of these matches carried odds.
+
+    The realistic ceiling rather than a straw man: the market has team news and
+    money behind it. Published beside our own so the gap is a number on the
+    page rather than something only the commit log knows.
+    """
+    if not all(c in rows.columns for c in ODDS_COLUMNS):
+        return None
+    priced = rows[rows[list(ODDS_COLUMNS)].notna().all(axis=1)]
+    if priced.empty:
+        return None
+    market = odds_implied_probs(priced, ODDS_COLUMNS)
+    return round(evaluate(priced[actual_col], market)["rps"], 4)
+
+
+def _per_group(
+    rows: pd.DataFrame, by: pd.Series, prob_cols: list[str], actual_col: str
+) -> dict[str, CompetitionAccuracy]:
+    """The same metric block for each group, never pooled across them."""
+    out = {}
+    for name, block in rows.groupby(by):
+        actual = block[actual_col]
+        metrics = evaluate(actual, block[prob_cols].to_numpy())
+        out[str(name)] = CompetitionAccuracy(
+            n=metrics["n"],
+            accuracy=round(metrics["accuracy"], 4),
+            rps=round(metrics["rps"], 4),
+            rps_base_rate=round(
+                evaluate(actual, base_rate_probs(actual, len(block)))["rps"], 4
+            ),
+        )
+    return out
+
+
 def _summarise(rows: pd.DataFrame, prob_cols: list[str], actual_col: str) -> Accuracy:
     """Metric block for a set of settled matches."""
     probs = rows[prob_cols].to_numpy()
@@ -1485,10 +1588,11 @@ def _summarise(rows: pd.DataFrame, prob_cols: list[str], actual_col: str) -> Acc
         # home win. The floor any real model has to clear.
         accuracy_base_rate=round(float(actual.value_counts(normalize=True).max()), 4),
         accuracy_market=accuracy_market,
-        by_league_accuracy={
-            str(lg): round(evaluate(g[actual_col], g[prob_cols].to_numpy())["accuracy"], 4)
-            for lg, g in rows.groupby("League")
-        },
+        # Never rendered until now, though it has been computed all along: the
+        # market's RPS is the comparison that makes ours mean something.
+        rps_market=_market_rps(rows, actual_col),
+        exact_score=_exact_score_rate(rows),
+        by_league=_per_group(rows, rows["League"], prob_cols, actual_col),
         calibration=[
             CalibrationBin(**row)
             for row in calibration_table(actual, probs).drop(columns=["gap"]).to_dict("records")
