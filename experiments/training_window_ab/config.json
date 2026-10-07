@@ -1,0 +1,18 @@
+{
+  "generated_at": "2026-10-07T14:25:17.798297+00:00",
+  "arms": {
+    "A_all_history": "all",
+    "B_from_1415": 1415
+  },
+  "start_season": 1516,
+  "xg_era_start": 1415,
+  "n_bootstrap": 10000,
+  "primary_endpoint": "pooled RPS, paired bootstrap, 95% CI excluding zero",
+  "fixture_key": [
+    "League",
+    "Season",
+    "Date",
+    "HomeTeam",
+    "AwayTeam"
+  ]
+}

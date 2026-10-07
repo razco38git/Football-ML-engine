@@ -55,8 +55,24 @@ def run_backtest(
     use_dixon_coles: bool = True,
     odds: pd.DataFrame | None = None,
     calibrate: bool = True,
+    train_from: int | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Walk forward one season at a time.
+
+    Args:
+        features: The built feature table.
+        start_season: First season to predict; everything earlier is
+            training-only.
+        use_dixon_coles: Apply the low-score correction.
+        odds: Closing prices, merged into the output and used for the market
+            benchmark. Never a model input.
+        calibrate: Temperature-scale using accumulated out-of-sample predictions.
+        train_from: Oldest season the model may **train** on, inclusive. ``None``
+            -- the default and what production uses -- means every earlier
+            season. It never affects which seasons are *tested*, so two runs
+            differing only in this predict identical fixtures and can be paired.
+            Added for the training-window A/B in ``pipelines.training_window_ab``;
+            see ``EXPERIMENTS.md``.
 
     Returns:
         ``(per_season_metrics, predictions)`` where predictions carries the
@@ -78,6 +94,8 @@ def run_backtest(
 
     for season in test_seasons:
         train = features[features["Season"] < season]
+        if train_from is not None:
+            train = train[train["Season"] >= train_from]
         test = features[features["Season"] == season]
         if train.empty or test.empty:
             continue

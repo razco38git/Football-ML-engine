@@ -1,0 +1,14 @@
+Building the production feature table ...
+A_all_history    RPS 0.19918  acc 0.5294  median train rows  19072  207s
+B_from_1415      RPS 0.20007  acc 0.5255  median train rows  11768  121s
+
+=== paired bootstrap (negative favours arm B) ===
+  PRIMARY pooled               n=20013  delta +0.00090 [+0.00047, +0.00133]  SIGNIFICANT
+  secondary early 1516-1920    n= 9029  delta +0.00141 [+0.00058, +0.00223]  SIGNIFICANT
+  secondary late 2021-2627     n=10984  delta +0.00048 [+0.00009, +0.00087]  SIGNIFICANT
+
+Verdict on the primary endpoint: REJECT: keep production (arm A)
+
+     rps  log_loss    brier  accuracy     n           arm train_from  median_train_rows  seconds
+0.199176  0.980907 0.583937  0.529406 20013 A_all_history        all              19072    207.4
+0.200075  0.983729 0.585895  0.525508 20013   B_from_1415       1415              11768    121.0

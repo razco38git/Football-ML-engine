@@ -25,6 +25,20 @@ def _one_hot(y: np.ndarray | pd.Series) -> np.ndarray:
     return np.column_stack([(y == o).astype("float64") for o in OUTCOMES])
 
 
+def rps_per_match(y_true: np.ndarray | pd.Series, probs: np.ndarray) -> np.ndarray:
+    """RPS for each fixture separately, as a ``(n,)`` array. Lower is better.
+
+    Split out from :func:`ranked_probability_score` so the pooled score and the
+    paired bootstrap cannot drift apart: there is one definition of RPS and the
+    mean of this *is* the headline number. Comparing two models needs the
+    per-match values rather than the mean -- see :func:`paired_bootstrap`.
+    """
+    obs = _one_hot(y_true)
+    cum_pred = np.cumsum(probs, axis=1)[:, :-1]
+    cum_obs = np.cumsum(obs, axis=1)[:, :-1]
+    return np.sum((cum_pred - cum_obs) ** 2, axis=1) / (len(OUTCOMES) - 1)
+
+
 def ranked_probability_score(y_true: np.ndarray | pd.Series, probs: np.ndarray) -> float:
     """Mean RPS over ordered outcomes. Lower is better.
 
@@ -32,10 +46,66 @@ def ranked_probability_score(y_true: np.ndarray | pd.Series, probs: np.ndarray) 
     football, and a naive base-rate forecast around 0.22. A model in the low 0.20s
     is doing real work; anything below ~0.19 deserves a hard look for leakage.
     """
-    obs = _one_hot(y_true)
-    cum_pred = np.cumsum(probs, axis=1)[:, :-1]
-    cum_obs = np.cumsum(obs, axis=1)[:, :-1]
-    return float(np.mean(np.sum((cum_pred - cum_obs) ** 2, axis=1) / (len(OUTCOMES) - 1)))
+    return float(np.mean(rps_per_match(y_true, probs)))
+
+
+def paired_bootstrap(
+    baseline: np.ndarray,
+    variant: np.ndarray,
+    n_boot: int = 10_000,
+    seed: int = 7,
+    alpha: float = 0.05,
+) -> dict[str, float | bool | int]:
+    """Bootstrap the mean per-match difference between two sets of scores.
+
+    **Pairing is the whole point.** Football matches differ enormously in how
+    predictable they are, and that between-match variance swamps the difference
+    between two models: an unpaired comparison of two models 0.001 apart cannot
+    resolve it. Resampling *fixtures* and differencing within each one cancels
+    the shared difficulty, which is what makes an effect that small measurable.
+
+    Both arrays must be per-match scores for **the same fixtures in the same
+    order**, which is checked. Any lower-is-better score works; this project
+    uses :func:`rps_per_match`.
+
+    Args:
+        baseline: Per-match scores for the reference model.
+        variant: Per-match scores for the model being tested.
+        n_boot: Bootstrap resamples.
+        seed: Fixed so a reported interval can be reproduced exactly.
+        alpha: ``0.05`` gives a 95% interval.
+
+    Returns:
+        ``delta`` (mean ``variant - baseline``, so negative favours the variant),
+        ``lo``/``hi`` percentile bounds, ``excludes_zero`` -- the only thing that
+        licenses the word "better" -- and ``n``.
+    """
+    baseline = np.asarray(baseline, dtype="float64")
+    variant = np.asarray(variant, dtype="float64")
+    if baseline.shape != variant.shape:
+        raise ValueError(
+            f"paired bootstrap needs matched fixtures; got {baseline.shape} and {variant.shape}"
+        )
+    if baseline.ndim != 1:
+        raise ValueError(f"expected per-match 1-D scores, got shape {baseline.shape}")
+
+    diff = variant - baseline
+    n = diff.size
+    rng = np.random.default_rng(seed)
+    # One (n_boot, n) index draw would be 10000 x 20013 int64 = 1.6GB. Summing
+    # per-resample keeps it to one row at a time.
+    means = np.empty(n_boot, dtype="float64")
+    for b in range(n_boot):
+        means[b] = diff[rng.integers(0, n, n)].mean()
+
+    lo, hi = np.percentile(means, [100 * alpha / 2, 100 * (1 - alpha / 2)])
+    return {
+        "delta": float(diff.mean()),
+        "lo": float(lo),
+        "hi": float(hi),
+        "excludes_zero": bool(lo > 0.0 or hi < 0.0),
+        "n": int(n),
+    }
 
 
 def log_loss(y_true: np.ndarray | pd.Series, probs: np.ndarray, eps: float = 1e-15) -> float:

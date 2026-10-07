@@ -39,3 +39,7 @@ Thumbs.db
 
 # Weekly refresh logs
 logs/
+
+# Ablation-ladder per-match predictions: ~7MB, derived, and exactly
+# reproducible by re-running (random_state is fixed).
+experiments/ablation_ladder/predictions.csv.gz

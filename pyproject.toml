@@ -33,6 +33,14 @@ model = [
     "lightgbm>=4.3",
     "shap>=0.45",
 ]
+# Plotting for the one-off measurement harnesses under `footballml.experiments`.
+# Not core: nothing the site serves draws a chart server-side -- the web app
+# renders its own inline SVG -- so matplotlib is only ever needed by someone
+# re-running an experiment, and `pipelines.ablation_ladder` degrades to writing
+# the CSVs without it rather than failing.
+experiments = [
+    "matplotlib>=3.8",
+]
 api = [
     "fastapi>=0.111",
     "uvicorn[standard]>=0.30",

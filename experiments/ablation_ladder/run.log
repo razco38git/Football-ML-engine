@@ -1,0 +1,48 @@
+Building the production feature table ...
+235 features: base=6  elo=3  form=120  xg=94  squad=12
+
+=== ladder ===
+base                       6 features  RPS 0.22988 (raw 0.23006)  acc 0.4402  17s
+base+elo                   9 features  RPS 0.20121 (raw 0.20115)  acc 0.5249  21s
+base+elo+form            129 features  RPS 0.19947 (raw 0.19943)  acc 0.5290  56s
+base+elo+form+xg         223 features  RPS 0.19933 (raw 0.19925)  acc 0.5289  121s
+base+elo+form+xg+squad   235 features  RPS 0.19918 (raw 0.19910)  acc 0.5294  125s
+full                     235 features  RPS 0.19918 (raw 0.19910)  acc 0.5294  126s
+
+=== leave-one-family-out from full ===
+full-minus-elo           232 features  RPS 0.19970 (raw 0.19962)  acc 0.5262  137s
+full-minus-form          115 features  RPS 0.19982 (raw 0.19963)  acc 0.5270  59s
+full-minus-xg            141 features  RPS 0.19907 (raw 0.19904)  acc 0.5294  62s
+full-minus-squad         223 features  RPS 0.19933 (raw 0.19925)  acc 0.5289  133s
+
+=== paired bootstraps ===
+  [marginal    ] base -> base+elo                           delta -0.02867 [-0.03041, -0.02691] SIGNIFICANT
+  [marginal    ] base+elo -> base+elo+form                  delta -0.00175 [-0.00239, -0.00109] SIGNIFICANT
+  [marginal    ] base+elo+form -> base+elo+form+xg          delta -0.00014 [-0.00049, +0.00023] not significant
+  [marginal    ] base+elo+form+xg -> base+elo+form+xg+squad delta -0.00015 [-0.00032, +0.00001] not significant
+  [marginal    ] base+elo+form+xg+squad -> full             delta +0.00000 [+0.00000, +0.00000] not significant
+  [vs_base     ] base -> base+elo                           delta -0.02867 [-0.03041, -0.02691] SIGNIFICANT
+  [vs_base     ] base -> base+elo+form                      delta -0.03041 [-0.03218, -0.02862] SIGNIFICANT
+  [vs_base     ] base -> base+elo+form+xg                   delta -0.03055 [-0.03234, -0.02872] SIGNIFICANT
+  [vs_base     ] base -> base+elo+form+xg+squad             delta -0.03070 [-0.03248, -0.02885] SIGNIFICANT
+  [vs_base     ] base -> full                               delta -0.03070 [-0.03248, -0.02885] SIGNIFICANT
+  [leave_one_out] full vs full-minus-elo                     delta +0.00052 [+0.00018, +0.00086] SIGNIFICANT
+  [leave_one_out] full vs full-minus-form                    delta +0.00064 [+0.00018, +0.00109] SIGNIFICANT
+  [leave_one_out] full vs full-minus-xg                      delta -0.00010 [-0.00045, +0.00023] not significant
+  [leave_one_out] full vs full-minus-squad                   delta +0.00015 [-0.00001, +0.00032] not significant
+
+Wrote results.csv, bootstrap_results.csv, per_season.csv, config.json
+Wrote rps_ladder.png
+Wrote marginal_contribution.png
+
+                  rung  n_features      rps  rps_uncalibrated  log_loss    brier  accuracy  d_rps_vs_prev  d_rps_vs_base
+                  base           6 0.229878          0.230060  1.071651 0.648091  0.440214            NaN       0.000000
+              base+elo           9 0.201212          0.201148  0.987199 0.588366  0.524859      -0.028666      -0.028666
+         base+elo+form         129 0.199467          0.199427  0.981867 0.584596  0.528956      -0.001745      -0.030412
+      base+elo+form+xg         223 0.199330          0.199252  0.981409 0.584327  0.528856      -0.000137      -0.030548
+base+elo+form+xg+squad         235 0.199176          0.199098  0.980907 0.583937  0.529406      -0.000154      -0.030702
+                  full         235 0.199176          0.199098  0.980907 0.583937  0.529406       0.000000      -0.030702
+        full-minus-elo         232 0.199696          0.199616  0.982583 0.585064  0.526158            NaN            NaN
+       full-minus-form         115 0.199816          0.199633  0.982931 0.585333  0.526957            NaN            NaN
+         full-minus-xg         141 0.199075          0.199038  0.980752 0.583723  0.529406            NaN            NaN
+      full-minus-squad         223 0.199330          0.199252  0.981409 0.584327  0.528856            NaN            NaN
