@@ -489,11 +489,47 @@ Paired bootstrap, 10,000 resamples; **positive favours arm A**:
 
 **Verdict: rejected. Production keeps all history.**
 
+## Per season
+
+The pooled figure above is a weighted mean of these, and reproduces from them to
+5.3e-17 — so the table and the headline cannot disagree.
+
+| season | n | A (all) | B (1415) | Δ | A train | B train | B keeps |
+|---|---|---|---|---|---|---|---|
+| 1516 | 1826 | 0.2059 | 0.2079 | **+0.00196** | 9,130 | 1,826 | 20% |
+| 1617 | 1826 | 0.1952 | 0.1972 | **+0.00201** | 10,956 | 3,652 | 33% |
+| 1718 | 1826 | 0.1951 | 0.1954 | +0.00025 | 12,782 | 5,478 | 43% |
+| 1819 | 1826 | 0.1964 | 0.1975 | +0.00109 | 14,608 | 7,304 | 50% |
+| 1920 | 1725 | 0.2034 | 0.2052 | **+0.00175** | 16,434 | 9,130 | 56% |
+| 2021 | 1826 | 0.2023 | 0.2031 | +0.00080 | 18,159 | 10,855 | 60% |
+| 2122 | 1826 | 0.2003 | 0.2003 | −0.00001 | 19,985 | 12,681 | 63% |
+| 2223 | 1826 | 0.2019 | 0.2021 | +0.00016 | 21,811 | 14,507 | 67% |
+| 2324 | 1752 | 0.1927 | 0.1931 | +0.00048 | 23,637 | 16,333 | 69% |
+| 2425 | 1752 | 0.1973 | 0.1975 | +0.00017 | 25,389 | 18,085 | 71% |
+| 2526 | 1752 | 0.1999 | 0.2012 | +0.00128 | 27,141 | 19,837 | 73% |
+| 2627 | 250 | 0.2027 | 0.2033 | +0.00059 | 28,893 | 21,589 | 75% |
+
+**Eleven of twelve seasons are worse under arm B**, and the twelfth is tied at
+−0.00001. Sign test, two-sided: **p = 0.0063**.
+
+Note what the last three columns show. Arm B always discards exactly the same
+**7,304 rows** — seasons 1011–1314, four times 1,826 — so the absolute loss is
+constant while the *share* it represents falls from 80% of the training set in
+1516 to 25% by 2627.
+
+The harm falls roughly in step: mean Δ is **+0.00131** across the first six
+seasons against **+0.00045** across the last six. Spearman between the harm and
+the share of rows kept is **−0.47**, the direction the row-loss explanation
+predicts — but **p = 0.124**, so with twelve seasons this is suggestive and not
+established, and it is reported as such.
+
 ## Interpretation
 
 **The hypothesis was wrong, and not marginally.** Arm B is worse on every metric
 and in every subset, including the late era where xG is fully mature and arm B
-discards almost nothing. That last row is the one that settles it: if pre-xG rows
+discards almost nothing. The per-season table makes that a stronger claim than a
+single interval can: eleven of twelve seasons move the same way, so the verdict
+cannot be the work of one unusual season. That last row is the one that settles it: if pre-xG rows
 were harmful, dropping them should have helped most where their absence costs
 least, and instead it still hurt by +0.00048 with an interval clear of zero.
 
