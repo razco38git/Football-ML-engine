@@ -22,9 +22,14 @@ result:
 
 | | RPS | Accuracy |
 |---|---|---|
-| always pick home | 0.2299 | 44.1% |
+| base rate | 0.2299 | 44.1% |
 | **this model** | **0.1992** | **52.9%** |
 | the bookmakers | 0.1950 | 53.9% |
+
+The baseline is the **base-rate forecast** — the long-run 44/25/31 split on
+every fixture. Its accuracy is the same as always picking the home side, because
+home is always its most likely outcome, but its RPS is that of the whole
+distribution and is the number worth beating.
 
 **8.9 points of accuracy above the baseline**, covering **88%** of the distance
 from guessing to the bookmaker benchmark — which stays 0.0042 RPS ahead, and is
@@ -120,6 +125,13 @@ published number comes from. Each constant, the formula it sits in, and the
 measurement that chose it — including the ones that argued against the change
 they justify.
 
+**[`EXPERIMENTS.md`](EXPERIMENTS.md)** is what the model's predictive power
+actually rests on, measured rather than asserted: an ablation ladder over every
+feature family, a Shapley attribution over all sixteen coalitions, and two
+hypotheses that were tested and rejected. It opens with the difference between
+sufficiency, attribution and necessity, because confusing those is how the first
+version of its own headline came out wrong.
+
 Two conventions worth knowing before opening anything:
 
 **Every feature describes what was knowable before kick-off**, and it is
@@ -138,7 +150,7 @@ it sits beside.
 ## Testing
 
 ```powershell
-python -m pytest -q          # 404 tests
+python -m pytest -q          # 460 tests
 python -m ruff check .
 cd web; npx tsc --noEmit
 ```

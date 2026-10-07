@@ -78,6 +78,16 @@ DEFAULT_GBM_PARAMS: dict[str, Any] = {
     "min_samples_leaf": 40,
     "l2_regularization": 1.0,
     "early_stopping": False,
+    # Inert at this data size, and worth knowing rather than assuming: sklearn
+    # uses `random_state` only to subsample when choosing bin thresholds, and
+    # only above 200,000 rows. Training has 25-29k, so nothing is subsampled and
+    # the fit is deterministic -- seeds 7, 123 and 999 give bit-identical
+    # predictions (`np.array_equal` true, max abs difference 0.0).
+    #
+    # Two consequences. Every experiment under `experiments/` reproduces exactly
+    # rather than approximately, which is why their write-ups can claim
+    # bit-identical reruns. And a multi-seed robustness check would print the
+    # same number five times: there is no estimator randomness here to estimate.
     "random_state": 7,
 }
 

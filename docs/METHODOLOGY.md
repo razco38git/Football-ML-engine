@@ -262,6 +262,15 @@ Draw probability against outcome, which is the bin most likely to hide a fudge:
 
 1. **Base rate** — the training-set frequencies, 44.1 / 25.1 / 30.8, on every
    match. Anything that cannot beat this has learned nothing.
+
+   Two conventions for this number appear in the project and differ in the
+   fourth decimal. **0.2299** is one global base rate fitted over all 20,013
+   matches, which is what the README headline quotes. **0.2301** is what
+   `run_backtest` records: each season's baseline comes from *that season's*
+   training set, pooled by match count, so it is the honest walk-forward
+   version and is what `EXPERIMENTS.md` reports. Neither is wrong; they answer
+   "what is the base rate" and "what would a base-rate forecaster have scored
+   walking forward".
 2. **Always home** — accuracy 44.06%. An accuracy baseline only; it has no
    distribution to score.
 3. **Bookmaker closing odds**, de-vigged by proportional normalisation of
@@ -542,7 +551,7 @@ build, both goal models averaged. **235 features.**
 | xG family | 21.3% |
 | Squad strength (12 columns) | 5.9% |
 | Pressing / PPDA | 1.8% |
-| Rest / congestion | 0.7% |
+| Rest / congestion | 0.9% |
 | Weakest 100 features combined | 6.2% |
 
 `elo_diff` carries ten times the next feature. The share moves with the sample —

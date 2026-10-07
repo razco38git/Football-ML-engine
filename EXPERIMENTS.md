@@ -417,11 +417,13 @@ signal — that makes a per-player perturbation meaningless.
 3. **Families are groups of columns, not of information.** Dropping `xg` leaves
    `form`, which still carries shots and results — a correlated, coarser view of
    the same matches. No ablation here isolates a *concept*, only a source.
-4. **One data vintage, one seed.** Boosting is deterministic given
-   `random_state`, so re-running reproduces these numbers exactly, but the
-   experiment does not estimate seed-to-seed variation. Differences comparable to
-   seed noise should be treated with the same caution the intervals already
-   impose.
+4. **One data vintage — but there is no seed variance to worry about.**
+   `random_state` is *inert* at this data size: sklearn uses it only to
+   subsample when choosing bin thresholds, and only above 200,000 rows, where
+   training has 25–29k. Seeds 7, 123 and 999 give bit-identical predictions.
+   So re-running reproduces every number here exactly rather than approximately,
+   and a multi-seed robustness check would print the same figure five times. The
+   remaining vintage caveat is the data, not the estimator.
 5. **The test fixtures are shared with every other decision in this project.**
    These 20,013 matches have now been used to accept or reject many changes, so
    the usual multiple-comparisons caveat applies to the collection of findings,
@@ -673,6 +675,42 @@ About 30 minutes for 16 walk-forward runs. Outputs to
 3. **Hyperparameters fixed to production** for all 16 coalitions, as in the
    ladder. A 9-feature coalition runs a budget tuned for 235.
 4. **Same shared test set** as every other decision here.
+
+---
+
+# What a frozen holdout could and could not do
+
+The obvious objection to everything in this file is that these 20,013 matches
+have gated many decisions, so the headline is not an untouched estimate. That is
+correct, and it is the project's real remaining evaluation weakness. The usual
+remedy — freeze the last two seasons, never experiment on them — does not work
+here, and the arithmetic is worth writing down so it is not proposed again.
+
+2025/26 and 2026/27 are **2,002 matches, 10% of the backtest**. Intervals scale
+with 1/sqrt(n), so they widen by sqrt(20013/2002) = **3.16x**. Applying that to
+the effects this project has actually measured:
+
+| change | on 20,013 | on a 2,002-match holdout | |
+|---|---|---|---|
+| GBM retune, the largest ever adopted | −0.00124 [−0.00158, −0.00090] | [−0.00231, −0.00017] | still clears |
+| `form`, ladder step | −0.00175 [−0.00239, −0.00109] | [−0.00381, +0.00031] | **does not clear** |
+| xG, late era | −0.00097 [−0.00141, −0.00050] | [−0.00241, +0.00047] | **does not clear** |
+
+So a frozen historical holdout could confirm the headline RPS and almost nothing
+else. It could not have adjudicated two of this project's three largest
+findings, and it would cost two seasons of training data to buy that.
+
+**The project already has the better instrument, and it is prospective rather
+than merely unused.** `store.py` is append-only, stamped with the model version
+and never rewritten, so a prediction cannot be regenerated after the fact. That
+is a stronger guarantee than an untouched historical slice, because the matches
+had not been played when the forecast was recorded.
+
+Its limitation is sample, not design: **16 settled predictions**, first recorded
+2026-09-15. At roughly 50–60 settled matches a week in season it needs most of a
+season to say anything useful about the headline, and it will never resolve a
+0.0001-level change. That is a reason to keep recording and wait, not a reason
+to carve up history.
 
 ---
 

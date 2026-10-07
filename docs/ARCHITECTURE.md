@@ -84,21 +84,40 @@ football has more 0-0 and 1-1 draws than independence predicts. A single fitted
 ### Features, and what actually drives them
 
 235 columns: 107 rolling windows over five matches, 107 over nineteen, three
-Elo, twelve squad strength, six other. Measured by mean absolute SHAP, in goals:
+Elo, twelve squad strength, six other. Measured by mean absolute SHAP over the
+last 2,000 complete rows of the feature build, both goal models averaged:
 
 ```
-Expected goals (xG/npxG)   76 features   21.7%
-Elo rating                  3 features   20.1%   <- elo_diff alone is 17.9%
-Shots                      16 features   12.0%
-Shots on target            18 features   11.8%
-Goals scored/conceded      20 features    8.0%
-Squad ratings              12 features    5.2%
+Elo rating                   3 features   26.9%   <- elo_diff alone is 24.3%
+Expected goals (xG/npxG)    76 features   21.3%
+Shots / accuracy            26 features   13.4%
+Shots on target             18 features   12.2%
+Goals scored/conceded       32 features    8.1%
+Deep completions             8 features    6.4%
+Squad ratings               12 features    5.9%
+Points / W-D-L              36 features    2.2%
+Pressing (PPDA)             10 features    1.8%
+Rest & congestion            5 features    0.9%
+League, window metadata      9 features    0.8%
 ```
 
-`elo_diff` is eight times the next single feature. It is not magic: it is the
+Quote the sample with the figure: these shares move with it, and an earlier
+measurement over a different period put `elo_diff` at 17.9% rather than 24.3%.
+
+`elo_diff` is ten times the next single feature. It is not magic: it is the
 elected representative of a cluster. It correlates 0.90 with 19-match goal
 difference and 0.85 with squad strength, and gradient boosting picks one feature
 from a correlated group and leaves the others unused.
+
+**This table is not an attribution of predictive power**, and the difference
+matters enough that it has its own section in
+[`../EXPERIMENTS.md`](../EXPERIMENTS.md). SHAP measures how much *this fitted
+model's output* moves with a feature. It does not measure how much performance
+that feature is responsible for, and under redundancy the two come apart badly:
+squad ratings are 5.9% here and 19.8% of the attributed gain when the families
+are compared properly, because alone they recover 76% of what the full model
+achieves. Four of these families are substitutable views of the same match
+results, and `EXPERIMENTS.md` measures what each is actually worth.
 
 **Bookmaker odds are deliberately absent.** They are the strongest single
 predictor available and are kept strictly as an evaluation benchmark, because a
