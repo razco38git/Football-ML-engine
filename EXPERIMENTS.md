@@ -346,6 +346,11 @@ both halves clear zero individually; and the two independent comparisons agree i
 sign and rough magnitude. It should still be confirmed on data this experiment
 has not touched before it is leaned on.
 
+Both measurements were subsequently rerun on the late era alone — see the final
+section — where xG passes the ladder *and* the leave-one-out test, both clear of
+zero. That is a stronger result than the pooled one, and it is **still the same
+matches**, so it does not discharge this caveat.
+
 **The practical reading: xG earns its place in the only era that matters.** In
 the recent half, adding it is worth −0.00097 — comparable to the entire `form`
 family's pooled marginal contribution (−0.00175) and *larger* than the GBM
@@ -668,3 +673,115 @@ About 30 minutes for 16 walk-forward runs. Outputs to
 3. **Hyperparameters fixed to production** for all 16 coalitions, as in the
    ladder. A 9-feature coalition runs a budget tuned for 235.
 4. **Same shared test set** as every other decision here.
+
+---
+
+# The same two measurements, on the xG era only
+
+**Purpose.** The ladder found xG's contribution is not constant across the
+backtest — significantly harmful in 1516–1920, significantly helpful from 2021.
+If that is right, both the ladder and the Shapley attribution should look
+different when the test set is restricted to the modern era, and the ladder
+should change more than the Shapley.
+
+**Design.** Training is left exactly as production: all history from 1011. The
+training-window A/B already showed that restricting it is significantly worse,
+so the only change here is which seasons are *tested* — 2021 onward, 10,984
+matches, the same split used for the era analysis above. Everything else is
+untouched.
+
+```bash
+python -m pipelines.ablation_ladder   --start-season 2021 --out-dir experiments/ablation_ladder_xg_era
+python -m pipelines.shapley_families  --start-season 2021 --out-dir experiments/shapley_families_xg_era
+```
+
+## Ladder
+
+| rung | features | RPS | Δ vs previous | |
+|---|---|---|---|---|
+| `base` | 6 | 0.231043 | — | |
+| `+elo` | 9 | 0.202262 | **−0.02878** [−0.03101, −0.02657] | significant |
+| `+form` | 129 | 0.200230 | **−0.00203** [−0.00280, −0.00125] | significant |
+| `+xg` | 223 | 0.199260 | **−0.00097** [−0.00141, −0.00050] | **significant** |
+| `+squad` | 235 | 0.199212 | −0.00005 [−0.00028, +0.00018] | — |
+
+Leave-one-out: `elo` **+0.00055** [+0.00012, +0.00097] significant, `xg`
+**+0.00052** [+0.00010, +0.00093] significant, `form` +0.00039 [−0.00008,
++0.00087] not significant, `squad` +0.00005 [−0.00018, +0.00028] not
+significant.
+
+## xG, the two eras side by side
+
+| | full backtest (20,013) | xG era (10,984) |
+|---|---|---|
+| ladder `+xg` step | −0.00014 [−0.00049, +0.00023] — | **−0.00097** [−0.00141, −0.00050] **significant** |
+| leave-one-out `xg` | −0.00010 [−0.00045, +0.00023] — | **+0.00052** [+0.00010, +0.00093] **significant** |
+| `full-minus-xg` RPS | **0.199075** (best rung in the experiment) | 0.199731 (against 0.199212 for full) |
+
+Pooled, dropping all 94 xG columns gave the *best* number in the experiment. On
+the modern era the same deletion is clearly harmful, and both tests now agree in
+the same direction. Same features, same code, different test seasons.
+
+## Shapley, the two eras side by side
+
+Efficiency holds in the xG era: the values sum to **0.03183**, the measured total
+gain. All four families significant in both eras.
+
+| family | full backtest | xG era | change |
+|---|---|---|---|
+| `elo` | 26.5% | 25.1% | −1.5 pts |
+| `form` | 28.4% | 26.6% | −1.8 pts |
+| **`xg`** | 25.3% | **27.4%** | **+2.1 pts** |
+| `squad` | 19.8% | 21.0% | +1.2 pts |
+
+Each family alone, as a share of its era's total gain:
+
+| era | `elo` | `form` | `xg` | `squad` |
+|---|---|---|---|---|
+| full backtest | 93% | 96% | 92% | 76% |
+| xG era | 90% | 94% | **95%** | 80% |
+
+## Interpretation
+
+**The era finding holds, and on the measurement that matters it is now
+unambiguous.** In the modern era xG passes both tests — adding it helps,
+removing it hurts, both intervals clear of zero — where pooled it passed
+neither.
+
+**The ladder moved a lot and the Shapley barely moved, which is the point of
+having both.** xG's ladder step went from indistinguishable from zero to
+significant, a roughly sevenfold change in the point estimate; its Shapley share
+moved 2.1 points. They are measuring different things, exactly as the opening
+section says:
+
+- the **ladder** measures marginal value *in the model as built*, which depends
+  on what else is available and on the era — so it is the number that should
+  move, and does;
+- the **Shapley** measures a family's share of credit given the redundancy
+  structure, and that structure has not changed, so it should be stable — and is.
+
+**The redundancy is unchanged, if anything slightly stronger.** Every family
+still recovers 80–95% of the gain alone, with xG now essentially tied with form
+as the best single family. So the summary stands: four largely substitutable
+views of match results. What the era changes is *which* of them carries the
+marginal load, not that they overlap.
+
+`+squad` remains non-significant on the ladder in both eras, and significant in
+both Shapley attributions. Nothing about the era split touches the reasoning in
+[`docs/METHODOLOGY.md`](docs/METHODOLOGY.md) §12.
+
+## Limitations
+
+1. **This is not independent confirmation of the era effect.** The split was
+   chosen post-hoc from the pooled run, and this rerun uses the same matches, the
+   same features and the same model. It confirms that the effect is large enough
+   to dominate a measurement restricted to that era — which was not guaranteed —
+   but it cannot confirm the split itself. Only seasons this project has not
+   tested can do that, and by construction they do not exist yet.
+2. **Smaller sample.** 10,984 matches against 20,013, so every interval here is
+   wider than its pooled counterpart. The `+squad` step and `form`'s
+   leave-one-out are both non-significant in this era and significant or
+   near-significant pooled, which is at least partly sample size rather than a
+   finding.
+3. **Hyperparameters remain fixed to production**, as in both parent
+   experiments.

@@ -1,0 +1,31 @@
+{
+  "generated_at": "2026-10-07T16:04:10.686244+00:00",
+  "git_revision": "0d7cb5a543605a33649890f37383abc228a30b01",
+  "players": [
+    "elo",
+    "form",
+    "xg",
+    "squad"
+  ],
+  "floor": [
+    "base"
+  ],
+  "n_coalitions": 16,
+  "start_season": 2021,
+  "quick_mode": false,
+  "n_bootstrap": 10000,
+  "n_matches": 10984,
+  "gbm_params": {
+    "loss": "poisson",
+    "learning_rate": 0.02,
+    "max_iter": 300,
+    "max_leaf_nodes": 15,
+    "min_samples_leaf": 40,
+    "l2_regularization": 1.0,
+    "early_stopping": false,
+    "random_state": 7
+  },
+  "hyperparameters_retuned_per_coalition": false,
+  "value_function": "gain = RPS(base) - RPS(S)",
+  "total_gain": 0.031831625938584296
+}

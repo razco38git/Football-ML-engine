@@ -1,0 +1,97 @@
+Building the production feature table ...
+235 features: base=6  elo=3  form=120  xg=94  squad=12
+
+=== ladder ===
+base                       6 features  RPS 0.23104 (raw 0.23111)  acc 0.4292  9s
+base+elo                   9 features  RPS 0.20226 (raw 0.20219)  acc 0.5239  10s
+base+elo+form            129 features  RPS 0.20023 (raw 0.20021)  acc 0.5264  34s
+base+elo+form+xg         223 features  RPS 0.19926 (raw 0.19924)  acc 0.5274  83s
+base+elo+form+xg+squad   235 features  RPS 0.19921 (raw 0.19919)  acc 0.5268  85s
+full                     235 features  RPS 0.19921 (raw 0.19919)  acc 0.5268  82s
+
+=== leave-one-family-out from full ===
+full-minus-elo           232 features  RPS 0.19977 (raw 0.19974)  acc 0.5249  81s
+full-minus-form          115 features  RPS 0.19961 (raw 0.19955)  acc 0.5276  37s
+full-minus-xg            141 features  RPS 0.19973 (raw 0.19972)  acc 0.5268  39s
+full-minus-squad         223 features  RPS 0.19926 (raw 0.19924)  acc 0.5274  84s
+
+=== paired bootstraps ===
+  [marginal    ] base -> base+elo                           delta -0.02878 [-0.03101, -0.02657] SIGNIFICANT
+  [marginal    ] base+elo -> base+elo+form                  delta -0.00203 [-0.00280, -0.00125] SIGNIFICANT
+  [marginal    ] base+elo+form -> base+elo+form+xg          delta -0.00097 [-0.00141, -0.00050] SIGNIFICANT
+  [marginal    ] base+elo+form+xg -> base+elo+form+xg+squad delta -0.00005 [-0.00028, +0.00018] not significant
+  [marginal    ] base+elo+form+xg+squad -> full             delta +0.00000 [+0.00000, +0.00000] not significant
+  [vs_base     ] base -> base+elo                           delta -0.02878 [-0.03101, -0.02657] SIGNIFICANT
+  [vs_base     ] base -> base+elo+form                      delta -0.03081 [-0.03312, -0.02851] SIGNIFICANT
+  [vs_base     ] base -> base+elo+form+xg                   delta -0.03178 [-0.03416, -0.02941] SIGNIFICANT
+  [vs_base     ] base -> base+elo+form+xg+squad             delta -0.03183 [-0.03421, -0.02944] SIGNIFICANT
+  [vs_base     ] base -> full                               delta -0.03183 [-0.03421, -0.02944] SIGNIFICANT
+  [leave_one_out] full vs full-minus-elo                     delta +0.00055 [+0.00012, +0.00097] SIGNIFICANT
+  [leave_one_out] full vs full-minus-form                    delta +0.00039 [-0.00008, +0.00087] not significant
+  [leave_one_out] full vs full-minus-xg                      delta +0.00052 [+0.00010, +0.00093] SIGNIFICANT
+  [leave_one_out] full vs full-minus-squad                   delta +0.00005 [-0.00018, +0.00028] not significant
+
+Wrote results.csv, bootstrap_results.csv, per_season.csv, config.json
+Wrote rps_ladder.png
+Wrote marginal_contribution.png
+
+                  rung  n_features      rps  rps_uncalibrated  log_loss    brier  accuracy  d_rps_vs_prev  d_rps_vs_base
+                  base           6 0.231043          0.231109  1.077382 0.652130  0.429170            NaN       0.000000
+              base+elo           9 0.202262          0.202193  0.992936 0.592089  0.523853      -0.028781      -0.028781
+         base+elo+form         129 0.200230          0.200212  0.986400 0.587647  0.526402      -0.002032      -0.030813
+      base+elo+form+xg         223 0.199260          0.199237  0.983251 0.585594  0.527403      -0.000970      -0.031783
+base+elo+form+xg+squad         235 0.199212          0.199188  0.983094 0.585406  0.526766      -0.000049      -0.031832
+                  full         235 0.199212          0.199188  0.983094 0.585406  0.526766       0.000000      -0.031832
+        full-minus-elo         232 0.199766          0.199738  0.985040 0.586633  0.524854            NaN            NaN
+       full-minus-form         115 0.199606          0.199551  0.984383 0.586253  0.527586            NaN            NaN
+         full-minus-xg         141 0.199731          0.199719  0.984896 0.586496  0.526766            NaN            NaN
+      full-minus-squad         223 0.199260          0.199237  0.983251 0.585594  0.527403            NaN            NaN
+Building the production feature table ...
+16 coalitions over ['elo', 'form', 'xg', 'squad'], floor ['base']
+
+   1/16  (base only)                  6 features  RPS 0.23104  15s
+   2/16  elo                          9 features  RPS 0.20226  16s
+   3/16  form                       126 features  RPS 0.20109  40s
+   4/16  xg                         100 features  RPS 0.20078  43s
+   5/16  squad                       18 features  RPS 0.20562  21s
+   6/16  elo+form                   129 features  RPS 0.20023  89s
+   7/16  elo+xg                     103 features  RPS 0.19981  75s
+   8/16  elo+squad                   21 features  RPS 0.20154  38s
+   9/16  form+xg                    220 features  RPS 0.20030  79s
+  10/16  form+squad                 138 features  RPS 0.20015  37s
+  11/16  xg+squad                   112 features  RPS 0.19999  36s
+  12/16  elo+form+xg                223 features  RPS 0.19926  115s
+  13/16  elo+form+squad             141 features  RPS 0.19973  66s
+  14/16  elo+xg+squad               115 features  RPS 0.19961  69s
+  15/16  form+xg+squad              232 features  RPS 0.19977  89s
+  16/16  elo+form+xg+squad          235 features  RPS 0.19921  80s
+
+Efficiency holds: the four values sum to the total gain, 0.03183
+
+=== Shapley values (RPS gain over the base rung) ===
+  elo    +0.00798 [+0.00726, +0.00870]   25.1%  SIGNIFICANT
+  form   +0.00847 [+0.00768, +0.00927]   26.6%  SIGNIFICANT
+  xg     +0.00871 [+0.00790, +0.00952]   27.4%  SIGNIFICANT
+  squad  +0.00668 [+0.00603, +0.00734]   21.0%  SIGNIFICANT
+Wrote shapley_values.png
+
+Wrote coalitions.csv, shapley.csv, config.json
+
+        coalition  size  n_features      rps     n  seconds
+      (base only)     0           6 0.231043 10984     14.8
+              elo     1           9 0.202262 10984     16.4
+             form     1         126 0.201093 10984     40.2
+               xg     1         100 0.200783 10984     43.2
+            squad     1          18 0.205622 10984     20.5
+         elo+form     2         129 0.200230 10984     89.1
+           elo+xg     2         103 0.199815 10984     75.1
+        elo+squad     2          21 0.201542 10984     37.9
+          form+xg     2         220 0.200303 10984     78.9
+       form+squad     2         138 0.200148 10984     37.1
+         xg+squad     2         112 0.199986 10984     36.2
+      elo+form+xg     3         223 0.199260 10984    114.7
+   elo+form+squad     3         141 0.199731 10984     65.6
+     elo+xg+squad     3         115 0.199606 10984     69.4
+    form+xg+squad     3         232 0.199766 10984     89.0
+elo+form+xg+squad     4         235 0.199212 10984     79.6
+ALL_DONE
