@@ -857,6 +857,70 @@ def _match_across_editions(
     return merged
 
 
+def _match_by_token_set(
+    piece: pd.DataFrame, edition: pd.DataFrame, columns: list[str], season: str
+) -> pd.DataFrame:
+    """The same name tokens in a different order.
+
+    The exact pass compares normalised names as strings, so it fails the moment
+    a source puts the family name on the other end. Understat writes Son
+    Heung-Min; EA writes "Heung Min Son". Identical tokens, no match.
+
+    That alone would only cost a rating. What made it worth a tier of its own is
+    what filled the gap: with no exact match, a later tier matched him to **Son
+    Seung Min**, a different player rated 49, and blended that into his 2024/25
+    rating -- published 66 against a performance rating of 84.3, while the right
+    entry sat in the same file at 87. Korean and Japanese names carry most of
+    these, because romanisation varies the order and the hyphenation.
+
+    So this runs *before* the loose tiers rather than after. An identical set of
+    name tokens is the strongest evidence short of an identical string, and the
+    only way to stop a weaker tier spending the row on the wrong man.
+
+    Only unambiguous keys are used. Two men whose names are anagrams of each
+    other are left to the tiers below, which have the club to lean on.
+    """
+    if "fifa_overall" not in piece.columns:
+        return piece
+    missing = piece["fifa_overall"].isna()
+    if not missing.any():
+        return piece
+
+    def key(name: object) -> str | None:
+        tokens = normalise_name(name).split() if isinstance(name, str) else []
+        # One token is not a name order, it is a nickname -- `_match_loosely`
+        # has the club-aware tiers for those.
+        return " ".join(sorted(tokens)) if len(tokens) > 1 else None
+
+    theirs = edition.assign(_set=edition["fifa_name"].map(key)).dropna(subset=["_set"])
+    counts = theirs["_set"].value_counts()
+    lookup = theirs[theirs["_set"].isin(counts[counts == 1].index)].set_index("_set")
+
+    ours = piece.loc[missing, "Player"].map(key)
+    found = ours.map(lambda k: k if k in lookup.index else None).dropna()
+    if found.empty:
+        return piece
+
+    filled = 0
+    for index, set_key in found.items():
+        row = lookup.loc[set_key]
+        if "position_group" in piece.columns and contradicts_position(
+            piece.at[index, "position_group"], row.get("role")
+        ):
+            continue
+        for column in columns:
+            if column in row.index:
+                piece.at[index, column] = row[column]
+        filled += 1
+
+    if filled:
+        logger.info(
+            "  %s: %d matched on the same name tokens in a different order",
+            season, filled,
+        )
+    return piece
+
+
 def _attach_per_season(
     players: pd.DataFrame, fifa: pd.DataFrame, columns: list[str]
 ) -> pd.DataFrame:
@@ -910,6 +974,11 @@ def _attach_per_season(
                     "  %s: %d exact name match(es) cleared, the EA entry plays "
                     "a position the player cannot", season, sum(wrong),
                 )
+        # Before the loose tiers, not after: an identical set of name tokens
+        # beats every heuristic below it, and running it later let a weaker
+        # tier spend the row on the wrong man first. See `_match_by_token_set`.
+        piece = _match_by_token_set(piece, edition, columns, season)
+
         # Twice, deliberately. `_match_loosely` learns what EA calls each club
         # from the matches made so far, and on the first call that is the
         # exact-name pass alone -- the pass Spanish squads fail, because EA

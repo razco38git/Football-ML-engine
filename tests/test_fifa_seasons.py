@@ -912,3 +912,78 @@ def test_a_player_with_no_ea_entry_is_left_to_the_fallback():
     )
 
     assert attach_fifa(players, export)["role"].iloc[0] == "CB"
+
+
+# --- the same name, written in the other order -----------------------------
+
+
+def test_a_reversed_name_order_matches_the_right_player():
+    """Understat writes Son Heung-Min; EA writes "Heung Min Son".
+
+    Identical tokens, no exact string match. On its own that would cost a
+    rating. What made it worth its own tier is what filled the gap: a later
+    tier matched him to *Son Seung Min*, a different player rated 49, and
+    blended that in -- 2024/25 published 66 against a performance rating of
+    84.3, while the right entry sat in the same file at 87.
+    """
+    export = _export(
+        [
+            {"fifa_name": "Heung Min Son", "fifa_overall": 87.0, "Season": "2425"},
+            {"fifa_name": "Son Seung Min", "fifa_overall": 49.0, "Season": "2425"},
+        ]
+    )
+    players = pd.DataFrame(
+        {
+            "Player": ["Son Heung-Min"],
+            "Season": ["2425"],
+            "season_position": ["F"],
+            "position_group": ["F"],
+        }
+    )
+
+    out = attach_fifa(players, export)
+
+    assert out["fifa_overall"].iloc[0] == 87.0, "matched the wrong Korean player"
+
+
+def test_an_anagram_of_two_players_is_left_to_the_club_tiers():
+    """Ambiguity is not a licence to guess.
+
+    If two EA entries reduce to the same set of tokens, the set says nothing
+    about which man this is, and the tiers below have the club to lean on.
+    """
+    export = _export(
+        [
+            {"fifa_name": "Lee Jae Sung", "fifa_overall": 78.0, "Season": "2425"},
+            {"fifa_name": "Jae Sung Lee", "fifa_overall": 59.0, "Season": "2425"},
+        ]
+    )
+    players = pd.DataFrame(
+        {
+            "Player": ["Sung Lee Jae"],
+            "Season": ["2425"],
+            "season_position": ["M"],
+            "position_group": ["M"],
+        }
+    )
+
+    assert attach_fifa(players, export)["fifa_overall"].isna().all()
+
+
+def test_the_token_set_never_crosses_the_goalkeeper_boundary():
+    """Same tokens, wrong man: the one boundary that is proof of a different
+    person has to hold here as it does in every other tier."""
+    export = _export(
+        [{"fifa_name": "Min Heung Son", "fifa_overall": 87.0, "Season": "2425",
+          "role": "FWD"}]
+    )
+    players = pd.DataFrame(
+        {
+            "Player": ["Son Heung Min"],
+            "Season": ["2425"],
+            "season_position": ["GK"],
+            "position_group": ["GK"],
+        }
+    )
+
+    assert attach_fifa(players, export)["fifa_overall"].isna().all()
