@@ -10,6 +10,59 @@ code change.
 
 ---
 
+# Reading an attribution number
+
+**This section exists because the first version of the ablation ladder below was
+reported wrongly, and the mistake is one anybody would make.** It governs how to
+read everything in this file.
+
+The ladder measured Elo at **93.4%** of the model's gain. That number is
+correct, and it is not the answer to "how much of the model's strength comes
+from Elo" — which is what it was presented as. It is the answer to "what does
+Elo add when it is the *first* thing added". Every family recovers ~90% of the
+gain on its own, so whichever went first was always going to post that figure.
+
+Three different questions, three different measurements, all true at once:
+
+| question | measurement | Elo's answer |
+|---|---|---|
+| Is it **sufficient**? | the family alone, against `base` | **93%** of the total gain |
+| What is its **fair share**? | Shapley, over all orderings | **26.5%** |
+| Is it **necessary**? | leave-one-out from the full model | **+0.00052**, about 1.7% |
+
+Elo is nearly sufficient, moderately credited, and barely necessary. Those do not
+conflict: `form`, `xg` and `squad` can each stand in for most of what it does, so
+removing it costs little while having it alone gets you most of the way.
+
+**The general rule: a marginal contribution measured at the end of a nested
+sequence is a lower bound on a family's worth, never its value.** Quoting a
+ladder share as an attribution is the error. This is not a quirk of this project
+— it is the same reason SHAP exists rather than "drop a feature and re-measure".
+
+### Then why run a ladder at all
+
+It answers a question Shapley does not, and the two should not be swapped:
+
+1. **The engineering question.** "I already have Elo and form — is it worth
+   building and maintaining 94 xG columns?" That is marginal contribution, and
+   the ladder's +0.00014 is the right answer. Shapley's 25.3% is the *wrong*
+   answer to it, and would justify work that buys nothing.
+2. **Cost.** The ladder is six runs, leave-one-out four more. Shapley is 2^n —
+   sixteen here, but 256 at eight families. The ladder is the cheap scout.
+3. **Its shape is itself diagnostic.** A steep first step and a flat tail *is* a
+   redundancy signature; complementary families would descend steadily. The
+   right reaction to "rung one takes 93% and the rest are flat" is *"would any
+   first family do that?"* — which is the question Shapley answers, and which
+   should have been asked before the 93.4% was written down as a headline.
+4. **Diminishing returns are real.** The ladder correctly shows the model is
+   saturated after the first family, which is what decides where to stop.
+
+So: the ladder for *what to build next*, leave-one-out for *what to delete*,
+Shapley for *what to credit*. Reaching for whichever flatters a family is the
+only way to get this wrong.
+
+---
+
 # Ablation ladder
 
 **Purpose.** The project had three ablations on record and all three were
@@ -303,13 +356,17 @@ It also means the headline backtest number **understates the model as it is
 shipped today**: 0.1992 is pooled across seasons in which the model was
 handicapped by data that did not yet exist.
 
-**`squad` is not significant in either direction**, which is consistent with the
-5.9% of attributed SHAP movement it carries and with the decision recorded in
+**`squad` is not significant in either direction here**, consistent with the 5.9%
+of attributed SHAP movement it carries and with the decision in
 [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md) §12 not to build a player-level
 what-if. Its leave-one-out interval ([−0.00001, +0.00032]) only just includes
 zero, so "too small to resolve at this sample size" is a fairer reading than
-"worthless" — but either way it cannot carry a feature that claims to price
-individual players.
+"worthless".
+
+Read that alongside the Shapley section, which puts `squad` at 19.8% with an
+interval well clear of zero: it carries real information and is redundant with
+the other three. Both facts hold, and it is the *redundancy* — not an absence of
+signal — that makes a per-player perturbation meaningless.
 
 ### Unexpected
 

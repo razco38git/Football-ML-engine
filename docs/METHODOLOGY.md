@@ -549,6 +549,40 @@ build, both goal models averaged. **235 features.**
 an earlier measurement over a different period put it at 18% — so quote the
 sample with the number.
 
+### What this table does and does not say
+
+SHAP measures **how much the fitted model's output moves** with a feature. It
+does not measure how much *predictive performance* that feature is responsible
+for, and under redundancy the two come apart. Both are worth having and they
+answer different questions; see the opening section of
+[`EXPERIMENTS.md`](../EXPERIMENTS.md) for the sufficiency / attribution /
+necessity distinction, which is the thing most easily got wrong here.
+
+Against the family-level Shapley attribution, which retrains for all sixteen
+coalitions and measures gain rather than output sensitivity:
+
+| family | SHAP (this table) | Shapley (performance) |
+|---|---|---|
+| Elo | 26.9% | 26.5% |
+| xG | 21.3% | 25.3% |
+| squad | **5.9%** | **19.8%** |
+
+Elo agreeing to within half a point is reassuring — SHAP is itself a Shapley
+method, over features instead of families — though with four largely
+interchangeable families it should not be over-read.
+
+**The squad gap is the informative one, and it is expected rather than a
+contradiction.** SHAP is conditioned on *one* fitted model, the full one, in
+which Elo, form and xG already supply what squad strength would have said; a
+booster handed four correlated views will lean on whichever it splits on first,
+and the others look idle. The Shapley figure refits without them, and squad then
+reaches 76% of the full model's gain from 18 columns on its own.
+
+So a low SHAP share means "the fitted model does not lean on this", **not**
+"this carries no information". That distinction is why the player-level
+what-if is declined on the leave-one-out number (§12) rather than on this
+table.
+
 **Windows are 5 and 19 matches.** Five alone made the model timid: it could not
 separate a genuinely elite side from one that had won three of five, so it shrank
 every prediction toward 50%. Where the market said 80%+, it said 78% and the home
@@ -613,9 +647,18 @@ The most-requested feature, and the one to keep refusing. "Barcelona without
 Yamal: 84 → 82.1, win probability 61% → 56%" is computable and would mean
 nothing. Four reasons, which compound:
 
-1. **Squad strength is 5.9% of attributed movement.** Removing one player from a
-   minutes-weighted mean of eleven moves a number carrying a twentieth of the
-   model's reasoning.
+1. **Removing squad strength from the full model costs nothing measurable:**
+   +0.00015 RPS, 95% interval [−0.00001, +0.00032], which does not clear zero
+   over 20,013 matches. So perturbing one player's contribution to a
+   minutes-weighted mean of eleven moves an input the model has shown it can
+   lose entirely without the output changing detectably.
+
+   Note this argument deliberately rests on the **leave-one-out** figure, not on
+   squad's 5.9% SHAP share and not on its 19.8% Shapley share. Squad quality
+   does carry real information — alone it reaches 76% of the full model's gain
+   — but it is redundant with Elo, form and xG, and *redundant* is exactly what
+   makes a per-player perturbation meaningless here. See §10 and
+   [`EXPERIMENTS.md`](../EXPERIMENTS.md).
 2. **It enters as a previous-season team aggregate.** The model has never seen a
    lineup. There is no mechanism by which it could know who is playing.
 3. **The counterfactual is not identified.** A player appears in stronger
