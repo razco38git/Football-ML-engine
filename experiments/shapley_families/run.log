@@ -1,0 +1,48 @@
+Building the production feature table ...
+16 coalitions over ['elo', 'form', 'xg', 'squad'], floor ['base']
+
+   1/16  (base only)                  6 features  RPS 0.22988  47s
+   2/16  elo                          9 features  RPS 0.20121  49s
+   3/16  form                       126 features  RPS 0.20036  97s
+   4/16  xg                         100 features  RPS 0.20158  90s
+   5/16  squad                       18 features  RPS 0.20669  59s
+   6/16  elo+form                   129 features  RPS 0.19947  149s
+   7/16  elo+xg                     103 features  RPS 0.20006  103s
+   8/16  elo+squad                   21 features  RPS 0.20110  61s
+   9/16  form+xg                    220 features  RPS 0.20012  195s
+  10/16  form+squad                 138 features  RPS 0.19954  106s
+  11/16  xg+squad                   112 features  RPS 0.20080  105s
+  12/16  elo+form+xg                223 features  RPS 0.19933  206s
+  13/16  elo+form+squad             141 features  RPS 0.19907  97s
+  14/16  elo+xg+squad               115 features  RPS 0.19982  98s
+  15/16  form+xg+squad              232 features  RPS 0.19970  182s
+  16/16  elo+form+xg+squad          235 features  RPS 0.19918  183s
+
+Efficiency holds: the four values sum to the total gain, 0.03070
+
+=== Shapley values (RPS gain over the base rung) ===
+  elo    +0.00815 [+0.00755, +0.00874]   26.5%  SIGNIFICANT
+  form   +0.00873 [+0.00807, +0.00938]   28.4%  SIGNIFICANT
+  xg     +0.00776 [+0.00714, +0.00836]   25.3%  SIGNIFICANT
+  squad  +0.00607 [+0.00559, +0.00653]   19.8%  SIGNIFICANT
+Wrote shapley_values.png
+
+Wrote coalitions.csv, shapley.csv, config.json
+
+        coalition  size  n_features      rps     n  seconds
+      (base only)     0           6 0.229878 20013     47.3
+              elo     1           9 0.201212 20013     49.4
+             form     1         126 0.200359 20013     96.8
+               xg     1         100 0.201585 20013     89.9
+            squad     1          18 0.206690 20013     59.3
+         elo+form     2         129 0.199467 20013    149.5
+           elo+xg     2         103 0.200063 20013    102.7
+        elo+squad     2          21 0.201103 20013     60.6
+          form+xg     2         220 0.200118 20013    195.1
+       form+squad     2         138 0.199544 20013    106.1
+         xg+squad     2         112 0.200799 20013    105.3
+      elo+form+xg     3         223 0.199330 20013    205.5
+   elo+form+squad     3         141 0.199075 20013     97.2
+     elo+xg+squad     3         115 0.199816 20013     97.8
+    form+xg+squad     3         232 0.199696 20013    181.8
+elo+form+xg+squad     4         235 0.199176 20013    183.4

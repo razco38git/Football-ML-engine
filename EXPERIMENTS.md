@@ -221,14 +221,21 @@ all 235 features.
 
 ## Interpretation
 
-**This model is, to a first approximation, a well-tuned Elo rating.** One
-feature family of three columns carries 93.4% of the total improvement over a
-base-rate forecast. The remaining 232 features split the last 6.6% between them.
+> **Superseded in part — read the Shapley section below before quoting this.**
+> The 93.4% is real but is a property of Elo being added *first*, not of Elo.
+> Every family recovers ~90% of the gain on its own, so whichever led the ladder
+> was always going to post that number. Averaged over all orderings the four
+> families are roughly equal and `form` is marginally the largest.
 
-That is not a criticism of the other families so much as a statement about what
-is knowable from match results: a rating that only moves when a result surprises
-it extracts most of the available signal, and the windows, shot counts and xG
-rates layered on top are refinements.
+One feature family of three columns carries 93.4% of the total improvement over
+a base-rate forecast when it is added first. The remaining 232 features split
+the last 6.6% between them.
+
+The tempting reading — "this model is essentially a well-tuned Elo" — does not
+survive the Shapley attribution. What the ladder does establish is weaker and
+still useful: **by the time the model has Elo, almost nothing else moves it**,
+which is a statement about redundancy among all four families rather than about
+Elo's primacy.
 
 **`form` is small but real.** +5.7% on the ladder, and it survives removal from
 the full model (+0.00064, interval excludes zero) — so it carries something no
@@ -330,19 +337,19 @@ individual players.
    early seasons are not an artefact of feeding the model data it cannot use;
    they are seasons in which xG genuinely had not accumulated yet. Leaving the
    headline at the full 12 seasons is the conservative and correct choice.
-3. **A Shapley attribution over family subsets** (2^5 = 32 runs, about two and a
-   half hours) would remove the ordering dependence entirely and give each family
-   one number instead of the ladder/leave-one-out pair. Not done.
+3. **A Shapley attribution over family subsets** — **done, see below.** It took
+   16 runs rather than 32, because `base` is a floor rather than a player, and it
+   changed the headline: the families are roughly equal, not Elo-dominated.
 
 ## Limitations
 
-1. **Marginal contribution is order-dependent.** The ladder's numbers are "what
-   this family adds given the ones before it", not a unique contribution.
-   `elo` and `form` are both derived from match results and overlap heavily, so
-   whichever is added first absorbs the shared information. This is why
-   leave-one-out is run alongside; neither number alone is the family's "value".
-   A Shapley-style attribution over all family subsets would resolve it properly
-   at 2^5 runs.
+1. **Marginal contribution is order-dependent, and here that dominates the
+   result.** The ladder's numbers are "what this family adds given the ones
+   before it", not a unique contribution. All four families are different views
+   of the same match results and overlap heavily, so whichever is added first
+   absorbs the shared information — which is exactly what happened. Leave-one-out
+   is run alongside for the opposite bound, and the Shapley section below
+   resolves it properly. **Do not quote a ladder share as a family's value.**
 2. **Hyperparameters are fixed to the production model**, so lower rungs are not
    independently optimised. See above.
 3. **Families are groups of columns, not of information.** Dropping `xg` leaves
@@ -461,3 +468,146 @@ About nine minutes. Outputs to `experiments/training_window_ab/`: `results.csv`,
    an arm that drops a matched number of *recent* rows instead.
 3. **Same shared test set** as everything else in this project; the
    multiple-comparisons caveat under the ladder applies here too.
+
+---
+
+# Shapley attribution over feature families
+
+**Purpose.** The ladder and leave-one-out disagreed, and neither is a family's
+value. This runs **every** coalition of the four families — 16 walk-forward
+backtests, `base` present throughout as the floor — and averages each family's
+marginal contribution over all orderings. That is the unique attribution
+satisfying efficiency, symmetry, dummy and linearity.
+
+Value function is *gain*: `v(S) = RPS(base) − RPS(S)`, so `v(∅) = 0` and the
+values sum to the full model's improvement over `base`.
+
+Intervals are exact, not approximate. A Shapley value is a linear combination of
+mean per-match differences, so it rewrites as the mean of a per-match quantity
+and the project's usual paired bootstrap applies to that directly.
+
+## Results
+
+Efficiency holds: the four values sum to **0.03070**, the measured total gain.
+
+| family | Shapley value | 95% CI | share | |
+|---|---|---|---|---|
+| **`form`** | **+0.00873** | [+0.00807, +0.00938] | **28.4%** | significant |
+| `elo` | +0.00815 | [+0.00755, +0.00874] | 26.5% | significant |
+| `xg` | +0.00776 | [+0.00714, +0.00836] | 25.3% | significant |
+| `squad` | +0.00607 | [+0.00559, +0.00653] | 19.8% | significant |
+
+All sixteen coalitions:
+
+| coalition | features | RPS |
+|---|---|---|
+| `(base only)` | 6 | 0.229878 |
+| `elo` | 9 | 0.201212 |
+| `form` | 126 | 0.200359 |
+| `xg` | 100 | 0.201585 |
+| `squad` | 18 | 0.206690 |
+| `elo+form` | 129 | 0.199467 |
+| `elo+xg` | 103 | 0.200063 |
+| `elo+squad` | 21 | 0.201103 |
+| `form+xg` | 220 | 0.200118 |
+| `form+squad` | 138 | 0.199544 |
+| `xg+squad` | 112 | 0.200799 |
+| `elo+form+xg` | 223 | 0.199330 |
+| `elo+form+squad` | 141 | **0.199075** |
+| `elo+xg+squad` | 115 | 0.199816 |
+| `form+xg+squad` | 232 | 0.199696 |
+| `elo+form+xg+squad` | 235 | 0.199176 |
+
+## Interpretation
+
+**This overturns the ladder's headline, and the ladder was the misleading one.**
+
+| family | ladder share | Shapley share | ladder significant | Shapley significant |
+|---|---|---|---|---|
+| `elo` | **93.4%** | 26.5% | yes | yes |
+| `form` | 5.7% | **28.4%** | yes | yes |
+| `xg` | 0.4% | 25.3% | **no** | **yes** |
+| `squad` | 0.5% | 19.8% | **no** | **yes** |
+
+Averaged over all orderings the four families are **roughly equal**, every one
+of them significant, and `form` is marginally the largest — not `elo`.
+
+The singleton coalitions say why. Each family, **on its own**, gets most of the
+way to the full model:
+
+| family alone | RPS | gain | % of the full model's gain |
+|---|---|---|---|
+| `form` (126) | 0.200359 | 0.029520 | **96%** |
+| `elo` (9) | 0.201212 | 0.028666 | **93%** |
+| `xg` (100) | 0.201585 | 0.028294 | **92%** |
+| `squad` (18) | 0.206690 | 0.023189 | 76% |
+
+So whichever family the ladder happened to add first was always going to show
+~93%, and everything after it was always going to look negligible. **Elo was not
+special; it was first.** Had `form` led the ladder it would have scored 96%.
+
+The redundancy can be put as one number. The solo gains sum to **0.109669**; the
+four families combined deliver **0.030702**. Only **28% survives combination** —
+about **72% of what each family carries is already present in the others**.
+
+That is not surprising once stated: Elo, rolling form, xG rates and squad
+ratings are four different views of the same match results. They are substitutes
+far more than complements, which is exactly the structure a nested ladder cannot
+express and a Shapley value is built for.
+
+**`squad` is rehabilitated, with a caveat.** The ladder could not distinguish it
+from zero; here it is 19.8% of the attributed gain with an interval comfortably
+clear of zero, and alone it reaches 76% of the full model's gain from 18
+columns. Both results are correct and they answer different questions: squad
+quality carries real predictive information, *and* by the time the model has
+Elo, form and xG it adds almost nothing on top. The first fact does not license
+a feature that prices individual players; the second is still why
+[`docs/METHODOLOGY.md`](docs/METHODOLOGY.md) §12 declines one.
+
+**The best coalition is not the full model.** `elo+form+squad` scores 0.199075
+on 141 features against 0.199176 for all 235 — consistent with the ladder's
+finding that `full-minus-xg` was the best rung there. Pooled across the whole
+backtest, the xG family is carrying its weight only in the recent era.
+
+### What this means for how the model is described
+
+"This model is essentially a well-tuned Elo" was the ladder's reading and it is
+**not supported**. The defensible statement is:
+
+> Four largely redundant views of match results, any one of which recovers
+> ~90% of the model's edge on its own, combined for a last ~7% that none of
+> them reaches alone.
+
+### Unexpected
+
+1. **A 9-column family and a 126-column family are worth the same.** `elo` and
+   `form` differ by a factor of fourteen in width and by 2 percentage points in
+   Shapley share. Feature count is not a proxy for contribution anywhere in this
+   table.
+2. **Every family is significant under Shapley; two were not under the ladder.**
+   The ladder's nulls were an artefact of position, not evidence of absence —
+   which is the general warning: a marginal contribution measured at the end of
+   a nested sequence is a lower bound on a family's worth, never its value.
+
+## Running it
+
+```bash
+python -m pipelines.shapley_families
+```
+
+About 30 minutes for 16 walk-forward runs. Outputs to
+`experiments/shapley_families/`: `coalitions.csv`, `shapley.csv`, `config.json`,
+`shapley_values.png`.
+
+## Limitations
+
+1. **`base` is a floor, not a player.** The attribution is over the four
+   quality-bearing families; league identity and rest are in every coalition.
+   Including them would be 32 runs and a degenerate `v(∅)`.
+2. **Shapley answers "value averaged over orderings", which is not "value to
+   the model as built".** For a deletion decision, leave-one-out is the relevant
+   number and it is far smaller. These do not conflict; they answer different
+   questions, and quoting whichever flatters a family would be the error.
+3. **Hyperparameters fixed to production** for all 16 coalitions, as in the
+   ladder. A 9-feature coalition runs a budget tuned for 235.
+4. **Same shared test set** as every other decision here.
