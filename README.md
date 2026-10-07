@@ -23,11 +23,24 @@ result:
 | | RPS | Accuracy |
 |---|---|---|
 | always pick home | 0.2299 | 44.1% |
-| **this model** | **0.1991** | **53.0%** |
+| **this model** | **0.1992** | **52.9%** |
 | the bookmakers | 0.1950 | 53.9% |
 
-**8.9 points of accuracy above the baseline**, covering about 86% of the
-distance from guessing to the market. Exact scoreline right 12.8% of the time.
+**8.9 points of accuracy above the baseline**, covering **88%** of the distance
+from guessing to the bookmaker benchmark — which stays 0.0042 RPS ahead, and is
+a strong benchmark rather than a theoretical ceiling: it prices team news,
+lineups and injuries, none of which this model sees. Exact scoreline right 12.8%
+of the time.
+
+Every figure in that table comes from the committed backtest, and is one line to
+reproduce rather than something to take on trust:
+
+```python
+import pandas as pd
+from footballml.models.evaluate import ranked_probability_score, accuracy
+df = pd.read_csv("data/processed/backtest_predictions.csv")
+ranked_probability_score(df.FTR, df[["prob_H", "prob_D", "prob_A"]].to_numpy())
+```
 
 RPS — ranked probability score, lower is better — is the headline metric rather
 than accuracy, because accuracy only asks whether the top pick came in. RPS
@@ -102,6 +115,11 @@ stages, the leak-safety rule and the test that enforces it, why the model
 predicts goal rates, what actually drives the predictions, and how a change is
 measured before it ships.
 
+**[`docs/METHODOLOGY.md`](docs/METHODOLOGY.md)** is the companion: where every
+published number comes from. Each constant, the formula it sits in, and the
+measurement that chose it — including the ones that argued against the change
+they justify.
+
 Two conventions worth knowing before opening anything:
 
 **Every feature describes what was knowable before kick-off**, and it is
@@ -120,7 +138,7 @@ it sits beside.
 ## Testing
 
 ```powershell
-python -m pytest -q          # 401 tests
+python -m pytest -q          # 404 tests
 python -m ruff check .
 cd web; npx tsc --noEmit
 ```
