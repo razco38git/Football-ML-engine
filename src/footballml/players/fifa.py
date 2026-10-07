@@ -712,6 +712,30 @@ def _match_loosely(
                 # Diminutives (Ollie/Oliver, Mat/Mathew) therefore stay
                 # unmatched: ~5 players, against silently wrong ratings.
 
+        if hit is None and len(parts) == 1 and parts[0]:
+            # A one-token name, where EA writes more.
+            #
+            # Every containment tier above requires two tokens on our side, so
+            # a player the performance source knows by a single name can never
+            # reach a longer EA entry. Understat calls PSG's midfielder simply
+            # "Fabián"; EA calls him "Fabián Ruiz" in half its editions and
+            # "Fabián Ruiz Peña" in the other half. We matched the three-token
+            # spelling and missed the two-token one, so his rating appeared and
+            # vanished between seasons -- and in 2024/25, unmatched and
+            # therefore unblended, he was published at 90 against EA's 82.
+            #
+            # This is the weakest key in the file, so it carries the strongest
+            # guard: the club alone decides it, and only when exactly one
+            # candidate is there. The token "fabian" appears in 26 entries of
+            # the 2024/25 edition; exactly one of them plays for Paris SG.
+            # Without that, a bare "Pablo" or "Rafa" would collapse onto
+            # whichever namesake sorted first.
+            ours = parts[0]
+            candidates = possible(
+                [row for tokens, row in token_sets if ours in tokens]
+            )
+            hit = at_club(candidates, team)
+
         if hit is not None:
             for col in columns:
                 merged.at[idx, col] = hit[col]

@@ -987,3 +987,105 @@ def test_the_token_set_never_crosses_the_goalkeeper_boundary():
     )
 
     assert attach_fifa(players, export)["fifa_overall"].isna().all()
+
+
+def _squad(club: str, season: str = "2425", n: int = 3):
+    """Team-mates who match exactly, so `_club_names` can learn the EA club.
+
+    The club map is built from players already matched and needs
+    `CLUB_EVIDENCE_MIN` of them before it trusts a name. A fixture with one
+    player leaves it empty, and every club-guarded tier then has nothing to
+    lean on -- which is a property of the matcher worth fixturing honestly
+    rather than working around.
+    """
+    rows = [
+        {"fifa_name": f"Team Mate {i}", "fifa_overall": 70.0 + i,
+         "Season": season, "fifa_club": club}
+        for i in range(n)
+    ]
+    players = [
+        {"Player": f"Team Mate {i}", "Team": club, "Season": season,
+         "season_position": "M", "position_group": "M"}
+        for i in range(n)
+    ]
+    return rows, players
+
+
+
+# --- a one-token name against a longer EA entry ----------------------------
+
+
+def test_a_single_name_reaches_a_longer_ea_entry_at_the_same_club():
+    """Understat calls PSG's midfielder simply "Fabián".
+
+    EA writes "Fabián Ruiz" in half its editions and "Fabián Ruiz Peña" in the
+    other half. Every containment tier required two tokens on our side, so the
+    three-token spelling matched and the two-token one did not, and his rating
+    appeared and vanished between seasons. In 2024/25, unmatched and therefore
+    unblended, he was published at 90 against EA's 82.
+    """
+    mates, squad = _squad("Paris SG")
+    export = _export(
+        [
+            *mates,
+            {"fifa_name": "Fabián Ruiz", "fifa_overall": 82.0, "Season": "2425",
+             "fifa_club": "Paris SG"},
+            {"fifa_name": "Fabian Schär", "fifa_overall": 82.0, "Season": "2425",
+             "fifa_club": "Newcastle Utd"},
+        ]
+    )
+    players = pd.DataFrame(
+        [*squad,
+         {"Player": "Fabián", "Team": "Paris SG", "Season": "2425",
+          "season_position": "M", "position_group": "M"}]
+    )
+
+    out = attach_fifa(players, export).set_index("Player")
+    assert out.at["Fabián", "fifa_overall"] == 82.0
+
+
+def test_a_single_name_is_refused_when_the_club_cannot_decide():
+    """The weakest key in the file, so the club alone carries it.
+
+    The token "fabian" appears in 26 entries of the 2024/25 edition. Without
+    the club, a bare "Pablo" or "Rafa" would collapse onto whichever namesake
+    happened to sort first -- and two of them at one club is no better.
+    """
+    mates, squad = _squad("Paris SG")
+    export = _export(
+        [
+            *mates,
+            {"fifa_name": "Fabián Ruiz", "fifa_overall": 82.0, "Season": "2425",
+             "fifa_club": "Paris SG"},
+            {"fifa_name": "Fabián Castillo", "fifa_overall": 70.0, "Season": "2425",
+             "fifa_club": "Paris SG"},
+        ]
+    )
+    players = pd.DataFrame(
+        [*squad,
+         {"Player": "Fabián", "Team": "Paris SG", "Season": "2425",
+          "season_position": "M", "position_group": "M"}]
+    )
+
+    out = attach_fifa(players, export).set_index("Player")
+    assert pd.isna(out.at["Fabián", "fifa_overall"]), (
+        "two candidates at the same club is not a match"
+    )
+
+
+def test_a_single_name_at_the_wrong_club_is_refused():
+    """Club is the only evidence here, so it is not optional."""
+    mates, squad = _squad("Real Betis")
+    export = _export(
+        [*mates,
+         {"fifa_name": "Fabián Ruiz", "fifa_overall": 82.0, "Season": "2425",
+          "fifa_club": "Paris SG"}]
+    )
+    players = pd.DataFrame(
+        [*squad,
+         {"Player": "Fabián", "Team": "Real Betis", "Season": "2425",
+          "season_position": "M", "position_group": "M"}]
+    )
+
+    out = attach_fifa(players, export).set_index("Player")
+    assert pd.isna(out.at["Fabián", "fifa_overall"])
