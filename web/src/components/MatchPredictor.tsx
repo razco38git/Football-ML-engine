@@ -126,7 +126,7 @@ function TeamSide({ team, form, league, align }: {
  * The scoreline distribution, as a grid.
  *
  * It exists to settle one apparent contradiction that no amount of text
- * settles: the single likeliest score is a draw in 63% of matches, including
+ * settles: the single likeliest score is a draw in 67% of matches, including
  * matches with a clear favourite, so a card can read "1-1" and "Villarreal win
  * 59%" at once and look like it is arguing with itself.
  *
@@ -142,8 +142,9 @@ function TeamSide({ team, form, league, align }: {
  * They answer different questions. The exact score is one cell of the
  * distribution; the outcome sums a whole region of it. A draw's mass sits on
  * the diagonal -- six scorelines inside 0-5 -- while a home win is spread over
- * fifteen, so the single brightest cell is a draw in 63% of matches, including
- * matches with a clear favourite.
+ * fifteen, so the single brightest cell is a draw in 67% of matches, including
+ * matches with a clear favourite. That share tracks the model's fitted Dixon-Coles
+ * rho (-0.057 as measured); see `top_scores` in dixon_coles.py.
  */
 function ScoreVersusOutcome({ p }: { p: Prediction }) {
   const modalIsDraw = p.modal_score_home === p.modal_score_away;
@@ -486,7 +487,7 @@ function ForecastSummary({ p }: { p: Prediction }) {
         percentage point, so showing one score alone invites the reader to
         treat a ~10% event as the forecast -- and since a draw's mass sits on
         the diagonal while a win is spread across many scorelines, that leader
-        is a draw in 63% of matches even when a side is a clear favourite.
+        is a draw in 67% of matches even when a side is a clear favourite.
       */}
       {p.likely_scores?.length > 1 && (
         <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--muted-foreground)' }}>

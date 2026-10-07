@@ -73,7 +73,7 @@ export interface Prediction {
    * above. Shown as a group because one score on its own reads as the forecast
    * and appears to contradict the outcome — an outcome sums a whole triangle of
    * scorelines while a draw's mass sits on the diagonal, so the leader is a
-   * draw in 63% of matches. Empty for predictions stored before this existed.
+   * draw in 67% of matches. Empty for predictions stored before this existed.
    */
   likely_scores: LikelyScore[];
   /**

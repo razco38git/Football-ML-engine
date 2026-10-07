@@ -117,12 +117,18 @@ def top_scores(matrix: np.ndarray, n: int = 3) -> tuple[np.ndarray, np.ndarray]:
     the reason is structural rather than a quirk of any fixture. An outcome
     probability sums a whole triangle of the matrix -- a home win collects 1-0,
     2-0, 2-1, 3-1 and the rest -- while a draw's mass piles into the few cells on
-    the diagonal. So 1-1 is the single likeliest score in 63% of matches even
+    the diagonal. So 1-1 is the single likeliest score in 67% of matches even
     though the home side is usually the likeliest *winner*, and a card showing
     only "1-1" beside "Home win 57%" reads as a contradiction it is not.
 
     Showing three makes the shape visible: the leader rarely clears the runner-up
     by more than a point or two.
+
+    That 67% is partly a property of ``rho`` rather than of football, so re-measure
+    it after a refit instead of trusting it: over the same 20,013-match backtest it
+    is 52% at ``rho=0``, 66% at ``-0.05`` and 73% at ``-0.10``. The figure quoted
+    above is for the fitted ``-0.057``, and every other mention of it in the
+    codebase inherits that caveat.
 
     Args:
         matrix: ``(n_matches, size, size)`` scoreline probabilities.
