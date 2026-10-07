@@ -1,24 +1,55 @@
 # Football-ML-engine
-Machine learning system for football match prediction, player analytics, and real-time football intelligence
 
-## Understanding it
+A match predictor for the top five European leagues and the Champions League,
+with the player and team rating systems that feed it.
 
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) is the guide: how the five
-stages fit together, what each tab does, why the model predicts goal rates
-rather than outcomes, and how a change is measured before it ships.
+It forecasts **how many goals each side will score** rather than classifying
+home/draw/away, and derives everything else — win probabilities, scorelines,
+over/under, both-teams-to-score — from the resulting distribution.
+
+```
+  football-data.co.uk  (results, odds)  ─┐
+  Understat            (xG)             ├─> ratings ─> features ─> model ─> site
+  FBref                (player stats)   │
+  EA FC exports        (player ratings) ─┘
+```
+
+## How good is it
+
+Measured by walk-forward backtest over **20,013 matches** — each season
+predicted by a model trained only on earlier ones, so nothing has seen its own
+result:
+
+| | RPS | Accuracy |
+|---|---|---|
+| always pick home | 0.2299 | 44.1% |
+| **this model** | **0.1991** | **53.0%** |
+| the bookmakers | 0.1950 | 53.9% |
+
+**8.9 points of accuracy above the baseline**, covering about 86% of the
+distance from guessing to the market. Exact scoreline right 12.8% of the time.
+
+RPS — ranked probability score, lower is better — is the headline metric rather
+than accuracy, because accuracy only asks whether the top pick came in. RPS
+scores the whole distribution, so being confidently wrong costs more than being
+unsure and wrong. The site explains it in full on the Prediction Accuracy tab.
+
+Calibration sits close to the diagonal across all ten probability bins: of the
+outcomes given 30%, about 30% happen. The model is **well calibrated and
+under-discriminating** — the remaining gap to the market is information it does
+not have (lineups, injuries), not a missing way of rearranging goals and shots.
 
 ## Running it
 
-The site is two processes and needs both — the page is served by Vite on
-**8443**, and every tab on it reads the API on **8000**. Start them with:
+Two processes, and it needs both — the page is served by Vite on **8443**, and
+every tab reads the API on **8000**:
 
 ```powershell
 .\scripts\start_site.ps1
 ```
 
-Then open **http://localhost:8443**. The script starts only what is not already
-listening, so it is safe to run twice, and it is registered to run at login.
-Remove that with:
+Then open **http://localhost:8443**. Safe to run twice: it starts only what is
+not already listening. It is registered to run at login; remove that with
 
 ```powershell
 Remove-Item "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\FootballML.lnk"
@@ -30,31 +61,73 @@ the default.
 
 ### After changing feature code, restart the API — do not reload it
 
-`POST /admin/reload` re-reads the data files and the model artifact but **not the
-code**. Retrain after adding a feature and the running server gets a model
-expecting columns its own feature builder cannot produce. It now refuses that
+`POST /admin/reload` re-reads the data files and the model artifact but **not
+the code**. Retrain after adding a feature and the running server gets a model
+expecting columns its own feature builder cannot produce. It now refuses such a
 reload and keeps serving the previous model rather than breaking every
 prediction, so the failure is loud — but the fix is a restart, not another
 retrain.
 
-`pipelines/weekly.py` treats a refused reload as a failed run for the same
-reason: every file on disk would be this week's while the site served last
-week's model.
+## The tabs
+
+| Tab | What it answers |
+|---|---|
+| **Match Predictor** | Who wins the next round, with the model's own reasoning per fixture |
+| **Discover** | Where we disagree with the bookmakers, where we are most certain, which outsiders we back |
+| **Player Ratings** | How good was this player that season, and what did he actually do |
+| **Player Similarity** | Who plays like him, on EA's attributes and on our own percentiles |
+| **Team Strength** | Squad quality by line, with each club's Elo history |
+| **Projected Tables** | Where everyone finishes, from simulating the rest of the season |
+| **Prediction Accuracy** | Were we right — against the bookmakers and against guessing |
+| **What If?** | Any two clubs, scored live |
 
 ## Keeping it current
 
-`pipelines/weekly.py` refreshes results, ratings, the model, predictions and the
-projected tables, then tells a running API to pick them up. It is registered as
-the Windows scheduled task **FootballML Weekly Refresh**, Mondays at 07:00, and
-writes `logs/weekly-<date>.log`.
-
-It is set to run on battery and to catch up a missed run (`StartWhenAvailable`),
-because it was skipped in silence on 2026-09-28 for want of exactly those two
-settings. Check on it with:
+`pipelines/weekly.py` runs every Monday: fetch results, rebuild ratings,
+retrain, settle last week's predictions and forecast the next round, reproject
+the tables, refresh the European correction, reload the API.
 
 ```powershell
-Get-ScheduledTask -TaskName "FootballML Weekly Refresh" | Get-ScheduledTaskInfo
+python -m pipelines.weekly              # the whole job
+python -m pipelines.weekly --only train # one step
 ```
 
-`LastTaskResult` of `0` is success; `0x800710E0` means Windows refused to start
-it.
+Individual stages are ordinary modules — `build_dataset`, `build_players`,
+`train`, `backtest`, `score_upcoming`, `project_season`, `validate_european`.
+
+## Reading the code
+
+**[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)** is the guide: the five
+stages, the leak-safety rule and the test that enforces it, why the model
+predicts goal rates, what actually drives the predictions, and how a change is
+measured before it ships.
+
+Two conventions worth knowing before opening anything:
+
+**Every feature describes what was knowable before kick-off**, and it is
+enforced rather than trusted. `tests/test_leakage.py` rebuilds the whole feature
+table from truncated data and demands every column match, so a feature that can
+see the future fails the suite without anyone writing a test for it.
+
+**Bookmaker odds are never model inputs.** They are the evaluation benchmark —
+a model that predicts the market by reading the market has learned nothing — and
+`feature_columns` excludes them explicitly, with a test.
+
+Decisions are recorded where they were made. A docstring that looks unusually
+long is usually carrying a measurement, often one that argued against the change
+it sits beside.
+
+## Testing
+
+```powershell
+python -m pytest -q          # 401 tests
+python -m ruff check .
+cd web; npx tsc --noEmit
+```
+
+## Stack
+
+Python 3.13, pandas, numpy, scipy, scikit-learn (one estimator:
+`HistGradientBoostingRegressor`), FastAPI, React 19 + Vite + Tailwind v4.
+`soccerdata` is an optional `ingest` extra — it pulls Selenium, and the API and
+training paths stay installable without a browser stack.

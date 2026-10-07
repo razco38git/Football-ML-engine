@@ -140,6 +140,150 @@ function Stat({ label, value, sub, color }: { label: string; value: string; sub:
  * which is what actually matters when reading a prediction.
  */
 /**
+ * What RPS is, for someone who has never met it.
+ *
+ * It is the number every decision in this project was made on, and it leads the
+ * page — so leaving it as four unexplained decimal places asks the reader to
+ * take the most important figure here entirely on trust. The explanation is
+ * built around one worked example, because the idea only lands once you see two
+ * wrong forecasts score differently.
+ */
+function WhatIsRps({ summary }: { summary: Accuracy }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div
+      className="rounded-xl p-5 mb-4"
+      style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+    >
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full text-left flex items-baseline justify-between gap-3"
+      >
+        <span>
+          <span
+            className="text-xs font-display font-bold uppercase tracking-wider"
+            style={{ color: 'var(--muted-foreground)' }}
+          >
+            What is RPS, and why {summary.rps.toFixed(4)} is good
+          </span>
+          <span className="block text-sm mt-1" style={{ color: 'var(--foreground)' }}>
+            It scores the whole forecast, not just whether the top pick won &mdash;
+            and <strong>lower is better</strong>.
+          </span>
+        </span>
+        <span className="text-xs shrink-0" style={{ color: 'var(--muted-foreground)' }}>
+          {open ? 'Hide' : 'Explain'} ▾
+        </span>
+      </button>
+
+      {open && (
+        <div className="mt-4 text-sm leading-relaxed" style={{ color: 'var(--foreground)' }}>
+          <p>
+            Accuracy asks one question: did the outcome we rated highest actually
+            happen? That throws away almost everything a forecast says. Two
+            predictions can both be &ldquo;wrong&rdquo; and be nothing alike.
+          </p>
+
+          <p className="mt-3">
+            Say the home side wins, and two forecasts both picked the away side:
+          </p>
+
+          <div className="mt-3 rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+            <table className="w-full text-xs font-data">
+              <thead>
+                <tr style={{ background: 'var(--secondary)', color: 'var(--muted-foreground)' }}>
+                  <th className="text-left px-3 py-1.5 font-normal">forecast</th>
+                  <th className="text-right px-2 py-1.5 font-normal">home</th>
+                  <th className="text-right px-2 py-1.5 font-normal">draw</th>
+                  <th className="text-right px-2 py-1.5 font-normal">away</th>
+                  <th className="text-right px-3 py-1.5 font-normal">RPS</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style={{ borderTop: '1px solid var(--border)' }}>
+                  <td className="px-3 py-1.5" style={{ color: 'var(--muted-foreground)' }}>
+                    cautious
+                  </td>
+                  <td className="text-right px-2 py-1.5">33%</td>
+                  <td className="text-right px-2 py-1.5">30%</td>
+                  <td className="text-right px-2 py-1.5">37%</td>
+                  <td className="text-right px-3 py-1.5 font-bold" style={{ color: '#ffea00' }}>
+                    0.293
+                  </td>
+                </tr>
+                <tr style={{ borderTop: '1px solid var(--border)' }}>
+                  <td className="px-3 py-1.5" style={{ color: 'var(--muted-foreground)' }}>
+                    certain
+                  </td>
+                  <td className="text-right px-2 py-1.5">5%</td>
+                  <td className="text-right px-2 py-1.5">15%</td>
+                  <td className="text-right px-2 py-1.5">80%</td>
+                  <td className="text-right px-3 py-1.5 font-bold" style={{ color: '#f44336' }}>
+                    0.771
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p className="mt-3">
+            <strong>Accuracy scores these identically</strong> &mdash; both missed. RPS
+            charges the confident one more than twice as much, which is the point: being
+            sure and wrong is a worse forecast than being unsure and wrong. Get it
+            right while confident and RPS goes the other way, toward zero.
+          </p>
+
+          <p className="mt-3">
+            It also knows that football results have an order. Predicting an away
+            win when the home side wins is a bigger miss than predicting a draw,
+            because a draw is the near miss between the two. RPS counts the
+            distance; accuracy treats every wrong answer the same.
+          </p>
+
+          <div
+            className="mt-4 rounded-lg px-4 py-3"
+            style={{ background: 'var(--secondary)', border: '1px solid var(--border)' }}
+          >
+            <div className="text-xs mb-1" style={{ color: 'var(--muted-foreground)' }}>
+              The scale, on these {summary.n.toLocaleString()} matches
+            </div>
+            <div className="font-data text-xs leading-relaxed">
+              <div>
+                <span style={{ color: 'var(--muted-foreground)' }}>0.0000&nbsp;&nbsp;</span>
+                perfect &mdash; 100% on the outcome that happened, every time
+              </div>
+              <div style={{ color: '#00e676' }}>
+                {summary.rps_market != null && (
+                  <>
+                    {summary.rps_market.toFixed(4)}&nbsp;&nbsp;the bookmakers
+                  </>
+                )}
+              </div>
+              <div style={{ color: '#00e676' }}>
+                {summary.rps.toFixed(4)}&nbsp;&nbsp;<strong>this model</strong>
+              </div>
+              <div style={{ color: 'var(--muted-foreground)' }}>
+                {summary.rps_base_rate.toFixed(4)}&nbsp;&nbsp;the long-run split &mdash; 44/25/31 every match
+              </div>
+              <div style={{ color: 'var(--muted-foreground)' }}>
+                0.2778&nbsp;&nbsp;no opinion &mdash; 33% on all three
+              </div>
+            </div>
+          </div>
+
+          <p className="mt-3 text-xs" style={{ color: 'var(--muted-foreground)' }}>
+            The gaps look small because the range is small. Nothing about football
+            allows a score near zero &mdash; the result genuinely is uncertain until
+            it is played. What matters is the distance between the rows, and a
+            hundredth of a point is a large move.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * The benchmarks that make our own number mean something.
  *
  * An RPS is not interpretable alone. It only says anything against what
@@ -169,7 +313,12 @@ function ModelVersusMarket({
       label: 'Guessing',
       rps: summary.rps_base_rate,
       acc: summary.accuracy_base_rate,
-      note: 'always back the home side',
+      // Two different baselines sharing one row, so the note names neither
+      // alone. RPS is scored against the long-run outcome split applied to
+      // every match; accuracy against always picking the commonest outcome,
+      // which is the home win. Calling the RPS figure "always back home" --
+      // as this did -- describes the wrong baseline.
+      note: 'the long-run split, and always picking home',
       us: false,
     },
   ];
@@ -532,6 +681,7 @@ export default function PredictionHistory() {
             />
           </div>
 
+          <WhatIsRps summary={summary} />
           <ModelVersusMarket summary={summary} confident={confident.length} confidentHits={confidentHits} />
           <ModelVersions />
 
