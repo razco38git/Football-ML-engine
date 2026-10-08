@@ -132,6 +132,46 @@ hypotheses that were tested and rejected. It opens with the difference between
 sufficiency, attribution and necessity, because confusing those is how the first
 version of its own headline came out wrong.
 
+### Where to start
+
+**The docstrings are the documentation.**
+`src/footballml/models/match_model.py` is 318 lines whose value is the module
+docstring and the comment over `DEFAULT_GBM_PARAMS`; the docstring of
+`src/footballml/features/elo.py` is a research note carrying a 150-combination
+sweep. Read the bodies and skip those and the project looks thinner than it is.
+
+Concept density is uneven, so this is an order rather than a list. About 2,000
+of the 10,000 Python lines carry nearly everything.
+
+1. **The shape** — [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), start to
+   finish, once.
+2. **The core**, and the three answers worth having —
+   `src/footballml/models/match_model.py` (module docstring and
+   `DEFAULT_GBM_PARAMS`), `src/footballml/models/dixon_coles.py` in full,
+   `src/footballml/features/rolling.py` (`prev_window` — the `.shift(1)` before
+   the roll is the load-bearing line), and `tests/test_leakage.py`
+   (`test_truncation_invariance`). Model shape, one coherent probability object,
+   leak safety.
+3. **What drives it** — the module docstring of
+   `src/footballml/features/elo.py`. Skim `src/footballml/features/build.py` for
+   `DEFAULT_WINDOWS` and the stem lists; skip the assembly.
+4. **How it is judged** — `src/footballml/models/evaluate.py`, then
+   `pipelines/backtest.py`, then [`EXPERIMENTS.md`](EXPERIMENTS.md) **starting
+   from its "Reading an attribution number" section**, without which the rest of
+   that file parses wrongly.
+5. **The player half** — `config/player_rating.yaml` *before*
+   `src/footballml/players/rating.py`, since the YAML holds the decisions and
+   the sweeps that chose them; then
+   `src/footballml/players/team_strength.py`.
+
+Reference rather than reading: `src/footballml/players/fifa.py`,
+`src/footballml/players/fbref.py`, `src/footballml/ingest/`,
+`src/footballml/api/schemas.py` and most of `web/`.
+
+[`docs/METHODOLOGY.md`](docs/METHODOLOGY.md) is not a step in that path but a
+companion to it — read §7 beside the Elo code, §8 beside the ratings, §5 beside
+the metrics.
+
 Two conventions worth knowing before opening anything:
 
 **Every feature describes what was knowable before kick-off**, and it is
