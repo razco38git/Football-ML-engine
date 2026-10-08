@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api, LEAGUE_NAMES, seasonLabel, type PlayerRating, type TeamStrength } from '../api/client';
 import { getRatingBg, getRatingTextColor, teamColor } from '../api/display';
 import { useAsync } from '../api/hooks';
+import { EloPanel } from './EloPanel';
 import { LeagueStrengthPanel } from './LeagueStrength';
 
 const LINES: { key: keyof TeamStrength; label: string }[] = [
@@ -229,6 +230,12 @@ export default function TeamStrength() {
 
       {/* Clicking a league filters the table below it. */}
       <LeagueStrengthPanel onPick={setLeague} />
+
+      {/* Elo sits above the squad table rather than inside a team's panel: the
+          two ratings disagree often, and a reader who meets the squad numbers
+          first without being told what the other one measures will try to
+          reconcile them. */}
+      <EloPanel />
 
       <div className="flex flex-wrap gap-3 mb-5 items-center">
         <select

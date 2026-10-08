@@ -6,11 +6,26 @@ drawn two looks, to a nineteen-match window, much like a mid-table side on a
 good run, and the only persistent input is the previous season's squad rating,
 joined once and then static until August.
 
-That shows up against the market. On 20,013 matches, where the market says 84%
-we say 79% and the home side wins 85%; where it says 65% we say 61% and the
-result comes in at 67%. Our RPS is 0.2009 against the market's 0.1950.
-Decomposing real league tables into skill and luck, our predicted spread is
-13.0 points against the market's 14.2.
+That shows up against the market, though much less than when this was written.
+Over the 20,007 backtested matches carrying odds, our RPS is **0.1992** against
+the market's **0.1950**, and the shortfall is concentrated exactly where the
+market is confident::
+
+    market band       n     market    we say    home wins
+    65-75%        1,802      69.3%     67.8%        72.6%
+    75-85%        1,027      79.5%     77.1%        81.3%
+    85-95%          218      87.5%     85.2%        89.0%
+
+Expected-points spread across a league table -- the standard deviation of
+``3*P(win) + P(draw)`` summed per club, over the 54 complete league-seasons in
+the backtest -- is **13.3** for us against **13.7** for the market. Real tables
+spread 16.9 and neither should match that; the excess is luck.
+
+Those figures are kinder than the ones first recorded here (RPS 0.2009, and a
+five-point shortfall where the market says 84%). The gap halved, mostly through
+the 2026-10-05 learning-budget retune. The *shape* of the complaint survived
+intact, which is why the argument below still stands: the model is timid in one
+specific place rather than uniformly.
 
 It is not a calibration problem, which was worth ruling out before writing any
 of this: sharpening the output probabilities was swept from 0.6 to 1.2 and the
@@ -51,7 +66,9 @@ model, where the 822-match measurement can be used directly.
 **MEASURED (2026-10-05): the three constants below are already right, and a
 better-posed rating adds nothing.** `elo_diff` carries 18% of the match model's
 attributed movement -- eight times the next feature -- so the numbers under it
-were worth checking. 150 combinations, scored on Elo's own Brier over 2016/17
+were worth checking. (Re-measured on a later sample it reads 24.3% and ten
+times; SHAP shares move with the sample, so quote the sample. Neither figure
+changes what the sweep below found.) 150 combinations, scored on Elo's own Brier over 2016/17
 onward with 2024/25-2025/26 held out:
 
     K    10=.15684  15=.15534  20=.15498  25=.15516  30=.15563  40=.15703
@@ -86,8 +103,13 @@ removing a redundant one moves the model.
 
 **So feature engineering on top of results has hit its ceiling here.** The model
 is well calibrated but under-discriminating: where the market says 80-90% the
-truth is 85.3% and we say 79.2%. That gap is missing information -- team news,
-lineups, injuries -- not a missing way of rearranging goals and shots.
+truth is **85.7%** and we say **81.4%**, a 2.4-point shortfall against the
+market's own 83.9%. That gap is missing information -- team news, lineups,
+injuries -- not a missing way of rearranging goals and shots.
+
+(When this paragraph was first written the same band read 85.3% true against
+79.2% from us, a 5.0-point shortfall. Half of it has since closed, and none of
+it closed through feature engineering, which is the point the paragraph makes.)
 
 **Leak-safety.** Each match records the ratings the two sides carried *going
 in*, and only then applies the update. A match never sees its own result, which

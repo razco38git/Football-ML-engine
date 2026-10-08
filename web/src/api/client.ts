@@ -201,6 +201,8 @@ export const api = {
   teamElo: (team: string, seasons = 3) =>
     get<EloHistory>(`/teams/${encodeURIComponent(team)}/elo?seasons=${seasons}`),
 
+  eloRanking: (limit = 15) => get<EloRanking>(`/elo?limit=${limit}`),
+
   /** Projected final table for one league. */
   projection: (league: string) => fetchProjection(league),
 
@@ -514,6 +516,30 @@ export interface CompetitionAccuracy {
   accuracy: number;
   rps: number;
   rps_base_rate: number;
+}
+
+export interface EloRankEntry {
+  team: string;
+  league: string;
+  elo: number;
+  season: string;
+  date: string;
+}
+
+/**
+ * Two Elo leaderboards, which answer different questions.
+ *
+ * `current` is standing right now; `peak` is the best any side has looked in
+ * the span the data covers, and is usually a different set of clubs from a
+ * different era. Both hold *pre-match* ratings — the number a side carried into
+ * that fixture, which is exactly what the model was given — so a "current"
+ * rating has not seen the result of the match it precedes.
+ */
+export interface EloRanking {
+  current: EloRankEntry[];
+  peak: EloRankEntry[];
+  /** Where every team starts, so a rating can be read as a distance from it. */
+  start: number;
 }
 
 export interface EloPoint {

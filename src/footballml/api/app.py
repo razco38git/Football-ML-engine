@@ -38,6 +38,8 @@ from footballml.api.schemas import (
     Driver,
     EloHistory,
     EloPoint,
+    EloRankEntry,
+    EloRanking,
     Health,
     LeagueStrength,
     LikelyScore,
@@ -69,6 +71,7 @@ from footballml.features.build import (
     build_match_features,
     build_upcoming_features,
 )
+from footballml.features.elo import START as ELO_START
 from footballml.form import build_index, recent_form
 from footballml.ingest.european import SHOWN_COMPETITIONS
 from footballml.ingest.matchhistory import LEAGUES, fetch_fixtures
@@ -1416,6 +1419,65 @@ def league_strength(
             )
         )
     return sorted(out, key=lambda x: x.mean_strength, reverse=True)
+
+
+@app.get("/elo", response_model=EloRanking)
+def elo_ranking(limit: int = Query(15, ge=1, le=50)) -> EloRanking:
+    """Who Elo rates highest now, and who it has ever rated highest.
+
+    The Team Strength tab publishes a *squad* rating: how good the players are,
+    computed once a season from minutes and performance. This is the other
+    number, and the two disagree often enough that showing one without the other
+    is misleading. Elo knows nothing about who is in the squad -- it moves only
+    when a result disagrees with what the rating expected, so it carries form,
+    European nights and a decade of accumulated standing, and it updates every
+    match rather than every August.
+
+    Both lists are built from the same pre-match ratings the model was given, so
+    a "current" rating is the one the side carried *into* its most recent
+    fixture and has not seen that result. See `EloRanking`.
+    """
+    features = state.features
+    if features.empty:
+        raise HTTPException(503, "Feature table not loaded")
+
+    # One row per (team, match) from both sides, carrying the pre-match rating.
+    frames = []
+    for side in ("Home", "Away"):
+        col = f"{side.lower()}_elo"
+        if col not in features.columns:
+            continue
+        frames.append(
+            features[[f"{side}Team", col, "Date", "Season", "League"]]
+            .rename(columns={f"{side}Team": "team", col: "elo"})
+            .dropna(subset=["elo"])
+        )
+    if not frames:
+        raise HTTPException(503, "No Elo columns in the feature table")
+
+    long = pd.concat(frames, ignore_index=True)
+    long["Date"] = pd.to_datetime(long["Date"])
+
+    def entries(rows: pd.DataFrame) -> list[EloRankEntry]:
+        return [
+            EloRankEntry(
+                team=str(r["team"]),
+                league=str(r.get("League", "")),
+                elo=round(float(r["elo"]), 1),
+                season=str(r.get("Season", "")),
+                date=str(pd.Timestamp(r["Date"]).date()),
+            )
+            for _, r in rows.iterrows()
+        ]
+
+    latest = long.sort_values("Date").groupby("team", as_index=False).last()
+    best = long.sort_values("elo").groupby("team", as_index=False).last()
+
+    return EloRanking(
+        current=entries(latest.nlargest(limit, "elo")),
+        peak=entries(best.nlargest(limit, "elo")),
+        start=ELO_START,
+    )
 
 
 @app.get("/teams/{name}/elo", response_model=EloHistory)

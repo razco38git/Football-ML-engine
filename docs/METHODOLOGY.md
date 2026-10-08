@@ -620,8 +620,11 @@ strength → full). The walk-forward harness can produce it.
   output probabilities was swept from 0.6 to 1.2, the optimum is ~0.95, and RPS
   does not improve. The model is not uniformly timid — it is timid exactly where
   the market is confident, which is a shortage of information.
-- **Where the market says 80–90%, the truth is 85.3% and this model says 79.2%.**
-  The one-line summary of its weakness: well calibrated, under-discriminating.
+- **Where the market says 80–90%, the truth is 85.7% and this model says 81.4%**,
+  against the market's own 83.9% — a 2.4-point shortfall. The one-line summary
+  of its weakness: well calibrated, under-discriminating. That shortfall was 5.0
+  points before the learning-budget retune, so it has halved; the shape is
+  unchanged, which is why the conclusion below is unchanged.
 - **Feature engineering on results has hit its ceiling.** A goals-based
   attack/defence Elo was built, properly tuned, and taken up enthusiastically by
   the booster — ranks 2, 3, 4 and 8 of 241, 9.4% of attributed movement, with

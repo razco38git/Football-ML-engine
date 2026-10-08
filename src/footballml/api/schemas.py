@@ -345,6 +345,35 @@ class EloPoint(BaseModel):
     venue: str
 
 
+class EloRankEntry(BaseModel):
+    """One team's place in an Elo ranking."""
+
+    team: str
+    league: str
+    elo: float
+    season: str
+    date: str
+
+
+class EloRanking(BaseModel):
+    """Who Elo currently rates highest, and who it has ever rated highest.
+
+    Two lists because they answer different questions. ``current`` is form and
+    standing right now; ``peak`` is the best any side has looked in the span the
+    data covers, which is usually a different set of teams and a different era.
+
+    Every rating here is a *pre-match* one -- the number the side carried into
+    the match, which is exactly what the model was given. A "current" rating is
+    therefore the rating going into that team's most recent fixture and has not
+    seen its result. That is the leak-safe number and the one the model used, so
+    it is the one worth publishing.
+    """
+
+    current: list[EloRankEntry]
+    peak: list[EloRankEntry]
+    start: float
+
+
 class EloHistory(BaseModel):
     """A team's rating over time.
 
