@@ -617,7 +617,25 @@ def upcoming(
     Explanations add little to the cost once features are built, and computing
     them eagerly means toggling "show analysis" in the UI is instant.
     """
-    _refresh_upcoming()
+    # Only build on the request path when there is nothing at all to serve.
+    #
+    # `_warm_upcoming` owns freshness: it runs every minute against a 30-minute
+    # TTL, so a cache that exists is almost never meaningfully stale. Rebuilding
+    # here as well meant that whenever the warmer was failing -- which is exactly
+    # when the sources are unreachable -- every request re-attempted the same
+    # 25-85s scrape and then failed with it. Serving a slightly old board beats
+    # making each visitor wait for the same outage to time out again.
+    if state._upcoming is None:
+        try:
+            _refresh_upcoming()
+        except Exception as exc:  # noqa: BLE001 - a 503 says "retry", a 500 says "broken"
+            logger.exception("Could not build the fixture cache")
+            raise HTTPException(
+                503,
+                "Fixtures are still being prepared. The scraper is retrying in the "
+                "background; try again in a minute.",
+            ) from exc
+
     results = state._upcoming or []
     if league:
         # A European tie carries `league` = the home side's division, because the
@@ -747,7 +765,18 @@ def _upcoming_fixture_list() -> pd.DataFrame:
     if fixtures.empty:
         return fixtures
 
-    odds = fetch_fixtures()
+    # Odds are decoration here: the fixtures are already built and about to be
+    # scored, and this only adds the market number shown beside ours on a card.
+    # It was the one unguarded fetch in this function, between two that are
+    # guarded, and football-data resetting the connection took the whole
+    # endpoint down with a 500 -- a cosmetic enrichment failing the thing it
+    # decorates. A card without a market row is the correct degraded state.
+    try:
+        odds = fetch_fixtures()
+    except Exception as exc:  # noqa: BLE001 - no market row beats no fixtures
+        logger.warning("No odds available (%s); fixtures will have no market row", exc)
+        return fixtures
+
     odds_cols = [c for c in ODDS_COLUMNS if c in odds.columns]
     if odds_cols and not odds.empty:
         key = ["League", "Date", "HomeTeam", "AwayTeam"]
