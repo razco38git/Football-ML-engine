@@ -36,6 +36,7 @@ import time
 from datetime import timedelta
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from footballml.entities.teams import load_aliases
@@ -80,6 +81,16 @@ SCHEDULE_MAX_AGE = timedelta(hours=12)
 #: is exactly what this module is for -- but a parse that quietly fails would
 #: mark *every* fixture unplayed, so the dash characters are matched explicitly.
 _SCORE = r"(\d+)\s*[-‐‑‒–—―]\s*(\d+)"
+
+#: Columns that describe a *result*, stripped from any fixture list. An unplayed
+#: fixture carries NaN in all three, and letting them ride along would put
+#: empty `FTHG`/`FTAG` next to rows the model is about to predict -- the same
+#: column names the training table uses for the truth.
+#:
+#: Dropped with `errors="ignore"`: a caller may hand in a schedule frame built
+#: before the goals were kept, and `window_fixtures` is given frames by tests
+#: and by `score_upcoming` as well as by `fetch_schedule`.
+_RESULT_ONLY = ["FTHG", "FTAG", "played"]
 
 
 def _cache_is_fresh(reader, max_age: timedelta | None) -> bool:
@@ -132,9 +143,17 @@ def fetch_schedule(
             :data:`SCHEDULE_MAX_AGE` for why the default is not ``None``.
 
     Returns:
-        ``League``, ``Season``, ``Date``, ``HomeTeam``, ``AwayTeam`` and
-        ``played``. Empty if soccerdata is not installed, so the caller can fall
-        back rather than crash -- FBref lives in the optional ingest extra.
+        ``League``, ``Season``, ``Date``, ``HomeTeam``, ``AwayTeam``, ``played``
+        and -- for rows that have been played -- ``FTHG`` and ``FTAG``. Empty if
+        soccerdata is not installed, so the caller can fall back rather than
+        crash: FBref lives in the optional ingest extra.
+
+        The goals used to be thrown away here. ``_SCORE`` has always captured
+        both numbers and this function used only group 0, and only to ask
+        whether it parsed. That cost nothing while football-data stayed current
+        and everything when it stopped: on 2026-10-11 the results table ended
+        2026-09-20, while these pages already held 27 played matches after it.
+        See :func:`played_results`.
     """
     # Imported here, not at module scope: `european` reads `_SCORE` from this
     # module, so a top-level import would be circular.
@@ -167,6 +186,11 @@ def fetch_schedule(
 
     inverse = {v: k for k, v in known.items()}
     aliases = load_aliases("fbref")
+    # Both capture groups, kept as numbers. A row FBref has not scored yet gives
+    # NaN in both, which is what `played` is derived from.
+    goals = (
+        raw["score"].astype(str).str.extract(_SCORE).apply(pd.to_numeric, errors="coerce")
+    )
 
     out = pd.DataFrame(
         {
@@ -175,7 +199,9 @@ def fetch_schedule(
             "Date": pd.to_datetime(raw["date"], errors="coerce").dt.normalize(),
             "HomeTeam": raw["home_team"].astype(str).str.strip().replace(aliases),
             "AwayTeam": raw["away_team"].astype(str).str.strip().replace(aliases),
-            "played": raw["score"].astype(str).str.extract(_SCORE)[0].notna(),
+            "FTHG": goals[0],
+            "FTAG": goals[1],
+            "played": goals[0].notna(),
         }
     )
     out = out.dropna(subset=["Date", "League"])
@@ -200,7 +226,7 @@ def window_fixtures(
     indistinguishable once both have become an empty frame.
     """
     if schedule.empty:
-        return _empty().drop(columns=["played"])
+        return _empty().drop(columns=_RESULT_ONLY, errors="ignore")
 
     today = (today or pd.Timestamp.today()).normalize()
     horizon = today + pd.Timedelta(days=horizon_days)
@@ -211,7 +237,46 @@ def window_fixtures(
         "%d unplayed fixture(s) between %s and %s",
         len(window), today.date(), horizon.date(),
     )
-    return window.drop(columns=["played"]).reset_index(drop=True)
+    return window.drop(columns=_RESULT_ONLY, errors="ignore").reset_index(drop=True)
+
+
+def played_results(
+    leagues: list[str] | None = None,
+    seasons: list[str] | None = None,
+    max_age: timedelta | None = SCHEDULE_MAX_AGE,
+) -> pd.DataFrame:
+    """Matches FBref has a score for, shaped like the results table.
+
+    A **second** results source, and deliberately not a replacement. football-data
+    carries shots, corners and closing odds; this carries the score and nothing
+    else. So these rows can settle a stored prediction and be shown as a recent
+    result, and they cannot be trained on -- a model fed rows whose shot counts
+    are silently missing is exactly the quiet corruption the leak tests exist to
+    prevent.
+
+    Returns:
+        ``League``, ``Season``, ``Date``, ``HomeTeam``, ``AwayTeam``, ``FTHG``,
+        ``FTAG``, ``FTR``. Empty when soccerdata is missing or nothing is
+        played, so a caller can treat it as "nothing to add".
+    """
+    schedule = fetch_schedule(leagues, seasons, max_age=max_age)
+    if schedule.empty:
+        return schedule.drop(columns=["played"], errors="ignore").assign(FTR=[])
+
+    done = schedule[schedule["played"]].copy()
+    if done.empty:
+        return done.drop(columns=["played"]).assign(FTR=pd.Series(dtype="object"))
+
+    done["FTHG"] = done["FTHG"].astype("int64")
+    done["FTAG"] = done["FTAG"].astype("int64")
+    done["FTR"] = np.where(
+        done["FTHG"] > done["FTAG"], "H", np.where(done["FTHG"] < done["FTAG"], "A", "D")
+    )
+    logger.info(
+        "FBref results: %d played match(es), latest %s",
+        len(done), done["Date"].max().date(),
+    )
+    return done.drop(columns=["played"]).reset_index(drop=True)
 
 
 def upcoming_fixtures(
@@ -247,5 +312,5 @@ def next_fixture_date(
 
 def _empty() -> pd.DataFrame:
     return pd.DataFrame(
-        columns=["League", "Season", "Date", "HomeTeam", "AwayTeam", "played"]
+        columns=["League", "Season", "Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "played"]
     )

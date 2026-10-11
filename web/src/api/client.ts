@@ -99,6 +99,18 @@ export interface Prediction {
   strength_away_attack: number | null;
   strength_away_defence: number | null;
 
+  /**
+   * True when this row is the forecast stored *before kickoff* rather than one
+   * re-scored from the feature table.
+   *
+   * Recent results are normally re-scored with the current model, which needs
+   * the match in the feature table — and that only advances when football-data
+   * publishes. When it lags, these come from the prediction store instead, so
+   * the page still shows the matches that were played. A stronger claim than a
+   * re-scored row, not a weaker one, and flagged because silently mixing the
+   * two would be dishonest.
+   */
+  predicted_before_kickoff?: boolean;
   actual_home_goals: number | null;
   actual_away_goals: number | null;
   actual_result: 'H' | 'D' | 'A' | null;

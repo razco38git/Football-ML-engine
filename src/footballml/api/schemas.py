@@ -134,6 +134,17 @@ class Prediction(BaseModel):
     strength_away_attack: float | None = None
     strength_away_defence: float | None = None
 
+    #: True when this row is the forecast that was *stored before kickoff*
+    #: rather than one scored retrospectively from the feature table.
+    #:
+    #: `/matches` normally re-scores played fixtures with the current model,
+    #: which needs them present in the feature table -- and that table only
+    #: advances when football-data publishes. When it lags, recent results are
+    #: served from the prediction store instead, so the page shows the matches
+    #: that were actually played. Those rows are a stronger claim, not a weaker
+    #: one: they were committed to in advance. They are flagged because mixing
+    #: two kinds of prediction without saying so would be dishonest.
+    predicted_before_kickoff: bool = False
     actual_home_goals: int | None = None
     actual_away_goals: int | None = None
     actual_result: str | None = None

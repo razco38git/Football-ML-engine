@@ -239,6 +239,47 @@ def _restore_fixture_columns(
     return frame, [*OUTPUT_COLUMNS, *odds_cols]
 
 
+def _schedule_results(known: pd.DataFrame, log: logging.Logger) -> pd.DataFrame:
+    """Scores FBref has that the results table does not yet.
+
+    football-data is the results source, and it falls behind. On 2026-10-11 the
+    match history ended 2026-09-20 while FBref already listed 27 played matches
+    after it, so three weeks of settled predictions were sitting unsettled and
+    three weeks of results were missing from the site. The schedule pages were
+    already being scraped for fixtures, and already carried the scores.
+
+    Strictly a top-up. Anything football-data has stays football-data's -- it
+    brings shots, corners and closing odds, and a row from here brings only the
+    score. These rows settle predictions and nothing else: they are not written
+    to the match history and never reach training.
+    """
+    try:
+        from footballml.ingest.schedule import played_results
+
+        extra = played_results()
+    except Exception as exc:  # noqa: BLE001 - a scraper outage must not stop settling
+        log.warning("No FBref results (%s); settling from the match history alone", exc)
+        return pd.DataFrame()
+    if extra.empty:
+        return extra
+
+    key = ["League", "Date", "HomeTeam", "AwayTeam"]
+    seen = known[key].assign(Date=pd.to_datetime(known["Date"]))
+    extra["Date"] = pd.to_datetime(extra["Date"])
+    fresh = extra.merge(seen, on=key, how="left", indicator=True)
+    fresh = fresh[fresh["_merge"] == "left_only"].drop(columns="_merge")
+    if fresh.empty:
+        log.info("FBref has no results the match history is missing")
+        return fresh
+
+    log.info(
+        "Topping up with %d result(s) FBref has and the match history does not "
+        "(latest %s against %s)",
+        len(fresh), fresh["Date"].max().date(), pd.to_datetime(known["Date"]).max().date(),
+    )
+    return fresh.assign(competition=store.DOMESTIC)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -265,6 +306,7 @@ def main() -> None:
     # as *history*. Without them a stored UCL prediction never settles, and sits
     # in the record forever with null results.
     results = pd.concat([results, _european_results()], ignore_index=True)
+    results = pd.concat([results, _schedule_results(results, log)], ignore_index=True)
     settled = store.settle(results)
     log.info("Settled %d previously stored predictions", settled)
 

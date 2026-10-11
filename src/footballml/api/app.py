@@ -851,7 +851,87 @@ def matches(
 
     preds = model.predict_frame(window[state.columns])
     frame = pd.concat([window.reset_index(drop=True), preds.reset_index(drop=True)], axis=1)
-    return _to_predictions(frame)
+    scored = _to_predictions(frame)
+
+    # Anything played since the feature table ends can only come from the store.
+    fresher = _recent_from_store(played["Date"].max(), league)
+    if not fresher:
+        return scored
+    return (fresher + scored)[offset : offset + limit]
+
+
+def _recent_from_store(known_through: pd.Timestamp, league: str | None) -> list[Prediction]:
+    """Settled predictions for matches the feature table has not caught up to.
+
+    Recent results are normally re-scored from `state.features`, which advances
+    only when football-data publishes a match. That source fell three weeks
+    behind in October 2026 -- the table ended 2026-09-20 while the leagues had
+    played on -- and the page simply stopped at the last row it had, with no
+    way for a reader to tell a stale feed from a quiet fortnight.
+
+    These rows are the forecasts stored before those kickoffs, settled from the
+    schedule pages. They carry no retrospective re-scoring and no market row,
+    and they are flagged `predicted_before_kickoff` so the page can say which
+    kind of prediction it is showing.
+    """
+    try:
+        rows = store.settled()
+    except Exception:  # noqa: BLE001 - a missing store must not break the page
+        logger.exception("Could not read the prediction store")
+        return []
+    if rows.empty:
+        return []
+
+    rows = rows.assign(Date=pd.to_datetime(rows["Date"]))
+    rows = rows[rows["Date"] > pd.Timestamp(known_through)]
+    if league:
+        rows = rows[rows["League"] == league]
+    if rows.empty:
+        return []
+
+    out = []
+    for _, r in rows.sort_values("Date", ascending=False).iterrows():
+        goals_home, goals_away = r.get("actual_home_goals"), r.get("actual_away_goals")
+        out.append(
+            Prediction(
+                league=str(r["League"]),
+                date=str(r["Date"].date()),
+                home_team=str(r["HomeTeam"]),
+                away_team=str(r["AwayTeam"]),
+                competition=str(r.get("competition") or store.DOMESTIC),
+                expected_goals_home=float(r["expected_goals_home"]),
+                expected_goals_away=float(r["expected_goals_away"]),
+                prob_home_win=float(r["prob_home_win"]),
+                prob_draw=float(r["prob_draw"]),
+                prob_away_win=float(r["prob_away_win"]),
+                predicted_outcome=str(r["predicted_outcome"]),
+                modal_score_home=int(r["modal_score_home"]),
+                modal_score_away=int(r["modal_score_away"]),
+                prob_over_2_5=float(r["prob_over_2_5"]),
+                prob_btts=float(r["prob_btts"]),
+                predicted_before_kickoff=True,
+                actual_home_goals=None if pd.isna(goals_home) else int(goals_home),
+                actual_away_goals=None if pd.isna(goals_away) else int(goals_away),
+                actual_result=str(r["actual_result"]),
+                # Without this the card reads "no prior matches" beside Lille,
+                # which is false and reads as a data error rather than as the
+                # results feed being behind. The index only reaches as far as
+                # the feature table does, so this is the form going into the
+                # *last match we have*, not into this one -- which is the same
+                # limitation the rest of the row already has.
+                form_home=_form_for(str(r["HomeTeam"]), r["Date"]),
+                form_away=_form_for(str(r["AwayTeam"]), r["Date"]),
+            )
+        )
+    return out
+
+
+def _form_for(team: str, before: pd.Timestamp) -> TeamForm | None:
+    """Recent form for a card served from the store, or None if unknown."""
+    try:
+        return TeamForm(**vars(recent_form(state.form_index, team, before)))
+    except Exception:  # noqa: BLE001 - a missing team costs a strip, not the card
+        return None
 
 
 def _european_matches(competition: str, limit: int, offset: int) -> list[Prediction]:

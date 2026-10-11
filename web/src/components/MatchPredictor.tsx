@@ -566,6 +566,22 @@ export function MatchCard({ p, leagues }: {
                 expectedHome={p.expected_goals_home}
                 expectedAway={p.expected_goals_away}
               />
+              {/*
+                Every other settled card is this model re-scoring a match it can
+                see in the feature table. This one is the forecast that was
+                recorded before kickoff, served because the results feed has not
+                caught up yet. That is the better claim of the two, so it is
+                marked rather than blended in silently.
+              */}
+              {p.predicted_before_kickoff && (
+                <span
+                  className="mt-1 px-1.5 py-0.5 rounded font-display uppercase tracking-wider"
+                  style={{ fontSize: 9, background: 'rgba(0,230,118,0.15)', color: '#00e676' }}
+                  title="Forecast recorded before kick-off, not re-scored afterwards. Shown because the results feed is behind."
+                >
+                  called in advance
+                </span>
+              )}
             </div>
           ) : (
             <ForecastSummary p={p} />
