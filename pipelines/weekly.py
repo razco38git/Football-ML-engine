@@ -119,10 +119,16 @@ STEPS: tuple[Step, ...] = (
 RELOAD = "reload"
 
 
-def _configure_logging(verbose: bool) -> Path:
-    """Log to stdout and to a dated file. Returns the file path."""
+def _configure_logging(verbose: bool, name: str = "weekly") -> Path:
+    """Log to stdout and to a dated file. Returns the file path.
+
+    `name` separates the jobs. The daily refresh reuses this, and writing both
+    into `weekly-<date>.log` would interleave two runs in one file and make a
+    daily failure read as a weekly one -- on a day when the weekly job had not
+    run at all.
+    """
     LOG_DIR.mkdir(exist_ok=True)
-    path = LOG_DIR / f"weekly-{datetime.now(UTC):%Y-%m-%d}.log"
+    path = LOG_DIR / f"{name}-{datetime.now(UTC):%Y-%m-%d}.log"
 
     handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
     handlers.append(logging.FileHandler(path, encoding="utf-8"))

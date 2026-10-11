@@ -1,0 +1,178 @@
+"""The daily results refresh.
+
+Its whole value is deciding *whether* to run. A match played on a Tuesday used
+to wait until Monday, so this runs every morning -- but most mornings
+football-data has published nothing new, and rebuilding an identical table and
+bouncing the API every day would be worse than the problem it solves.
+
+So the behaviour worth pinning is the short-circuit, the fingerprint it turns
+on, and that a failure anywhere leaves the site serving the complete older copy
+rather than a half-refreshed one.
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from pipelines import daily
+
+
+@pytest.fixture
+def runs(monkeypatch) -> list[str]:
+    """Record which pipelines were invoked, running none of them."""
+    called: list[str] = []
+    monkeypatch.setattr(daily, "run_step", lambda step: called.append(step.name) or 0.0)
+    monkeypatch.setattr(daily, "reload_api", lambda *_a, **_k: True)
+    return called
+
+
+def _args(monkeypatch, **over) -> None:
+    argv = ["daily"]
+    if over.get("force"):
+        argv.append("--force")
+    monkeypatch.setattr(sys, "argv", argv)
+
+
+# --- the fingerprint ----------------------------------------------------------
+
+def test_fingerprint_is_rows_and_latest_date(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "matches_all.csv"
+    pd.DataFrame({"Date": ["2026-09-19", "2026-09-20"]}).to_csv(path, index=False)
+    monkeypatch.setattr(daily, "MATCHES", path)
+    assert daily._fingerprint() == (2, "2026-09-20")
+
+
+def test_fingerprint_notices_a_correction_that_adds_no_date(tmp_path, monkeypatch) -> None:
+    """A re-published old match moves the count and not the latest date.
+
+    Keying on the date alone would call that "nothing new" and leave the
+    correction unpublished until the next Monday.
+    """
+    path = tmp_path / "matches_all.csv"
+    monkeypatch.setattr(daily, "MATCHES", path)
+    pd.DataFrame({"Date": ["2026-09-20"]}).to_csv(path, index=False)
+    before = daily._fingerprint()
+    pd.DataFrame({"Date": ["2026-09-19", "2026-09-20"]}).to_csv(path, index=False)
+    assert daily._fingerprint() != before
+
+
+def test_fingerprint_survives_a_missing_or_empty_file(tmp_path, monkeypatch) -> None:
+    """First ever run, or a wiped data directory: not a crash."""
+    missing = tmp_path / "nope.csv"
+    monkeypatch.setattr(daily, "MATCHES", missing)
+    assert daily._fingerprint() == (0, "")
+
+    empty = tmp_path / "empty.csv"
+    pd.DataFrame({"Date": []}).to_csv(empty, index=False)
+    monkeypatch.setattr(daily, "MATCHES", empty)
+    assert daily._fingerprint() == (0, "")
+
+
+# --- the short-circuit --------------------------------------------------------
+
+def test_nothing_new_means_nothing_downstream(monkeypatch, runs) -> None:
+    """The common case: fetch, find the same data, stop."""
+    _args(monkeypatch)
+    monkeypatch.setattr(daily, "_fingerprint", lambda: (29143, "2026-09-20"))
+    reloaded: list[bool] = []
+    monkeypatch.setattr(daily, "reload_api", lambda *_a, **_k: reloaded.append(True) or True)
+
+    assert daily.main() == 0
+    assert runs == ["build_dataset"]
+    # The API must not be bounced for an identical rebuild.
+    assert reloaded == []
+
+
+def test_new_results_run_the_whole_chain(monkeypatch, runs) -> None:
+    _args(monkeypatch)
+    seen = iter([(29143, "2026-09-20"), (29170, "2026-10-10")])
+    monkeypatch.setattr(daily, "_fingerprint", lambda: next(seen))
+
+    assert daily.main() == 0
+    assert runs == ["build_dataset", "score_upcoming", "project_season"]
+
+
+def test_force_rebuilds_without_new_results(monkeypatch, runs) -> None:
+    _args(monkeypatch, force=True)
+    monkeypatch.setattr(daily, "_fingerprint", lambda: (29143, "2026-09-20"))
+
+    assert daily.main() == 0
+    assert runs == ["build_dataset", "score_upcoming", "project_season"]
+
+
+# --- failures leave the site complete rather than half-refreshed --------------
+
+def test_a_failed_fetch_touches_nothing(monkeypatch, runs) -> None:
+    """football-data being unreachable is normal and must cost nothing."""
+    _args(monkeypatch)
+
+    def boom(step):
+        raise subprocess.CalledProcessError(1, step.name)
+
+    monkeypatch.setattr(daily, "run_step", boom)
+    reloaded: list[bool] = []
+    monkeypatch.setattr(daily, "reload_api", lambda *_a, **_k: reloaded.append(True) or True)
+
+    assert daily.main() == 1
+    assert reloaded == []
+
+
+def test_a_failed_step_stops_before_publishing(monkeypatch) -> None:
+    """A half-refreshed site is worse than one a day behind."""
+    _args(monkeypatch)
+    seen = iter([(1, "2026-09-20"), (2, "2026-10-10")])
+    monkeypatch.setattr(daily, "_fingerprint", lambda: next(seen))
+
+    called: list[str] = []
+
+    def run(step):
+        called.append(step.name)
+        if step.name == "project_season":
+            raise subprocess.CalledProcessError(1, step.name)
+        return 0.0
+
+    monkeypatch.setattr(daily, "run_step", run)
+    reloaded: list[bool] = []
+    monkeypatch.setattr(daily, "reload_api", lambda *_a, **_k: reloaded.append(True) or True)
+
+    assert daily.main() == 1
+    assert called == ["build_dataset", "score_upcoming", "project_season"]
+    assert reloaded == []
+
+
+def test_a_dead_api_is_reported_not_swallowed(monkeypatch, runs) -> None:
+    """The data is on disk; the run must still say it is not published."""
+    _args(monkeypatch)
+    seen = iter([(1, "2026-09-20"), (2, "2026-10-10")])
+    monkeypatch.setattr(daily, "_fingerprint", lambda: next(seen))
+    monkeypatch.setattr(daily, "reload_api", lambda *_a, **_k: False)
+
+    assert daily.main() == 1
+
+
+# --- the chain itself ---------------------------------------------------------
+
+def test_the_expensive_weekly_steps_are_not_in_the_daily_chain() -> None:
+    """Skipping these is the whole point; including one would be a regression.
+
+    `build_players` is 7m21s of whole-season numbers that barely move in a day,
+    and `train` would mint a model version every morning, scattering the live
+    track record across seven versions a week.
+    """
+    names = {daily.FETCH.name, *(s.name for s in daily.STEPS)}
+    assert "build_players" not in names
+    assert "train" not in names
+    assert names == {"build_dataset", "score_upcoming", "project_season"}
+
+
+def test_settling_comes_before_projecting() -> None:
+    """`project_season` reads what `score_upcoming` has settled."""
+    order = [s.name for s in daily.STEPS]
+    assert order.index("score_upcoming") < order.index("project_season")

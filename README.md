@@ -101,14 +101,39 @@ retrain.
 
 ## Keeping it current
 
-`pipelines/weekly.py` runs every Monday: fetch results, rebuild ratings,
-retrain, settle last week's predictions and forecast the next round, reproject
-the tables, refresh the European correction, reload the API.
+Two jobs, and the split is between work that is expensive and work that is
+urgent.
+
+**`pipelines/weekly.py`, Mondays at 07:00** — the full rebuild: fetch results,
+rebuild player ratings and squad strength, retrain, settle last week's
+predictions and forecast the next round, reproject the tables, refresh the
+European correction, reload the API. About twenty minutes.
+
+**`pipelines/daily.py`, every morning at 07:30** — the smallest chain that puts
+a played match on the site correctly: fetch results, and *only if something new
+arrived*, settle it, re-simulate the tables and reload. About six minutes, or
+twenty seconds on a day when football-data has published nothing.
 
 ```powershell
-python -m pipelines.weekly              # the whole job
-python -m pipelines.weekly --only train # one step
+python -m pipelines.weekly               # the whole job
+python -m pipelines.weekly --only train  # one step
+python -m pipelines.daily                # the fast refresh
+python -m pipelines.daily --force        # rebuild even with no new matches
+.\scripts\register_daily.ps1             # register the 07:30 task
 ```
+
+The daily job deliberately skips `build_players` (7m 21s of whole-season
+numbers that barely move in a day) and `train` — not to save the minute, but
+because retraining mints a model version, and doing that every morning would
+fill `/models` with near-identical rows and scatter the live track record
+across seven versions a week. Between Mondays the site already serves
+predictions from the last weekly model; the daily job keeps that true and
+refreshes only what the new *results* change.
+
+**It never fills a gap with a partial row.** If football-data has not published
+a match, the tables wait rather than showing an approximation. That matters
+because the projection simulates from the full feature table — shots, xG and
+all — and a row missing half its features would quietly distort it.
 
 Individual stages are ordinary modules — `build_dataset`, `build_players`,
 `train`, `backtest`, `score_upcoming`, `project_season`, `validate_european`.
