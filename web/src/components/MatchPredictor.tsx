@@ -613,6 +613,9 @@ export function MatchCard({ p, leagues }: {
               home={p.home_team}
               away={p.away_team}
               correct={correct}
+              probHome={p.prob_home_win}
+              probDraw={p.prob_draw}
+              probAway={p.prob_away_win}
             />
           )}
         </div>

@@ -112,6 +112,9 @@ function ResultRow({ m }: { m: MatchResult }) {
           home={m.home_team}
           away={m.away_team}
           correct={m.correct}
+          probHome={m.prob_home_win}
+          probDraw={m.prob_draw}
+          probAway={m.prob_away_win}
         />
       </div>
     </div>

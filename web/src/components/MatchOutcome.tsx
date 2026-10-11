@@ -14,6 +14,8 @@
  * which is why neither `MatchResult` nor `Prediction` is imported here.
  */
 
+import { NO_FAVOURITE_BELOW } from '../api/display';
+
 type Outcome = 'H' | 'D' | 'A';
 
 /** Which side an outcome letter refers to, in words a reader recognises. */
@@ -124,23 +126,51 @@ export function CallVersusResult({
   home,
   away,
   correct,
+  probHome,
+  probDraw,
+  probAway,
 }: {
   predicted: Outcome | string;
   actual: Outcome | string;
   home: string;
   away: string;
   correct: boolean;
+  /** The three probabilities, so this can agree with the headline above it. */
+  probHome?: number;
+  probDraw?: number;
+  probAway?: number;
 }) {
+  // A card showed "Too close to call" in the analysis and "We said Mainz" in
+  // the footer, on 38 / 24 / 38. Both came from the same prediction: the
+  // headline asks `verdict`, which refuses to name a winner below
+  // NO_FAVOURITE_BELOW, while this line read `predicted_outcome` raw -- and
+  // that is an argmax, which breaks a dead heat by whichever side it happens
+  // to see first. The footer now asks the same question as the headline.
+  const known = probHome != null && probDraw != null && probAway != null;
+  const backed = !known || Math.max(probHome, probDraw, probAway) >= NO_FAVOURITE_BELOW;
+
   return (
     <div
       className="flex justify-between mt-1 text-xs"
       style={{ color: 'var(--muted-foreground)' }}
     >
       <span>
-        We said{' '}
-        <span style={{ color: correct ? '#00e676' : '#f44336', fontWeight: 500 }}>
-          {outcomeLabel(predicted, home, away)}
-        </span>
+        {backed ? (
+          <>
+            We said{' '}
+            <span style={{ color: correct ? '#00e676' : '#f44336', fontWeight: 500 }}>
+              {outcomeLabel(predicted, home, away)}
+            </span>
+          </>
+        ) : (
+          // Deliberately not coloured by `correct`. We did not back anyone, so
+          // there is nothing here to be right or wrong about -- the tick beside
+          // it is the published accuracy metric, which scores the top
+          // probability whether or not it amounts to a favourite.
+          <span title={`No outcome reached ${Math.round(NO_FAVOURITE_BELOW * 100)}%, so the model named no favourite. The tick scores its highest probability anyway, which is how accuracy is counted.`}>
+            We called it <span style={{ fontWeight: 500 }}>too close</span>
+          </span>
+        )}
       </span>
       <span>
         It was{' '}
