@@ -273,6 +273,35 @@ def main() -> int:
 
     logger.info("Weekly refresh starting; logging to %s", log_path.name)
     started = time.monotonic()
+
+    # Waits rather than giving up, unlike the daily job: this is the run that
+    # must not be skipped, and the only thing it can be waiting for finishes in
+    # a few minutes. A schedule offset is not a lock -- both missed triggers
+    # fired four seconds apart on 2026-10-12 after the machine spent the
+    # morning switched off.
+    from pipelines._lock import holder, refresh_lock
+
+    with refresh_lock("weekly", wait_seconds=LOCK_WAIT_SECONDS) as acquired:
+        if not acquired:
+            logger.error(
+                "Another refresh has held the lock for over %.0f minutes (%s). "
+                "Not starting: two runs rewriting data/processed at once can "
+                "leave a half-written table that every later stage reads as "
+                "real. Investigate that run, then rerun this one.",
+                LOCK_WAIT_SECONDS / 60, holder() or "unknown",
+            )
+            return 1
+        return _run(args, wanted, log_path, started)
+
+
+#: How long the weekly run waits for a daily run to finish. The daily job's
+#: longest path is about six and a half minutes.
+LOCK_WAIT_SECONDS = 600.0
+
+
+def _run(
+    args: argparse.Namespace, wanted: set[str], log_path: Path, started: float
+) -> int:
     ran: list[str] = []
     failed_optional: list[str] = []
 

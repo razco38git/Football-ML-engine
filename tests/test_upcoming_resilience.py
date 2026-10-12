@@ -116,6 +116,44 @@ def test_an_outage_with_a_cache_is_invisible(monkeypatch) -> None:
     assert len(api.upcoming(league=None, explain=False)) == 1
 
 
+def test_a_cached_board_never_serves_a_match_already_played(monkeypatch) -> None:
+    """The bug a visitor saw: yesterday's fixtures listed as upcoming.
+
+    The board is built with `Date >= today` baked in, so it is only correct on
+    the day it was built. When the warmer could not refresh it overnight the
+    request path served it unchanged -- correctly, since re-attempting a dead
+    source helps nobody -- and seventeen matches played the previous evening
+    appeared under "Upcoming". Getting this right needs no scrape.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    today = datetime.now(UTC).date()
+    api.state._upcoming = [
+        _prediction("Yesterday FC", "Old Town"),
+        _prediction("Today FC", "Now United"),
+        _prediction("Tomorrow FC", "Later City"),
+    ]
+    api.state._upcoming[0].date = today - timedelta(days=1)
+    api.state._upcoming[1].date = today
+    api.state._upcoming[2].date = today + timedelta(days=1)
+    api.state._upcoming_at = datetime.now(UTC)
+
+    out = api.upcoming(league=None, explain=False)
+    assert [p.home_team for p in out] == ["Today FC", "Tomorrow FC"]
+
+
+def test_an_entirely_past_board_empties_rather_than_misleads(monkeypatch) -> None:
+    """Shrinking to nothing reads as "nothing scheduled"; the alternative lies."""
+    from datetime import UTC, datetime, timedelta
+
+    old = datetime.now(UTC).date() - timedelta(days=3)
+    api.state._upcoming = [_prediction("Long Ago", "United")]
+    api.state._upcoming[0].date = old
+    api.state._upcoming_at = datetime.now(UTC)
+
+    assert api.upcoming(league=None, explain=False) == []
+
+
 def test_no_cache_and_a_failing_build_is_a_503(monkeypatch) -> None:
     """A 503 tells the caller to retry; a 500 tells them it is broken."""
     def dead():

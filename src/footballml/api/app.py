@@ -636,7 +636,22 @@ def upcoming(
                 "background; try again in a minute.",
             ) from exc
 
-    results = state._upcoming or []
+    # Never serve a fixture whose date has passed, however old the cache is.
+    #
+    # The board is built with `Date >= today` baked in, so it is correct only on
+    # the day it was built. On 2026-10-12 the site showed seventeen matches
+    # played the previous evening as "upcoming": the warmer had been failing
+    # against an unreachable source, the request path -- correctly -- serves
+    # whatever is cached rather than re-attempting the same outage, and nothing
+    # reconciled the cached board with the fact that midnight had passed.
+    #
+    # Serving stale fixtures is fine; serving *played* ones as upcoming is not,
+    # and this needs no scrape to get right. As the cache ages the board shrinks
+    # and eventually empties, which reads as "nothing scheduled" rather than as
+    # a confident wrong answer.
+    today = datetime.now(UTC).date().isoformat()
+    results = [p for p in (state._upcoming or []) if str(p.date) >= today]
+
     if league:
         # A European tie carries `league` = the home side's division, because the
         # model has no code for a competition. So filtering by "UCL" has to look

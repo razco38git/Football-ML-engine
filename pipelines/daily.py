@@ -54,6 +54,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from pipelines._lock import holder, refresh_lock  # noqa: E402
 from pipelines.weekly import (  # noqa: E402
     API_URL,
     Step,
@@ -109,6 +110,22 @@ def main() -> int:
     log_path = _configure_logging(args.verbose, name="daily")
     logger.info("Daily refresh starting; logging to %s", log_path.name)
     started = time.monotonic()
+
+    # The weekly job does everything this one does and more, so if it is
+    # running there is nothing to wait for. Both missed triggers firing
+    # together is not hypothetical: on 2026-10-12 the machine was off all
+    # morning and Windows started the two four seconds apart.
+    with refresh_lock("daily") as acquired:
+        if not acquired:
+            logger.info(
+                "Another refresh is running (%s); stopping. It rebuilds "
+                "everything this job would have.", holder() or "unknown",
+            )
+            return 0
+        return _run(args, started)
+
+
+def _run(args: argparse.Namespace, started: float) -> int:
 
     before = _fingerprint()
     try:
