@@ -31,14 +31,21 @@ So a projection refreshed here uses the newest *results* with the current
 *model*, which is exactly the arrangement the Match Predictor has had all along.
 
 **Nothing new is not an error.** Most days football-data publishes no match
-this job has not already seen, and on those days it stops after
-``build_dataset`` rather than spending six minutes rebuilding an identical
-table and bouncing the API for no reason.
+this job has not already seen. That is not a reason to skip settling -- the
+schedule pages routinely know a result days earlier -- but it is a reason not
+to re-simulate a table built from rows that did not change.
 
 Run::
 
     python -m pipelines.daily
-    python -m pipelines.daily --force     # refresh even with no new matches
+    python -m pipelines.daily --force     # re-project even with no new matches
+
+**Settling runs every day; projecting runs only when the results table moved.**
+Settlement reads two sources -- football-data, and the schedule pages, which
+carry a score days before football-data publishes one -- so it has work to do on
+a day when the fetch brought nothing. The projection simulates from the results
+table alone, so with no new rows it would spend four minutes rewriting the file
+it already wrote.
 """
 
 from __future__ import annotations
@@ -69,16 +76,23 @@ MATCHES = ROOT / "data" / "processed" / "matches_all.csv"
 
 logger = logging.getLogger("daily")
 
-#: The smallest chain that puts a played match on the site correctly.
-#:
-#: `build_dataset` first because everything downstream reads what it writes,
-#: and because its result decides whether the rest runs at all.
-STEPS: tuple[Step, ...] = (
-    Step("score_upcoming", (), "settle what was played, re-forecast the next round"),
-    Step("project_season", (), "re-simulate the rest of the season"),
-)
-
 FETCH = Step("build_dataset", (), "fetch match results")
+
+#: Settling runs every day, whatever football-data did.
+#:
+#: It reads two sources -- football-data, and the schedule pages, which carry a
+#: score days before football-data publishes one -- so it has work to do on days
+#: when the fetch brought nothing.
+SETTLE = Step("score_upcoming", (), "settle what was played, re-forecast the next round")
+
+#: Projecting runs only when the results table actually moved.
+#:
+#: `project_season` simulates from that table and nothing else, so with no new
+#: rows it would spend four minutes reproducing the file it already wrote.
+PROJECT = Step("project_season", (), "re-simulate the rest of the season")
+
+#: Both, for callers that want the full chain.
+STEPS: tuple[Step, ...] = (SETTLE, PROJECT)
 
 
 def _fingerprint() -> tuple[int, str]:
@@ -141,22 +155,33 @@ def _run(args: argparse.Namespace, started: float) -> int:
         )
         return 1
     after = _fingerprint()
+    advanced = after != before
 
-    if after == before and not args.force:
+    if advanced:
         logger.info(
-            "No new matches (%d rows, latest %s). Stopping here: the tables would "
-            "be rebuilt identically and the API bounced for nothing. Use --force "
-            "to rebuild anyway. Done in %s",
-            after[0], after[1] or "n/a", _duration(time.monotonic() - started),
+            "New results: %d rows (was %d), latest %s (was %s)",
+            after[0], before[0], after[1] or "n/a", before[1] or "n/a",
         )
-        return 0
+    else:
+        logger.info(
+            "football-data published nothing new (%d rows, latest %s)",
+            after[0], after[1] or "n/a",
+        )
 
-    logger.info(
-        "New results: %d rows (was %d), latest %s (was %s)",
-        after[0], before[0], after[1] or "n/a", before[1] or "n/a",
-    )
+    # `score_upcoming` runs whatever football-data did, and that is the whole
+    # correction here. It settles from *two* sources -- football-data, and the
+    # schedule pages that carry a score football-data has not published yet --
+    # so gating it on football-data advancing gated it on the wrong thing.
+    #
+    # On 2026-10-12 that is exactly what happened: 51 predictions for the 11th
+    # sat unsettled with all seventeen results already on the schedule pages,
+    # because football-data had moved nothing and this job stopped after the
+    # fetch. Settling is also cheap and idempotent -- `store.append`
+    # de-duplicates per model version, so re-forecasting the same fixtures adds
+    # nothing.
+    steps = [SETTLE, PROJECT] if (advanced or args.force) else [SETTLE]
 
-    for step in STEPS:
+    for step in steps:
         try:
             run_step(step)
         except subprocess.CalledProcessError as exc:

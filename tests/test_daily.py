@@ -77,17 +77,32 @@ def test_fingerprint_survives_a_missing_or_empty_file(tmp_path, monkeypatch) -> 
 
 # --- the short-circuit --------------------------------------------------------
 
-def test_nothing_new_means_nothing_downstream(monkeypatch, runs) -> None:
-    """The common case: fetch, find the same data, stop."""
+def test_nothing_new_still_settles(monkeypatch, runs) -> None:
+    """The bug this guards: settling gated on the wrong source.
+
+    On 2026-10-12, 51 predictions for the previous day sat unsettled with all
+    seventeen results already on the schedule pages, because football-data had
+    published nothing and the job stopped after the fetch. Settlement reads both
+    sources, so it has work to do whatever football-data did.
+    """
     _args(monkeypatch)
     monkeypatch.setattr(daily, "_fingerprint", lambda: (29143, "2026-09-20"))
-    reloaded: list[bool] = []
-    monkeypatch.setattr(daily, "reload_api", lambda *_a, **_k: reloaded.append(True) or True)
 
     assert daily.main() == 0
-    assert runs == ["build_dataset"]
-    # The API must not be bounced for an identical rebuild.
-    assert reloaded == []
+    assert runs == ["build_dataset", "score_upcoming"]
+
+
+def test_nothing_new_does_not_reproject(monkeypatch, runs) -> None:
+    """`project_season` simulates from the results table and nothing else.
+
+    With no new rows it would spend four minutes rewriting the file it already
+    wrote, so it is the one step the short-circuit still skips.
+    """
+    _args(monkeypatch)
+    monkeypatch.setattr(daily, "_fingerprint", lambda: (29143, "2026-09-20"))
+
+    assert daily.main() == 0
+    assert "project_season" not in runs
 
 
 def test_new_results_run_the_whole_chain(monkeypatch, runs) -> None:
@@ -99,7 +114,8 @@ def test_new_results_run_the_whole_chain(monkeypatch, runs) -> None:
     assert runs == ["build_dataset", "score_upcoming", "project_season"]
 
 
-def test_force_rebuilds_without_new_results(monkeypatch, runs) -> None:
+def test_force_reprojects_without_new_results(monkeypatch, runs) -> None:
+    """`--force` is for re-simulating; settling needs no forcing."""
     _args(monkeypatch, force=True)
     monkeypatch.setattr(daily, "_fingerprint", lambda: (29143, "2026-09-20"))
 
@@ -166,7 +182,7 @@ def test_the_expensive_weekly_steps_are_not_in_the_daily_chain() -> None:
     and `train` would mint a model version every morning, scattering the live
     track record across seven versions a week.
     """
-    names = {daily.FETCH.name, *(s.name for s in daily.STEPS)}
+    names = {daily.FETCH.name, daily.SETTLE.name, daily.PROJECT.name}
     assert "build_players" not in names
     assert "train" not in names
     assert names == {"build_dataset", "score_upcoming", "project_season"}
