@@ -20,6 +20,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from footballml.data import PROCESSED_DIR  # noqa: E402
+from footballml.ingest.fbref_results import (  # noqa: E402
+    fetch_fbref_results,
+    top_up,
+)
 from footballml.ingest.matchhistory import (  # noqa: E402
     LEAGUES,
     fetch_match_history,
@@ -55,6 +59,27 @@ def main() -> None:
     matches = to_matches(raw)
     tmh = to_team_match_history(matches)
     log.info("Built %d matches -> %d team-match rows", len(matches), len(tmh))
+
+    # football-data falls behind -- three weeks, in October 2026 -- and that
+    # froze the projected tables, because `project_season` simulates from this
+    # table and will not simulate from rows missing half their columns.
+    #
+    # Of what football-data brings, only goals, shots and shots on target ever
+    # reach the model: fouls, corners and cards are stored and read by nothing.
+    # FBref publishes all three, Understat supplies the xG family below, so a
+    # topped-up row is complete in every column that becomes a feature. It is
+    # not an approximation standing in for one, which is why it is allowed here
+    # rather than only on the display path.
+    #
+    # Adds only. football-data's own rows always win, so a week when it is
+    # current produces exactly the frame it produced before.
+    # The current season only. Everything earlier is finished and football-data
+    # published it long ago, so there is nothing there to top up -- and asking
+    # for more is expensive in a way that is easy to miss: FBref is rate limited
+    # to one page every seven seconds, so a first run over twelve seasons of
+    # five leagues spent 51 minutes scraping 2023/24 Serie A before it was
+    # stopped. One season is a couple of minutes.
+    tmh = top_up(tmh, fetch_fbref_results(args.leagues, seasons[-1:], known=tmh))
 
     # Understat starts in 2014/15, so restrict the xG request to seasons it can
     # actually serve rather than logging a warning for every earlier one.

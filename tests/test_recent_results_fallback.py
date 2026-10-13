@@ -99,6 +99,42 @@ def test_added_rows_are_flagged_as_pre_kickoff(monkeypatch) -> None:
     assert out[0].actual_home_goals == 2
 
 
+def test_a_stored_row_with_odds_reports_the_market(monkeypatch) -> None:
+    """Discover filters its bookmaker list on these fields.
+
+    The store carries B365 prices and this path was dropping them, so eight of
+    the fifty-two settled predictions were silently absent from "where we
+    disagreed with the bookmakers" while their odds sat unused.
+    """
+    rows = _stored(["2026-10-12"]).assign(B365H=2.0, B365D=4.0, B365A=4.0)
+    monkeypatch.setattr(api.store, "settled", lambda *a, **k: rows)
+
+    out = api._recent_from_store(pd.Timestamp("2026-09-20"), None)[0]
+    # De-vigged: 1/2 : 1/4 : 1/4 normalises to 0.5 / 0.25 / 0.25.
+    assert out.market_prob_home == pytest.approx(0.5, abs=1e-3)
+    assert out.market_prob_draw == pytest.approx(0.25, abs=1e-3)
+    assert out.market_prob_away == pytest.approx(0.25, abs=1e-3)
+    assert out.market_prob_home + out.market_prob_draw + out.market_prob_away == pytest.approx(
+        1.0, abs=1e-3
+    )
+
+
+def test_a_stored_row_without_odds_has_no_market(monkeypatch) -> None:
+    """Most rows have none, because football-data was unreachable when stored."""
+    monkeypatch.setattr(api.store, "settled", lambda *a, **k: _stored(["2026-10-12"]))
+    out = api._recent_from_store(pd.Timestamp("2026-09-20"), None)[0]
+    assert out.market_prob_home is None
+    assert out.market_prob_draw is None
+    assert out.market_prob_away is None
+
+
+def test_a_partial_price_is_treated_as_no_price(monkeypatch) -> None:
+    """Two of three odds cannot be de-vigged into anything meaningful."""
+    rows = _stored(["2026-10-12"]).assign(B365H=2.0, B365D=4.0, B365A=float("nan"))
+    monkeypatch.setattr(api.store, "settled", lambda *a, **k: rows)
+    assert api._recent_from_store(pd.Timestamp("2026-09-20"), None)[0].market_prob_home is None
+
+
 def test_rows_are_newest_first(monkeypatch) -> None:
     monkeypatch.setattr(
         api.store, "settled",

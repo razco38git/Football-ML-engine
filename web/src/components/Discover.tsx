@@ -186,7 +186,7 @@ export default function Discover() {
         {disagreements.length > 0 && (
           <Card
             title="Where we disagreed with the bookmakers"
-            blurb="Recent matches where our probability for our own pick was furthest from the market's probability for that same outcome. The tick says whether the pick came in — the market usually wins these."
+            blurb="Recent matches where our probability for our own pick was furthest from the market's probability for that same outcome. The tick says whether the pick came in — the market usually wins these. A match only appears once we have a closing price for it, so this list is shorter than Recent results rather than out of date."
           >
             {disagreements.map(({ p, gap, ours, theirs }) => {
               const settled = p.actual_result !== null;

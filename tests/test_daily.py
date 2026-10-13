@@ -24,6 +24,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from pipelines import daily
 
 
+@pytest.fixture(autouse=True)
+def quiet_logging(monkeypatch, tmp_path):
+    """Keep the tests out of the production log.
+
+    `daily.main` configures logging to `logs/daily-<today>.log`, the same file
+    the scheduled job writes. Running these tests put 43 lines of invented
+    failures into it -- "Settling failed", "build_dataset failed" -- stamped
+    with a real timestamp, in the file somebody reads to find out what the
+    morning's run actually did.
+    """
+    monkeypatch.setattr(daily, "_configure_logging", lambda *a, **k: tmp_path / "daily.log")
+
+
 @pytest.fixture
 def runs(monkeypatch) -> list[str]:
     """Record which pipelines were invoked, running none of them."""
@@ -77,6 +90,66 @@ def test_fingerprint_survives_a_missing_or_empty_file(tmp_path, monkeypatch) -> 
 
 # --- the short-circuit --------------------------------------------------------
 
+def test_settling_happens_before_the_fetch(monkeypatch, runs) -> None:
+    """The ordering is the whole fix, so it is pinned rather than assumed.
+
+    `build_dataset` grew the FBref top-up, which scrapes a page per team at a
+    seven-second rate limit whenever football-data is behind -- every morning,
+    since 2026-09-20. With settling second, the previous day's results waited
+    twenty-five minutes behind a scrape they do not need.
+    """
+    _args(monkeypatch)
+    monkeypatch.setattr(daily, "_fingerprint", lambda: (29143, "2026-09-20"))
+
+    assert daily.main() == 0
+    assert runs.index("score_upcoming") < runs.index("build_dataset")
+
+
+def test_the_first_reload_comes_before_the_fetch(monkeypatch) -> None:
+    """Publishing early is the point: the tabs are correct a minute in."""
+    order: list[str] = []
+    monkeypatch.setattr(daily, "run_step", lambda s: order.append(s.name) or 0.0)
+    monkeypatch.setattr(daily, "reload_api", lambda *_a, **_k: order.append("reload") or True)
+    _args(monkeypatch)
+    monkeypatch.setattr(daily, "_fingerprint", lambda: (29143, "2026-09-20"))
+
+    daily.main()
+    assert order.index("reload") < order.index("build_dataset")
+
+
+def test_a_failed_fetch_keeps_the_settled_results_published(monkeypatch) -> None:
+    """Settling already succeeded and published; that is a useful run, not a failed one."""
+    _args(monkeypatch)
+    monkeypatch.setattr(daily, "_fingerprint", lambda: (1, "2026-09-20"))
+    monkeypatch.setattr(daily, "reload_api", lambda *_a, **_k: True)
+
+    def run(step):
+        if step.name == "build_dataset":
+            raise subprocess.CalledProcessError(1, step.name)
+        return 0.0
+
+    monkeypatch.setattr(daily, "run_step", run)
+    assert daily.main() == 0
+
+
+def test_a_failed_settle_does_not_stop_the_fetch(monkeypatch, runs) -> None:
+    """The fetch may still bring results worth projecting."""
+    _args(monkeypatch)
+    monkeypatch.setattr(daily, "_fingerprint", lambda: (29143, "2026-09-20"))
+    called: list[str] = []
+
+    def run(step):
+        called.append(step.name)
+        if step.args == ("--settle-only",):
+            raise subprocess.CalledProcessError(1, step.name)
+        return 0.0
+
+    monkeypatch.setattr(daily, "run_step", run)
+    monkeypatch.setattr(daily, "reload_api", lambda *_a, **_k: True)
+    daily.main()
+    assert "build_dataset" in called
+
+
 def test_nothing_new_still_settles(monkeypatch, runs) -> None:
     """The bug this guards: settling gated on the wrong source.
 
@@ -89,7 +162,7 @@ def test_nothing_new_still_settles(monkeypatch, runs) -> None:
     monkeypatch.setattr(daily, "_fingerprint", lambda: (29143, "2026-09-20"))
 
     assert daily.main() == 0
-    assert runs == ["build_dataset", "score_upcoming"]
+    assert runs == ["score_upcoming", "build_dataset"]
 
 
 def test_nothing_new_does_not_reproject(monkeypatch, runs) -> None:
@@ -111,7 +184,7 @@ def test_new_results_run_the_whole_chain(monkeypatch, runs) -> None:
     monkeypatch.setattr(daily, "_fingerprint", lambda: next(seen))
 
     assert daily.main() == 0
-    assert runs == ["build_dataset", "score_upcoming", "project_season"]
+    assert runs == ["score_upcoming", "build_dataset", "score_upcoming", "project_season"]
 
 
 def test_force_reprojects_without_new_results(monkeypatch, runs) -> None:
@@ -120,7 +193,7 @@ def test_force_reprojects_without_new_results(monkeypatch, runs) -> None:
     monkeypatch.setattr(daily, "_fingerprint", lambda: (29143, "2026-09-20"))
 
     assert daily.main() == 0
-    assert runs == ["build_dataset", "score_upcoming", "project_season"]
+    assert runs == ["score_upcoming", "build_dataset", "score_upcoming", "project_season"]
 
 
 # --- failures leave the site complete rather than half-refreshed --------------
@@ -140,8 +213,16 @@ def test_a_failed_fetch_touches_nothing(monkeypatch, runs) -> None:
     assert reloaded == []
 
 
-def test_a_failed_step_stops_before_publishing(monkeypatch) -> None:
-    """A half-refreshed site is worse than one a day behind."""
+def test_a_failed_projection_still_reports_failure(monkeypatch) -> None:
+    """The settled results stay published; the run still exits non-zero.
+
+    This used to assert that nothing was published until every step had
+    succeeded. That is no longer the intent: settling publishes deliberately
+    and early, because the three tabs reading it should not wait on a
+    twenty-minute scrape. What must not happen is a *projection* failure
+    passing silently -- a half-rebuilt table says nothing about which half it
+    is.
+    """
     _args(monkeypatch)
     seen = iter([(1, "2026-09-20"), (2, "2026-10-10")])
     monkeypatch.setattr(daily, "_fingerprint", lambda: next(seen))
@@ -159,8 +240,9 @@ def test_a_failed_step_stops_before_publishing(monkeypatch) -> None:
     monkeypatch.setattr(daily, "reload_api", lambda *_a, **_k: reloaded.append(True) or True)
 
     assert daily.main() == 1
-    assert called == ["build_dataset", "score_upcoming", "project_season"]
-    assert reloaded == []
+    assert called == ["score_upcoming", "build_dataset", "score_upcoming", "project_season"]
+    # Settling published before the fetch, and that stands.
+    assert reloaded == [True]
 
 
 def test_a_dead_api_is_reported_not_swallowed(monkeypatch, runs) -> None:

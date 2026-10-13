@@ -885,9 +885,15 @@ def _recent_from_store(known_through: pd.Timestamp, league: str | None) -> list[
     way for a reader to tell a stale feed from a quiet fortnight.
 
     These rows are the forecasts stored before those kickoffs, settled from the
-    schedule pages. They carry no retrospective re-scoring and no market row,
-    and they are flagged `predicted_before_kickoff` so the page can say which
-    kind of prediction it is showing.
+    schedule pages, and flagged `predicted_before_kickoff` so the page can say
+    which kind of prediction it is showing.
+
+    They carry a market row wherever the store has one. That is not every row:
+    `score_upcoming` takes odds from football-data's fixtures file at the moment
+    it predicts, and when that file is unreachable the forecast is stored
+    without them. The gap closes on its own -- once football-data publishes the
+    match it enters the feature table *with* closing odds, and the branch above
+    serves that row instead of this one.
     """
     try:
         rows = store.settled()
@@ -925,6 +931,7 @@ def _recent_from_store(known_through: pd.Timestamp, league: str | None) -> list[
                 prob_over_2_5=float(r["prob_over_2_5"]),
                 prob_btts=float(r["prob_btts"]),
                 predicted_before_kickoff=True,
+                **_stored_market(r),
                 actual_home_goals=None if pd.isna(goals_home) else int(goals_home),
                 actual_away_goals=None if pd.isna(goals_away) else int(goals_away),
                 actual_result=str(r["actual_result"]),
@@ -939,6 +946,26 @@ def _recent_from_store(known_through: pd.Timestamp, league: str | None) -> list[
             )
         )
     return out
+
+
+def _stored_market(row: pd.Series) -> dict[str, float]:
+    """The market's view of a stored prediction, de-vigged, or nothing.
+
+    Discover's "where we disagreed with the bookmakers" filters on these, so a
+    row that has odds and does not report them is silently dropped from that
+    list. Eight of the fifty-two settled predictions were being discarded this
+    way while the odds sat in the store unused.
+    """
+    cols = list(ODDS_COLUMNS)
+    if any(pd.isna(row.get(c)) for c in cols):
+        return {}
+    market = odds_implied_probs(pd.DataFrame([{c: float(row[c]) for c in cols}]), ODDS_COLUMNS)[0]
+    return {
+        "market_prob_home": round(float(market[0]), 4),
+        "market_prob_draw": round(float(market[1]), 4),
+        "market_prob_away": round(float(market[2]), 4),
+    }
+
 
 
 def _form_for(team: str, before: pd.Timestamp) -> TeamForm | None:

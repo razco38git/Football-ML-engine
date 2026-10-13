@@ -83,6 +83,10 @@ FETCH = Step("build_dataset", (), "fetch match results")
 #: It reads two sources -- football-data, and the schedule pages, which carry a
 #: score days before football-data publishes one -- so it has work to do on days
 #: when the fetch brought nothing.
+SETTLE_ONLY = Step(
+    "score_upcoming", ("--settle-only",), "settle what was played -- the fast path"
+)
+
 SETTLE = Step("score_upcoming", (), "settle what was played, re-forecast the next round")
 
 #: Projecting runs only when the results table actually moved.
@@ -140,20 +144,57 @@ def main() -> int:
 
 
 def _run(args: argparse.Namespace, started: float) -> int:
+    # Settle first, publish, *then* do the slow work.
+    #
+    # The order used to be the other way round, and it stopped working the day
+    # `build_dataset` grew the FBref top-up: that scrapes a page per team at a
+    # seven-second rate limit whenever football-data is behind, and
+    # football-data has been behind since 2026-09-20, so it is behind every
+    # morning. On 2026-10-13 the job started at 08:55 and was still inside the
+    # fetch at 09:28 with sixteen of the previous day's predictions unsettled.
+    #
+    # Settling needs none of it. It reads the schedule -- five pages, cached for
+    # twelve hours -- and the history already on disk. The expensive step exists
+    # for the *projection*; Recent results, Prediction Accuracy and Discover
+    # only need the cheap one, and now get it about a minute in rather than
+    # twenty-five.
+    published = False
+    try:
+        run_step(SETTLE_ONLY)
+        published = reload_api(args.api_url)
+        if published:
+            logger.info(
+                "Settled and published in %s. The rest of this run is the "
+                "projection, which nobody is waiting on.",
+                _duration(time.monotonic() - started),
+            )
+        else:
+            logger.error(
+                "Settled, but the API is still serving the old copy. Start it, "
+                "or POST /admin/reload, to publish it."
+            )
+    except subprocess.CalledProcessError as exc:
+        # Not fatal. The fetch below may still bring results worth projecting,
+        # and a later run settles what this one could not.
+        logger.error(
+            "Settling failed (exit %d); carrying on to the fetch. The tabs keep "
+            "whatever was last settled.", exc.returncode,
+        )
 
     before = _fingerprint()
     try:
         run_step(FETCH)
     except subprocess.CalledProcessError as exc:
-        # The usual cause is football-data being unreachable, which happens.
-        # Yesterday's tables are correct and complete; today's absence of new
-        # ones is not a reason to touch anything.
+        # football-data being unreachable is a normal morning. Anything settled
+        # above is already live, so this is the end of a useful run rather than
+        # a failure of one.
         logger.error(
-            "build_dataset failed (exit %d). Nothing downstream ran, so the site "
-            "keeps serving what it had. Tomorrow's run will try again.",
+            "build_dataset failed (exit %d). Nothing further ran; the settled "
+            "results above are published and the tables keep yesterday's "
+            "numbers. Tomorrow's run will try again.",
             exc.returncode,
         )
-        return 1
+        return 0 if published else 1
     after = _fingerprint()
     advanced = after != before
 
@@ -164,22 +205,18 @@ def _run(args: argparse.Namespace, started: float) -> int:
         )
     else:
         logger.info(
-            "football-data published nothing new (%d rows, latest %s)",
+            "football-data published nothing new (%d rows, latest %s); the "
+            "tables would be rebuilt identically, so they are left alone",
             after[0], after[1] or "n/a",
         )
 
-    # `score_upcoming` runs whatever football-data did, and that is the whole
-    # correction here. It settles from *two* sources -- football-data, and the
-    # schedule pages that carry a score football-data has not published yet --
-    # so gating it on football-data advancing gated it on the wrong thing.
-    #
-    # On 2026-10-12 that is exactly what happened: 51 predictions for the 11th
-    # sat unsettled with all seventeen results already on the schedule pages,
-    # because football-data had moved nothing and this job stopped after the
-    # fetch. Settling is also cheap and idempotent -- `store.append`
-    # de-duplicates per model version, so re-forecasting the same fixtures adds
-    # nothing.
-    steps = [SETTLE, PROJECT] if (advanced or args.force) else [SETTLE]
+    # Re-forecast on the fresh history, and re-simulate only if it moved.
+    # `project_season` reads the results table and nothing else, so with no new
+    # rows it would spend four minutes rewriting the file it already wrote.
+    steps = [SETTLE, PROJECT] if (advanced or args.force) else []
+    if not steps:
+        logger.info("Nothing left to do. Done in %s", _duration(time.monotonic() - started))
+        return 0
 
     for step in steps:
         try:
