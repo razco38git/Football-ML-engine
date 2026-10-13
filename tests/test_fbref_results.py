@@ -171,3 +171,199 @@ def test_the_columns_it_promises_are_the_ones_features_need() -> None:
         "ShotsOnTargetFor", "ShotsOnTargetAgainst",
     ):
         assert needed in fb.COLUMNS
+
+
+# --- the gate's memory --------------------------------------------------------
+#
+# The gate compares the schedule to the history and scrapes if anything is
+# missing. With no memory, a match *neither* source can supply keeps its
+# division behind for good: on 2026-10-13 La Liga was behind by one match --
+# Vallecano 0-0 Ath Bilbao, 10 October -- that football-data had skipped and
+# whose FBref shooting line did not exist, so the completeness check refused the
+# row, correctly, and `build_dataset` paid 6m 43s to be told so again every
+# morning.
+#
+# What is pinned here is the asymmetry that makes parking safe. A league that
+# comes back with shots for every match but one has said something true about
+# that one. A league that comes back with nothing has a dead browser, and
+# parking on that would hide a real gap for a week.
+
+def _schedule(rows: list[tuple[str, str, str, str]]) -> pd.DataFrame:
+    """Played matches as `played_results` shapes them."""
+    return pd.DataFrame({
+        "League": [r[0] for r in rows],
+        "Season": ["2627"] * len(rows),
+        "Date": pd.to_datetime([r[1] for r in rows]),
+        "HomeTeam": [r[2] for r in rows],
+        "AwayTeam": [r[3] for r in rows],
+        "FTHG": [0] * len(rows),
+        "FTAG": [0] * len(rows),
+        "FTR": ["D"] * len(rows),
+    })
+
+
+def _history(rows: list[tuple[str, str, str, str]]) -> pd.DataFrame:
+    """The same matches as the history holds them: one row per team."""
+    sides = []
+    for league, date, home, away in rows:
+        for team, opponent, venue in ((home, away, "Home"), (away, home, "Away")):
+            sides.append({
+                "League": league, "Season": "2627", "Date": pd.Timestamp(date),
+                "Team": team, "Opponent": opponent, "Venue": venue,
+                "GoalsFor": 0, "GoalsAgainst": 0, "Result": "D",
+            })
+    return pd.DataFrame(sides)
+
+
+def test_a_match_the_history_lacks_is_missing() -> None:
+    sched = _schedule([("SP1", "2026-10-10", "Vallecano", "Ath Bilbao"),
+                       ("SP1", "2026-10-10", "Barcelona", "Getafe")])
+    known = _history([("SP1", "2026-10-10", "Barcelona", "Getafe")])
+    out = fb._missing_matches(sched, known)
+    assert list(out["HomeTeam"]) == ["Vallecano"]
+
+
+def test_no_history_means_everything_is_missing() -> None:
+    """Nothing to compare must not read as nothing to do."""
+    sched = _schedule([("SP1", "2026-10-10", "Vallecano", "Ath Bilbao")])
+    assert len(fb._missing_matches(sched, None)) == 1
+    assert len(fb._missing_matches(sched, pd.DataFrame())) == 1
+
+
+def test_a_parked_match_is_not_retried_within_the_window(tmp_path) -> None:
+    sched = _schedule([("SP1", "2026-10-10", "Vallecano", "Ath Bilbao")])
+    path = tmp_path / "deferred.csv"
+    now = pd.Timestamp("2026-10-14")
+
+    fb._record_deferred(sched, pd.DataFrame(columns=fb.DEFERRED_COLUMNS), path, now)
+    deferred = fb._load_deferred(path)
+    assert fb._parked(deferred, now) == fb._keys(sched)
+    # Still inside the window the next morning.
+    assert fb._parked(deferred, now + pd.Timedelta(days=1)) == fb._keys(sched)
+
+
+def test_a_parked_match_is_retried_once_the_window_passes(tmp_path) -> None:
+    """Parking must not be permanent: FBref does backfill match reports."""
+    sched = _schedule([("SP1", "2026-10-10", "Vallecano", "Ath Bilbao")])
+    path = tmp_path / "deferred.csv"
+    now = pd.Timestamp("2026-10-14")
+
+    fb._record_deferred(sched, pd.DataFrame(columns=fb.DEFERRED_COLUMNS), path, now)
+    deferred = fb._load_deferred(path)
+    assert fb._parked(deferred, now + fb.RETRY_AFTER) == set()
+
+
+def test_attempts_accumulate_across_runs(tmp_path) -> None:
+    """A count of four on a six-week-old hole is how a reader learns it is permanent."""
+    sched = _schedule([("SP1", "2026-10-10", "Vallecano", "Ath Bilbao")])
+    path = tmp_path / "deferred.csv"
+
+    for day in ("2026-10-14", "2026-10-21", "2026-10-28"):
+        fb._record_deferred(sched, fb._load_deferred(path), path, pd.Timestamp(day))
+
+    out = fb._load_deferred(path)
+    assert len(out) == 1
+    assert int(out.iloc[0]["attempts"]) == 3
+    assert out.iloc[0]["last_attempt"] == pd.Timestamp("2026-10-28")
+
+
+def test_a_parked_match_is_forgotten_once_it_arrives(tmp_path) -> None:
+    """Otherwise the file grows a permanent row for every hole ever seen."""
+    sched = _schedule([("SP1", "2026-10-10", "Vallecano", "Ath Bilbao")])
+    path = tmp_path / "deferred.csv"
+    fb._record_deferred(sched, pd.DataFrame(columns=fb.DEFERRED_COLUMNS), path,
+                        pd.Timestamp("2026-10-14"))
+
+    arrived = _history([("SP1", "2026-10-10", "Vallecano", "Ath Bilbao")])
+    assert fb._load_deferred(path, seen=fb._seen(arrived)).empty
+
+
+def test_other_divisions_keep_their_records(tmp_path) -> None:
+    """A run that scrapes only Spain must not drop a parked German match."""
+    path = tmp_path / "deferred.csv"
+    german = _schedule([("D1", "2026-10-03", "Mainz", "Leverkusen")])
+    fb._record_deferred(german, pd.DataFrame(columns=fb.DEFERRED_COLUMNS), path,
+                        pd.Timestamp("2026-10-07"))
+
+    spanish = _schedule([("SP1", "2026-10-10", "Vallecano", "Ath Bilbao")])
+    fb._record_deferred(spanish, fb._load_deferred(path), path, pd.Timestamp("2026-10-14"))
+
+    out = fb._load_deferred(path)
+    assert sorted(out["League"]) == ["D1", "SP1"]
+
+
+def test_an_unreadable_record_makes_everything_eligible(tmp_path) -> None:
+    """Failing open: a corrupt cache costs a scrape, not a day of results."""
+    path = tmp_path / "deferred.csv"
+    path.write_text("not,a,valid\nrecord\n", encoding="utf-8")
+    assert fb._load_deferred(path).empty
+
+    path.write_text("League,Season\nSP1,2627\n", encoding="utf-8")
+    assert fb._load_deferred(path).empty
+
+
+# --- what gets parked, and what must not --------------------------------------
+
+def _merged(rows: list[tuple[str, str, str, str, object]]) -> pd.DataFrame:
+    """`wide` as the merge leaves it: the schedule plus HS/AS, NaN when unresolved."""
+    return pd.DataFrame({
+        "League": [r[0] for r in rows],
+        "Season": ["2627"] * len(rows),
+        "Date": pd.to_datetime([r[1] for r in rows]),
+        "HomeTeam": [r[2] for r in rows],
+        "AwayTeam": [r[3] for r in rows],
+        "HS": [r[4] for r in rows],
+        "AS": [r[4] for r in rows],
+    })
+
+
+def test_a_match_with_no_shot_line_is_parked(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "deferred.csv"
+    monkeypatch.setattr(fb, "DEFERRED_PATH", path)
+    wide = _merged([
+        ("SP1", "2026-10-10", "Barcelona", "Getafe", 23.0),
+        ("SP1", "2026-10-10", "Vallecano", "Ath Bilbao", float("nan")),
+    ])
+    eligible = _schedule([("SP1", "2026-10-10", "Vallecano", "Ath Bilbao")])
+
+    fb._park_what_failed(wide, eligible, fb._load_deferred(path),
+                         pd.Timestamp("2026-10-14"))
+
+    out = fb._load_deferred(path)
+    assert list(out["HomeTeam"]) == ["Vallecano"]
+
+
+def test_a_dead_browser_parks_nothing(tmp_path, monkeypatch) -> None:
+    """The load-bearing distinction.
+
+    soccerdata drives FBref through a headless browser that can die mid-run,
+    and a league then comes back with no shots at all. Parking on that would
+    hide a genuine gap for a week -- the opposite of the point.
+    """
+    path = tmp_path / "deferred.csv"
+    monkeypatch.setattr(fb, "DEFERRED_PATH", path)
+    wide = _merged([
+        ("SP1", "2026-10-10", "Barcelona", "Getafe", float("nan")),
+        ("SP1", "2026-10-10", "Vallecano", "Ath Bilbao", float("nan")),
+    ])
+    eligible = _schedule([("SP1", "2026-10-10", "Vallecano", "Ath Bilbao")])
+
+    fb._park_what_failed(wide, eligible, fb._load_deferred(path),
+                         pd.Timestamp("2026-10-14"))
+    assert fb._load_deferred(path).empty
+
+
+def test_only_what_the_run_was_trying_to_add_is_parked(tmp_path, monkeypatch) -> None:
+    """`wide` carries the whole season; most of it the history already has."""
+    path = tmp_path / "deferred.csv"
+    monkeypatch.setattr(fb, "DEFERRED_PATH", path)
+    wide = _merged([
+        ("SP1", "2026-08-15", "Alaves", "Getafe", float("nan")),  # old, already stored
+        ("SP1", "2026-10-10", "Barcelona", "Getafe", 23.0),
+        ("SP1", "2026-10-10", "Vallecano", "Ath Bilbao", float("nan")),
+    ])
+    eligible = _schedule([("SP1", "2026-10-10", "Vallecano", "Ath Bilbao")])
+
+    fb._park_what_failed(wide, eligible, fb._load_deferred(path),
+                         pd.Timestamp("2026-10-14"))
+    assert list(fb._load_deferred(path)["HomeTeam"]) == ["Vallecano"]

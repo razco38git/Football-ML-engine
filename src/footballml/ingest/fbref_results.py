@@ -29,10 +29,13 @@ inferred.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from footballml.data import PROCESSED_DIR
 from footballml.entities import load_aliases
 from footballml.ingest.matchhistory import current_season_label
 from footballml.ingest.understat import UNDERSTAT_LEAGUES
@@ -45,6 +48,34 @@ FOOTBALL_DATA = "football-data"
 
 #: Identifies one side's half of one match.
 KEY = ["League", "Season", "Date", "Team", "Opponent"]
+
+#: Identifies a whole match, as the schedule presents it.
+MATCH_KEY = ["League", "Season", "Date", "HomeTeam", "AwayTeam"]
+
+#: Matches a working scrape could not complete, so the gate can stop paying for
+#: them. Local state beside the other processed files, not a tracked artifact:
+#: it is derived, and losing it costs one wasted scrape.
+DEFERRED_PATH = PROCESSED_DIR / "fbref_deferred.csv"
+
+DEFERRED_COLUMNS = [*MATCH_KEY, "attempts", "last_attempt"]
+
+#: How long a parked match is left alone before it is tried again.
+#:
+#: The gate is otherwise memoryless, which is a real cost: on 2026-10-13 La Liga
+#: was behind by exactly one match -- Vallecano 0-0 Ath Bilbao, 10 October --
+#: that *neither* source could supply. football-data published nine of the
+#: round's ten and skipped it; FBref's schedule page had the score, but the
+#: shooting matchlogs for both clubs ended three weeks earlier, so there was no
+#: shot line to merge and the completeness check refused the row. Nothing was
+#: wrong, and nothing would change tomorrow -- yet the league counted as behind
+#: every morning, and `build_dataset` paid 6m 43s for a row it would refuse
+#: again.
+#:
+#: A week, rather than never, because FBref does backfill match reports: a
+#: permanent skip would trade the daily cost for silently losing shots that
+#: arrive late. Whichever run next finds the record stale pays for one retry, so
+#: the worst case is one scrape a week per unfillable match instead of seven.
+RETRY_AFTER = timedelta(days=7)
 
 #: The columns here that become model features. Every one must be present on a
 #: row before it is allowed into the match history -- see `fetch_fbref_results`.
@@ -148,6 +179,14 @@ def fetch_fbref_results(
     it shows no played match that ``known`` is missing, this returns immediately
     and the shooting table is never touched. Only leagues that are actually
     behind get scraped.
+
+    The gate also remembers. A match neither source can supply -- FBref has the
+    score on the schedule page but no shooting line to merge -- would otherwise
+    keep its division "behind" for good, and buy the same refusal every morning.
+    Such a match is parked in :data:`DEFERRED_PATH` for :data:`RETRY_AFTER` and
+    does not count towards being behind while it is, so the cost falls from
+    every run to one a week. See :func:`_park_what_failed` for why a league that
+    returns *nothing* is never parked.
     """
     codes = list(leagues or UNDERSTAT_LEAGUES)
     unknown = [c for c in codes if c not in UNDERSTAT_LEAGUES]
@@ -166,14 +205,28 @@ def fetch_fbref_results(
         results["Date"] = pd.to_datetime(results["Date"])
         results["Season"] = results["Season"].astype(str)
 
-        behind = _leagues_behind(results, known)
-        if not behind:
+        now = _today()
+        seen = _seen(known)
+        missing = _missing_matches(results, known)
+        if missing.empty:
             logger.info(
                 "The match history has every played match the schedule knows "
                 "about; skipping the shooting scrape"
             )
             return pd.DataFrame(columns=COLUMNS)
 
+        deferred = _load_deferred(seen=seen)
+        eligible = missing[~_key_series(missing).isin(_parked(deferred, now))]
+        if eligible.empty:
+            logger.info(
+                "All %d missing match(es) were already tried and could not be "
+                "completed (%s); next attempt once a record is %d days old. "
+                "Skipping the shooting scrape.",
+                len(missing), _describe(missing), RETRY_AFTER.days,
+            )
+            return pd.DataFrame(columns=COLUMNS)
+
+        behind = set(eligible["League"].dropna().unique())
         results = results[results["League"].isin(behind)]
         logger.info("Behind in %s; fetching shooting stats for those only", sorted(behind))
         shots = _shooting(sorted(behind), seasons)
@@ -202,6 +255,7 @@ def fetch_fbref_results(
         "FBref results: %d played match(es) to %s, shots resolved for %d",
         len(wide), wide["Date"].max().date(), resolved,
     )
+    _park_what_failed(wide, eligible, deferred, now)
 
     sides = []
     for venue, (gf, ga, sf, sa, stf, sta, team, opp) in {
@@ -250,30 +304,246 @@ def fetch_fbref_results(
     return out.loc[complete, COLUMNS].reset_index(drop=True)
 
 
-def _leagues_behind(results: pd.DataFrame, known: pd.DataFrame | None) -> set[str]:
-    """Divisions where the schedule knows a played match the history does not.
+def _today() -> pd.Timestamp:
+    """Date-granular "now". Its own function so a test can move it."""
+    return pd.Timestamp(datetime.now(UTC).date())
 
-    Cheap by design: it compares the schedule -- five cached pages -- against
-    rows already on disk, and decides whether the twelve-minute scrape is worth
-    starting. With ``known`` missing there is nothing to compare, so everything
-    is treated as behind rather than silently skipping a real gap.
+
+def _key_series(frame: pd.DataFrame) -> pd.Series:
+    """One hashable key per row, for membership tests against another frame."""
+    if frame.empty:
+        return pd.Series([], dtype=object, index=frame.index)
+    return pd.Series(
+        list(
+            zip(
+                frame["League"],
+                frame["Season"].astype(str),
+                pd.to_datetime(frame["Date"]),
+                frame["HomeTeam"],
+                frame["AwayTeam"],
+                strict=True,
+            )
+        ),
+        index=frame.index,
+        dtype=object,
+    )
+
+
+def _keys(frame: pd.DataFrame) -> set[tuple]:
+    return set(_key_series(frame))
+
+
+def _seen(known: pd.DataFrame | None) -> set[tuple] | None:
+    """``(league, season, date, team)`` for every match already in the history.
+
+    ``None`` when there is nothing to compare, which callers read as "assume
+    everything is missing" rather than silently skipping a real gap.
     """
     if known is None or known.empty:
-        return set(results["League"].dropna().unique())
+        return None
 
     have = known.assign(
         Date=pd.to_datetime(known["Date"]), Season=known["Season"].astype(str)
     )
     # The history is one row per team; a match is present if either side is.
-    seen = set(
+    return set(
         zip(have["League"], have["Season"], have["Date"], have["Team"], strict=True)
     )
-    behind = {
-        row.League
-        for row in results.itertuples()
-        if (row.League, row.Season, row.Date, row.HomeTeam) not in seen
+
+
+def _missing_matches(results: pd.DataFrame, known: pd.DataFrame | None) -> pd.DataFrame:
+    """Played matches the schedule knows about and the history does not.
+
+    Cheap by design: it compares the schedule -- five cached pages -- against
+    rows already on disk, and is what decides whether the twelve-minute scrape
+    is worth starting.
+
+    Returns the matches rather than just their divisions, because the divisions
+    alone are not enough to decide. A league is "behind" for as long as one
+    match is absent, and :func:`_load_deferred` needs to know *which* match that
+    is to tell a gap worth scraping for from one that has already been tried.
+    """
+    seen = _seen(known)
+    if seen is None:
+        return results.copy()
+
+    absent = pd.Series(
+        [
+            (row.League, row.Season, row.Date, row.HomeTeam) not in seen
+            for row in results.itertuples()
+        ],
+        index=results.index,
+        dtype=bool,
+    )
+    return results[absent].copy()
+
+
+def _load_deferred(
+    path: Path | None = None, seen: set[tuple] | None = None
+) -> pd.DataFrame:
+    """Matches a working scrape has already failed to complete.
+
+    Pruned against the history on the way in: once a match arrives from either
+    source its record is dead weight, and dropping it here is what keeps the
+    file from growing a permanent row for every hole ever seen.
+
+    Unreadable or malformed is treated as empty -- the cost of forgetting is one
+    wasted scrape, and the cost of raising is a build that fails over a cache.
+    """
+    path = path or DEFERRED_PATH
+    empty = pd.DataFrame(columns=DEFERRED_COLUMNS)
+    if not path.exists():
+        return empty
+
+    try:
+        frame = pd.read_csv(path)
+    except (OSError, ValueError) as exc:
+        logger.warning(
+            "Could not read %s (%s); every missing match is eligible again",
+            path.name, exc,
+        )
+        return empty
+
+    absent = [c for c in DEFERRED_COLUMNS if c not in frame.columns]
+    if absent:
+        logger.warning(
+            "%s is missing column(s) %s; every missing match is eligible again",
+            path.name, absent,
+        )
+        return empty
+
+    frame = frame.assign(
+        Date=pd.to_datetime(frame["Date"], errors="coerce"),
+        Season=frame["Season"].astype(str),
+        last_attempt=pd.to_datetime(frame["last_attempt"], errors="coerce"),
+        attempts=pd.to_numeric(frame["attempts"], errors="coerce"),
+    ).dropna(subset=["Date", "last_attempt", "attempts"])
+
+    if seen is not None and not frame.empty:
+        arrived = pd.Series(
+            [
+                (row.League, row.Season, row.Date, row.HomeTeam) in seen
+                for row in frame.itertuples()
+            ],
+            index=frame.index,
+            dtype=bool,
+        )
+        if arrived.any():
+            logger.info(
+                "%d parked match(es) have since arrived from a source; forgetting them",
+                int(arrived.sum()),
+            )
+        frame = frame[~arrived]
+
+    return frame.reset_index(drop=True)
+
+
+def _parked(deferred: pd.DataFrame, now: pd.Timestamp) -> set[tuple]:
+    """Keys still inside their retry window, so not worth scraping for today."""
+    if deferred.empty:
+        return set()
+    return _keys(deferred[deferred["last_attempt"] > now - RETRY_AFTER])
+
+
+def _record_deferred(
+    unfillable: pd.DataFrame,
+    deferred: pd.DataFrame,
+    path: Path | None = None,
+    now: pd.Timestamp | None = None,
+) -> None:
+    """Park matches a working scrape could not complete, and rewrite the file.
+
+    ``attempts`` is incremented rather than overwritten. It is not used to
+    decide anything -- :func:`_parked` goes on the date alone -- but a count of
+    four on a match from six weeks ago is how somebody reading the file learns
+    that this is a permanent hole in both sources rather than a page FBref has
+    not got round to yet.
+    """
+    path = path or DEFERRED_PATH
+    now = now if now is not None else _today()
+
+    record: dict[tuple, tuple[int, pd.Timestamp]] = {
+        (row.League, row.Season, row.Date, row.HomeTeam, row.AwayTeam): (
+            int(row.attempts), row.last_attempt,
+        )
+        for row in deferred.itertuples()
     }
-    return behind
+    for key in _keys(unfillable):
+        attempts, _ = record.get(key, (0, now))
+        record[key] = (attempts + 1, now)
+
+    out = pd.DataFrame(
+        [
+            {
+                "League": league, "Season": season,
+                "Date": pd.Timestamp(date).date().isoformat(),
+                "HomeTeam": home, "AwayTeam": away, "attempts": attempts,
+                "last_attempt": pd.Timestamp(last).date().isoformat(),
+            }
+            for (league, season, date, home, away), (attempts, last) in sorted(
+                record.items(), key=lambda item: (item[0][0], str(item[0][2]))
+            )
+        ],
+        columns=DEFERRED_COLUMNS,
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    out.to_csv(path, index=False)
+
+
+def _park_what_failed(
+    wide: pd.DataFrame,
+    eligible: pd.DataFrame,
+    deferred: pd.DataFrame,
+    now: pd.Timestamp,
+) -> None:
+    """Park the matches this scrape was for and still could not complete.
+
+    Only matches in a division whose scrape plainly *worked*. The distinction is
+    the whole safety of this: a league that comes back with no shots at all is
+    the headless browser having died, which happens, and parking on that would
+    hide a real gap for a week. A league that comes back with shots for every
+    match but one has told us something true about that one.
+
+    Never raises. Forgetting to park costs a repeated scrape; failing the build
+    over a cache file costs the day's results.
+    """
+    try:
+        unresolved = wide[wide[["HS", "AS"]].isna().any(axis=1)]
+        worked = {
+            league
+            for league, rows in wide.groupby("League")
+            if bool(rows[["HS", "AS"]].notna().all(axis=1).any())
+        }
+        # Only what this run was actually trying to add -- `wide` carries the
+        # league's whole season, most of which the history already has.
+        unfillable = unresolved[
+            unresolved["League"].isin(worked)
+            & _key_series(unresolved).isin(_keys(eligible))
+        ]
+        if unfillable.empty and deferred.empty:
+            return
+
+        _record_deferred(unfillable, deferred, now=now)
+        if not unfillable.empty:
+            logger.warning(
+                "FBref has no shooting line for %d missing match(es) (%s). "
+                "Parked for %d days: the row cannot be completed, and without "
+                "this the division counts as behind every morning.",
+                len(unfillable), _describe(unfillable), RETRY_AFTER.days,
+            )
+    except Exception as exc:  # noqa: BLE001 - a bookkeeping file must not break the build
+        logger.warning("Could not record deferred matches (%s)", exc)
+
+
+def _describe(matches: pd.DataFrame, limit: int = 4) -> str:
+    """``SP1 2026-10-10 Vallecano v Ath Bilbao`` for a log line."""
+    shown = [
+        f"{row.League} {pd.Timestamp(row.Date).date()} {row.HomeTeam} v {row.AwayTeam}"
+        for row in matches.head(limit).itertuples()
+    ]
+    if len(matches) > limit:
+        shown.append(f"and {len(matches) - limit} more")
+    return "; ".join(shown)
 
 
 def top_up(tmh: pd.DataFrame, extra: pd.DataFrame) -> pd.DataFrame:
