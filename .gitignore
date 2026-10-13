@@ -10,6 +10,8 @@ venv/
 # Data
 data/raw/*
 data/processed/*
+# Derived per-season ingest blocks; rebuilt on demand.
+data/cache/
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 

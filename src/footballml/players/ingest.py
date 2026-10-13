@@ -202,8 +202,20 @@ def fetch_player_seasons(
     seasons: list[str] | None = None,
     with_fbref: bool = True,
     with_fifa: bool = True,
+    use_cache: bool = True,
 ) -> pd.DataFrame:
     """Fetch per-season player totals and derive per-90 rates.
+
+    Args:
+        leagues: Division codes. Defaults to all five.
+        seasons: Season labels. Defaults to every season Understat covers.
+        with_fbref: Merge FBref's defensive and goalkeeping metrics.
+        with_fifa: Blend in the EA exports and their detailed positions.
+        use_cache: Serve finished seasons' FBref reads from
+            :mod:`footballml.players.cache`. Only that read is cached, and
+            :mod:`footballml.players.cache` says at length why nothing further
+            can be -- three of the corrections here deliberately compare a
+            player's seasons against each other.
 
     Returns:
         One row per player per team per season, with raw totals, ``*_per90``
@@ -272,7 +284,7 @@ def fetch_player_seasons(
         # pair the wrong players.
         from footballml.players.fbref import fetch_fbref_stats, match_players
 
-        extra = fetch_fbref_stats(codes, seasons)
+        extra = fetch_fbref_stats(codes, seasons, use_cache=use_cache)
         out = match_players(
             out,
             extra,

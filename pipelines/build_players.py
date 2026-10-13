@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from footballml.data import PROCESSED_DIR  # noqa: E402
 from footballml.ingest.understat import UNDERSTAT_LEAGUES, season_labels  # noqa: E402
+from footballml.players import cache  # noqa: E402
 from footballml.players.ingest import fetch_player_seasons  # noqa: E402
 from footballml.players.rating import latest_ratings, rate_players  # noqa: E402
 from footballml.players.team_strength import team_strength  # noqa: E402
@@ -40,6 +41,20 @@ def main() -> None:
         help="Players per team when --team-method=best_n.",
     )
     parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help=(
+            "Read every season from FBref instead of reusing finished ones. The "
+            "cache invalidates itself when the code that fills it changes, so "
+            "this is for confirming that, not routine use."
+        ),
+    )
+    parser.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="Delete every cached season before running.",
+    )
+    parser.add_argument(
         "--team-method",
         default="best_n",
         choices=["eleven", "best_n", "squad"],
@@ -59,7 +74,10 @@ def main() -> None:
     seasons = season_labels(args.start_season, args.end_season)
     log.info("Fetching players across %d seasons", len(seasons))
 
-    players = fetch_player_seasons(args.leagues, seasons)
+    if args.clear_cache:
+        log.info("Cleared %d cached season(s)", cache.clear())
+
+    players = fetch_player_seasons(args.leagues, seasons, use_cache=not args.no_cache)
     log.info("Fetched %d player-seasons", len(players))
 
     rated = rate_players(players)

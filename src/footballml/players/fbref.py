@@ -53,6 +53,7 @@ import unicodedata
 import pandas as pd
 
 from footballml.ingest.understat import UNDERSTAT_LEAGUES
+from footballml.players import cache
 
 logger = logging.getLogger(__name__)
 
@@ -294,9 +295,18 @@ def _flatten_columns(columns: pd.Index) -> list[str]:
 
 
 def fetch_fbref_stats(
-    leagues: list[str] | None = None, seasons: list[str] | None = None
+    leagues: list[str] | None = None,
+    seasons: list[str] | None = None,
+    use_cache: bool = True,
 ) -> pd.DataFrame:
     """Fetch and combine FBref ``misc`` and ``keeper`` per-90 stats.
+
+    Args:
+        leagues: Division codes. Defaults to all five.
+        seasons: Season labels. ``None`` reads whatever the reader was built for.
+        use_cache: Serve finished seasons from
+            :mod:`footballml.players.cache`. The latest season requested is
+            always read fresh, because it changes daily.
 
     Returns:
         ``League``, ``Season``, ``Team``, ``Player`` plus per-90 defensive and
@@ -308,6 +318,8 @@ def fetch_fbref_stats(
     names = [UNDERSTAT_LEAGUES[c] for c in codes]
     inverse = {v: k for k, v in UNDERSTAT_LEAGUES.items()}
     fb = sd.FBref(leagues=names, seasons=seasons)
+    current_season = max(seasons) if seasons else None
+    cached_seasons: list[str] = []
 
     frames = []
     for stat_type, wanted in (("misc", MISC_COLUMNS), ("keeper", KEEPER_COLUMNS)):
@@ -317,7 +329,17 @@ def fetch_fbref_stats(
         # entire run. Per-season means a bad page costs that season, not the
         # eleven that parsed fine.
         seasonal: list[pd.DataFrame] = []
+        request = cache.request_key(codes, stat_type)
         for season in seasons or [None]:
+            # A finished season reads the same forever, and reading all twelve
+            # is 150s of the 346s `build_players` takes. The season in progress
+            # changes daily, so it is never served from cache.
+            cacheable = use_cache and season is not None and season != current_season
+            if cacheable and (hit := cache.load(str(season), request)) is not None:
+                seasonal.append(hit)
+                cached_seasons.append(str(season))
+                continue
+
             reader = fb if season is None else sd.FBref(leagues=names, seasons=season)
             try:
                 raw = reader.read_player_season_stats(stat_type).reset_index()
@@ -345,6 +367,8 @@ def fetch_fbref_stats(
                 else:
                     out[f"{name}_per90"] = values.div(nineties).where(nineties > 0)
                     out[name] = values
+            if cacheable:
+                cache.save(str(season), request, out)
             seasonal.append(out)
 
         if not seasonal:
@@ -357,6 +381,12 @@ def fetch_fbref_stats(
         logger.info(
             "FBref %s: %d rows across %d season(s)",
             stat_type, len(combined), combined["Season"].nunique(),
+        )
+
+    if cached_seasons:
+        logger.info(
+            "FBref: %d block(s) served from cache, covering season(s) %s",
+            len(cached_seasons), ", ".join(sorted(set(cached_seasons))),
         )
 
     misc, keeper = frames
