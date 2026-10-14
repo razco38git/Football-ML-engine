@@ -46,6 +46,17 @@ carry a score days before football-data publishes one -- so it has work to do on
 a day when the fetch brought nothing. The projection simulates from the results
 table alone, so with no new rows it would spend four minutes rewriting the file
 it already wrote.
+
+**European results are fetched here too, and their absence is reported.** A
+UEFA tie settles from ``european_matches.csv`` and from nothing else, and that
+file used to be written only by the Monday job, where the step is optional and
+browser-driven. It had been failing: on 2026-10-14 its newest result was
+2026-09-17, so four weeks of European predictions sat unsettled and the
+Champions League was simply missing from Recent results and Prediction Accuracy.
+Nothing on the site or in a log said so, which is why `_report_stranded_european`
+now says it loudly. The fetch runs *after* the first publish, because it is the
+most fragile thing in the job, and *before* the ``build_dataset`` early return,
+because a football-data outage has nothing to do with European football.
 """
 
 from __future__ import annotations
@@ -73,10 +84,33 @@ from pipelines.weekly import (  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 MATCHES = ROOT / "data" / "processed" / "matches_all.csv"
+EUROPEAN = ROOT / "data" / "processed" / "european_matches.csv"
+PREDICTIONS = ROOT / "data" / "processed" / "predictions.csv"
+
+#: A European prediction older than this with no result is reported.
+#:
+#: Two days, not one: a tie kicking off Wednesday night is settled by Thursday
+#: morning's run, and complaining at that point would cry wolf every matchweek.
+STRANDED_AFTER_DAYS = 2
 
 logger = logging.getLogger("daily")
 
 FETCH = Step("build_dataset", (), "fetch match results")
+
+#: European results, which nothing else in this job can supply.
+#:
+#: `score_upcoming` settles a UEFA tie from `european_matches.csv` and from
+#: nothing else, and that file was only ever written by the Monday job, where
+#: this step is optional and browser-driven. It had been failing: on 2026-10-14
+#: the file's newest result was 2026-09-17, so every European prediction for
+#: four weeks sat unsettled and the Champions League was simply absent from
+#: Recent results and Prediction Accuracy. Nothing said so.
+#:
+#: Placed after the first publish, not before it. It drives a headless browser
+#: over eleven seasons of UEFA pages and is comfortably the most fragile thing
+#: here, so putting it ahead of settling would park the domestic results behind
+#: the same kind of scrape that `SETTLE_ONLY` was moved in front of.
+FETCH_EUROPEAN = Step("fetch_european", (), "pull any new UEFA results")
 
 #: Settling runs every day, whatever football-data did.
 #:
@@ -99,20 +133,71 @@ PROJECT = Step("project_season", (), "re-simulate the rest of the season")
 STEPS: tuple[Step, ...] = (SETTLE, PROJECT)
 
 
-def _fingerprint() -> tuple[int, str]:
-    """How much football the results table currently knows about.
+def _fingerprint(path: Path | None = None) -> tuple[int, str]:
+    """How much football a results table currently knows about.
 
     Row count *and* latest date, because either can move without the other: a
     correction to an old match changes the count and not the date, and a
     rescheduled fixture arriving late changes neither in a way a count alone
     would catch.
     """
-    if not MATCHES.exists():
+    path = path or MATCHES
+    if not path.exists():
         return (0, "")
-    frame = pd.read_csv(MATCHES, usecols=["Date"])
+    frame = pd.read_csv(path, usecols=["Date"])
     if frame.empty:
         return (0, "")
     return (len(frame), str(pd.to_datetime(frame["Date"]).max().date()))
+
+
+def _stranded_european() -> pd.DataFrame:
+    """European predictions old enough that a result should have arrived.
+
+    The point of this is to be *noisy*. The failure it reports is the quietest
+    one this pipeline has: a UEFA tie we committed to before kickoff, whose
+    result never arrived, shows up nowhere -- not as a wrong prediction, not as
+    a gap, just as a competition that silently stopped appearing. Four weeks of
+    it went unnoticed.
+    """
+    empty = pd.DataFrame(columns=["League", "competition", "Date", "HomeTeam", "AwayTeam"])
+    if not PREDICTIONS.exists():
+        return empty
+    try:
+        stored = pd.read_csv(PREDICTIONS)
+    except (OSError, ValueError) as exc:
+        logger.warning("Could not read the prediction store (%s)", exc)
+        return empty
+    needed = {"competition", "Date", "actual_result", "HomeTeam", "AwayTeam"}
+    if not needed <= set(stored.columns):
+        return empty
+
+    cutoff = pd.Timestamp.today().normalize() - pd.Timedelta(days=STRANDED_AFTER_DAYS)
+    stranded = stored[
+        (stored["competition"].astype(str) != "domestic")
+        & stored["actual_result"].isna()
+        & (pd.to_datetime(stored["Date"], errors="coerce") < cutoff)
+    ]
+    return stranded.drop_duplicates(["competition", "Date", "HomeTeam", "AwayTeam"])
+
+
+def _report_stranded_european() -> None:
+    """Say plainly when European results are missing, or that they are not."""
+    stranded = _stranded_european()
+    if stranded.empty:
+        return
+    listed = "; ".join(
+        f"{row.competition} {pd.Timestamp(row.Date).date()} {row.HomeTeam} v {row.AwayTeam}"
+        for row in stranded.head(6).itertuples()
+    )
+    if len(stranded) > 6:
+        listed += f"; and {len(stranded) - 6} more"
+    logger.error(
+        "%d European prediction(s) over %d days old still have no result (%s). "
+        "They settle from european_matches.csv, so this means the UEFA fetch "
+        "has not succeeded -- the Champions League is missing from Recent "
+        "results and Prediction Accuracy until it does.",
+        len(stranded), STRANDED_AFTER_DAYS, listed,
+    )
 
 
 def main() -> int:
@@ -180,6 +265,39 @@ def _run(args: argparse.Namespace, started: float) -> int:
             "Settling failed (exit %d); carrying on to the fetch. The tabs keep "
             "whatever was last settled.", exc.returncode,
         )
+
+    # European results, then settle again if any arrived.
+    #
+    # Deliberately before the `build_dataset` early return below. football-data
+    # being unreachable is a normal morning -- it was unreachable all of
+    # 2026-10-14 -- and a UEFA tie does not need it: it settles from
+    # `european_matches.csv` alone. Putting this after the return would mean a
+    # football-data outage also costs the Champions League, which has nothing
+    # to do with it.
+    european_before = _fingerprint(EUROPEAN)
+    try:
+        run_step(FETCH_EUROPEAN)
+    except subprocess.CalledProcessError as exc:
+        # Reported, not swallowed. This step is optional in the weekly job and
+        # that is exactly how it came to be four weeks stale unnoticed.
+        logger.error(
+            "fetch_european failed (exit %d). European results stay as they "
+            "were; the rest of this run is unaffected.", exc.returncode,
+        )
+    else:
+        if _fingerprint(EUROPEAN) != european_before:
+            logger.info("New European results; settling them")
+            try:
+                run_step(SETTLE_ONLY)
+                published = reload_api(args.api_url) or published
+            except subprocess.CalledProcessError as exc:
+                logger.error(
+                    "Settling the European results failed (exit %d)", exc.returncode
+                )
+        else:
+            logger.info("No new European results")
+
+    _report_stranded_european()
 
     before = _fingerprint()
     try:
