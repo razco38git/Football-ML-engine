@@ -73,12 +73,19 @@ function Stop-StaleApi {
         added to the player endpoints came back null in the UI for hours,
         because the process predated the field.
 
-        `uvicorn --reload` is the obvious answer and does not work here --
-        measured 2026-10-15, including with a direct launch and no wrapper. The
-        reloader detects the edit, logs "Reloading...", and the worker never
-        shuts down; uvicorn never even reaches "Shutting down". So the check
-        lives here instead, where it costs a restart only when there is a
-        reason for one.
+        `uvicorn --reload` is the obvious answer and is deliberately not used.
+        Measured 2026-10-15 on this machine, it is unreliable: the reloader
+        detects the edit, logs "Reloading...", and the worker then restarts or
+        hangs depending on the run -- once out of four attempts it completed.
+        A hung reloader leaves the API serving stale code behind a supervisor
+        that will not replace it, which is worse than the staleness it was
+        meant to cure.
+
+        One cause was found and fixed: shutdown used to wait on the fixture
+        warmer's uncancellable scrape (see `_warm_upcoming`), which is why a
+        graceful stop could take minutes. That alone did not make the reloader
+        dependable, so the restart decision lives here, where it is explicit
+        and costs a restart only when there is a reason for one.
 
         Compared against process start, not against a marker file, so it is
         still right after a reboot, a manual `uvicorn`, or an edit made while
@@ -98,10 +105,11 @@ function Stop-StaleApi {
 
     Write-Host ("  api is older than src ({0:HH:mm:ss} < {1:HH:mm:ss}) -- restarting it" -f $oldest, $newest)
     foreach ($proc in $running) {
-        # -Force, because a graceful stop waits on the fixture warmer, and that
-        # is an uncancellable `asyncio.to_thread` around a rate-limited scrape:
-        # 85 seconds of page fetches on a good day. Nothing here needs a clean
-        # shutdown -- the API holds no unsaved state, only caches it rebuilds.
+        # -Force because Windows gives no clean way to send an interrupt to
+        # another process, not because a polite stop would hang: that was true
+        # until the fixture warmer stopped blocking shutdown, and is not now.
+        # Nothing here needs a clean exit anyway -- the API holds no unsaved
+        # state, only caches it rebuilds at startup.
         Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
     }
     # Give the port a moment to come free, or Start-Background sees it listening
