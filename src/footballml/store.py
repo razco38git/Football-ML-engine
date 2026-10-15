@@ -171,24 +171,62 @@ def settled(path: Path | None = None) -> pd.DataFrame:
 
     `append` de-duplicates per model version, so a fixture predicted before
     kickoff, then re-predicted after a retrain while it was still unplayed, is
-    stored twice. That is right for the store -- each version's own forecast is
-    worth keeping -- but wrong for a published record: nine La Liga fixtures
-    appeared as eighteen, doubling `n` and counting every hit and miss twice.
+    stored several times. That is right for the store -- each version's own
+    forecast is worth keeping -- but wrong for a published record: nine La Liga
+    fixtures appeared as eighteen, doubling `n` and counting every hit and miss
+    twice.
 
-    The earliest prediction per fixture wins. It is the most conservative claim
-    available: the forecast committed furthest ahead of kickoff, made with the
-    least information.
+    **The last forecast made before the match date wins**, and both halves of
+    that matter.
+
+    *Last*, because that is the one the site actually showed. This used to keep
+    the earliest, on the reasoning that it was the most conservative claim --
+    the forecast committed furthest ahead, made with the least information.
+    That was the wrong axis. The Match Predictor serves the *current* model, so
+    a reader saw 44/25/32 for Roma v Real Madrid the day before kickoff and
+    then found 47/24/29 in Recent results afterwards: a ten-day-old forecast
+    from a model three versions superseded. Across the settled record all 61
+    fixtures held more than one forecast and 58 disagreed, by as much as
+    sixteen points. Scoring a number nobody was shown is not conservative, it
+    is just a different claim.
+
+    *Before the match date*, because `score_upcoming` forecasts whatever still
+    looks unplayed, and when the results feed lags that includes matches that
+    have already kicked off. Fourteen stored rows postdate their fixture, one
+    by a day and a half. Those are not pre-kickoff forecasts whatever else they
+    are, so they are refused -- and a fixture whose *only* forecasts postdate
+    it drops out of the published record entirely rather than being counted on
+    one. Three have. We hold dates and not kickoff times, so the bound has to
+    be the match date's midnight: it is the latest instant we can prove came
+    first.
+
+    Without a ``predicted_at`` column nothing can be proved about ordering or
+    timing, so the rows are left as they are and the last per fixture is taken
+    on file order.
     """
     stored = load(path)
     if stored.empty:
         return stored
 
     rows = stored[stored["actual_result"].notna()]
-    if "predicted_at" in rows.columns:
-        rows = rows.sort_values("predicted_at")
+    if "predicted_at" in rows.columns and "Date" in rows.columns:
+        made = pd.to_datetime(rows["predicted_at"], utc=True, errors="coerce")
+        kickoff = pd.to_datetime(rows["Date"], errors="coerce")
+        # A forecast with no timestamp cannot be shown to precede the match.
+        provable = made.notna() & kickoff.notna()
+        before = made.dt.tz_localize(None) < kickoff
+        dropped = int((provable & ~before).sum())
+        if dropped:
+            logger.info(
+                "Ignoring %d stored forecast(s) not made before the match date; "
+                "they cannot be published as predictions committed in advance",
+                dropped,
+            )
+        rows = rows[~provable | before].sort_values("predicted_at")
+
     rows = rows.assign(competition=_competition(rows))
     key = ["League", "competition", "Date", "HomeTeam", "AwayTeam"]
     present = [c for c in key if c in rows.columns]
     if present:
-        rows = rows.drop_duplicates(present, keep="first")
+        rows = rows.drop_duplicates(present, keep="last")
     return rows.reset_index(drop=True)
