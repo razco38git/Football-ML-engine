@@ -864,16 +864,6 @@ both Shapley attributions. Nothing about the era split touches the reasoning in
 
 # The defending sub-rating
 
-> **Superseded before shipping — re-run required.** Every number below was
-> measured with a club-name bug in `add_team_defence`: the player frame carries
-> Understat spellings and the match history carries football-data's, so the
-> join silently missed **26.6% of defenders**, worst at the biggest clubs
-> (Milan, Atletico, PSG, both Manchester clubs, Athletic). The join now reaches
-> 100%. The diagnosis in "Why" stands — it does not depend on the new metric —
-> and so does the shape of the result, but the weights are not settled and
-> nothing from the `outcome` arm is shipped. Re-run
-> `python -m pipelines.defending_sweep` and replace the two tables.
-
 ## Why
 
 A reader asked why Arsenal, the best defence in Europe, rate 79.6, and why
@@ -889,7 +879,7 @@ aggregate against that club's own defensive record:
 | **`sub_defending`**    | **+0.097**        | **+0.102**     |
 
 `sub_defending` is not weak, it is **backwards**: teams whose defenders rank
-higher on "defending" concede more. It is 62% of a centre-back's composite, and
+higher on "defending" concede more. It was 62% of a centre-back's composite, and
 every one of its five inputs reduces to three raw counts — tackles won,
 interceptions, fouls — because `clean_challenge_rate` and `ball_won_per_foul`
 are derived from those same three. It counts defensive *actions*, and a defender
@@ -908,12 +898,10 @@ paid provider was declined.
 
 - **`share`** — cut the weight on a backwards signal. CB `defending` from 0.62
   down to 0, the freed weight redistributed across involvement, creation and
-  finishing in their existing proportions. Untested until now: the sweep
-  recorded in `config/player_rating.yaml` moved the *full-back* share upward,
-  0.38 to 0.80, and lost at every step. Downward had never been tried.
+  finishing in their existing proportions.
 - **`outcome`** — give defenders what the goalkeeper already has. `GK` is rated
   97% on outcomes (`goals_against_per90: -2.0`, `clean_sheet_pct`) while the
-  centre-backs in front of him are rated 0% on them. Adds a `team_defence`
+  centre-backs in front of him were rated 0% on them. Adds a `team_defence`
   sub-rating built from the club's own `xGAgainst`, `GoalsAgainst` and clean
   sheet rate, taken out of `defending`.
 
@@ -922,91 +910,226 @@ seed 7), and the back line against the **next** season's goals conceded — next
 not same, because that is the only direction the model reads strength, and
 because a same-season figure would mark the `outcome` variant's own homework.
 
+### Two runs were measured and thrown away
+
+**Run 1 — the club-name join.** `add_team_defence` joined the player frame's
+Understat club spellings ("Manchester City", "Atletico Madrid", "Paris Saint
+Germain") against the match history's football-data spellings ("Man City",
+"Ath Madrid", "Paris SG"). A left join does not fail when it matches nothing,
+it fills NaN, so **26.6% of defenders silently had no team-defence value** —
+worst at Milan, Atletico, PSG, both Manchester clubs and Athletic, which is the
+worst possible place for it to fail. `add_team_strength` has carried
+`load_aliases("understat")` for exactly this reason all along. That run chose
+`team_defence: 0.30` at delta -0.00045, CI [-0.00063, -0.00027], comfortably
+significant. **Superseded in full; none of its numbers appear below.**
+
+**Run 2 — the peak was ignoring zero weights.** `peak_weight: 0.15` blends in a
+player's best sub-rating, and it took the maximum over *every* defined
+sub-rating, including ones weighted zero. So a weight of zero kept a group out
+of the composite but not out of the published rating. The tell was that
+rebuilding moved **807 of 3,904 full backs** by up to 4 points with no
+full-back weight and no full-back sub-rating changed: a left back at a
+mean-defence club was being credited for being outstanding at his club's clean
+sheets. It meant run 2's `baseline` was never production behaviour — it already
+carried part of the effect being measured — and it reversed the full-back
+conclusion entirely. **Superseded in full.**
+
+The fix narrows the peak to the sub-ratings a role is actually weighted on
+(`_peak_over_rated_sub_ratings`). In isolation it leaves every outfield role
+bit-identical to production and moves only keepers, through their zero-weighted
+`workload`: 459 of 1,799 move, mean delta -0.001, worst case 5 points.
+
+Everything below is run 3, on a join at **100%** of 34,739 player-seasons and a
+peak that respects a zero weight.
+
 ## Results
 
 | variant | CB defending | team_defence | RPS | delta | 95% CI | defence vs next GA |
 |---------|--------------|--------------|-----|-------|--------|--------------------|
-| baseline | 0.62 | 0.00 | 0.36508 | — | — | -0.452 |
-| share-0.45 | 0.45 | 0.00 | 0.36505 | -0.00003 | [-0.00020, +0.00014] | -0.466 |
-| share-0.30 | 0.30 | 0.00 | 0.36498 | -0.00010 | [-0.00028, +0.00007] | -0.478 |
-| share-0.15 | 0.15 | 0.00 | 0.36510 | +0.00002 | [-0.00017, +0.00020] | -0.485 |
-| **share-0.00** | 0.00 | 0.00 | 0.36482 | **-0.00026** | [-0.00044, -0.00008] | -0.491 |
-| outcome-0.15 | 0.47 | 0.15 | 0.36496 | -0.00012 | [-0.00030, +0.00005] | -0.497 |
-| **outcome-0.30** | 0.32 | 0.30 | **0.36463** | **-0.00045** | [-0.00063, -0.00027] | **-0.528** |
-| outcome-0.45 | 0.17 | 0.45 | 0.36536 | **+0.00028** | [+0.00010, +0.00046] | -0.548 |
+| baseline | 0.62 | 0.00 | 0.36515 | — | — | -0.442 |
+| share-0.62 | 0.62 | 0.00 | 0.36515 | 0.00000 | — | -0.442 |
+| share-0.45 | 0.45 | 0.00 | 0.36505 | -0.00010 | [-0.00027, +0.00006] | -0.455 |
+| share-0.30 | 0.30 | 0.00 | 0.36497 | -0.00018 | [-0.00036, 0.00000] | -0.470 |
+| share-0.15 | 0.15 | 0.00 | 0.36497 | -0.00018 | [-0.00036, 0.00000] | -0.478 |
+| share-0.00 | 0.00 | 0.00 | 0.36529 | +0.00014 | [-0.00005, +0.00033] | -0.485 |
+| outcome-0.15 | 0.47 | 0.15 | 0.36510 | -0.00005 | [-0.00023, +0.00013] | -0.488 |
+| **outcome-0.30** | 0.32 | 0.30 | 0.36505 | -0.00010 | [-0.00028, +0.00008] | **-0.523** |
+| outcome-0.45 | 0.17 | 0.45 | 0.36517 | +0.00002 | [-0.00016, +0.00020] | -0.544 |
 
-## Interpretation
+**Not one variant is significant on RPS.** `share-0.62` is mathematically
+identical to baseline and is in the table as a determinism check; it came back
+bit-identical on all four metrics, as did `baseline` and `cb-0.30-only` when the
+second stage re-ran them in a separate process.
 
-**The diagnosis is confirmed from both directions.** The defence correlation
-improves monotonically as defending's weight falls, -0.452 to -0.491, with no
-other change. And deleting the group outright — `share-0.00`, removing 62% of a
-centre-back's composite — *significantly improves* the model. A component worth
-nearly two thirds of the rating was making predictions worse.
+The defence correlation is monotone in both families, which is the one result
+that has held across all three runs and both defects.
 
-**`outcome-0.30` wins on both criteria** and is what ships: the best RPS in the
-table, significant against baseline, and a correlation gain of -0.452 to -0.528
-— about three quarters of the way to the -0.555 ceiling that a team's own
-previous conceding reaches.
+## Defensive validity, split by role
 
-**There is a real optimum, not a direction.** `outcome-0.45` buys the best
-correlation in the table, -0.548, and is significantly *worse* at predicting.
-Past some point the team's record crowds out what the rating knows about the
-player, and the correlation keeps improving precisely because the number is
-turning into last season's goals conceded.
+Full-back weights are identical in the first three rows, so `FB only` acts as a
+control and should not move — and does not.
+
+| variant | CB only | FB only | CB+FB+D | EA agreement (CB) | EA agreement (FB) |
+|---|---|---|---|---|---|
+| baseline | -0.381 | -0.396 | -0.433 | +0.778 | +0.815 |
+| share-0.00 | -0.463 | -0.396 | -0.477 | +0.803 | +0.815 |
+| **outcome-0.30** | **-0.544** | -0.396 | -0.526 | **+0.833** | +0.815 |
+| cb-0.30+fb-0.30 | -0.544 | -0.509 | -0.559 | +0.833 | +0.829 |
+
+xGA and npxGA agree: `outcome-0.30` reaches -0.558 and -0.531 on the CB line.
+It improves in **all five leagues on all three outcome measures** — Bundesliga
+-0.645 to -0.661, Premier League -0.433 to -0.517, Ligue 1 -0.325 to -0.395,
+Serie A -0.594 to -0.665, La Liga -0.531 to -0.621.
+
+That EA's independently scouted `fifa_overall` also moves closer, +0.778 to
++0.833, is the part hardest to explain as fitting our own second metric.
+
+## The RPS result that did not replicate
+
+The full-back extension looked like the clear winner. Paired on the same 20,060
+fixtures it beat everything, including the centre-back-only variant:
+
+| comparison | delta | 95% CI | |
+|---|---|---|---|
+| baseline to share-0.00 | +0.00014 | [-0.00005, +0.00033] | not significant |
+| baseline to outcome-0.30 | -0.00010 | [-0.00028, +0.00008] | not significant |
+| baseline to cb-0.30+fb-0.30 | -0.00046 | [-0.00065, -0.00028] | significant |
+| share-0.00 to outcome-0.30 | -0.00024 | [-0.00043, -0.00005] | significant |
+| outcome-0.30 to cb-0.30+fb-0.30 | -0.00037 | [-0.00056, -0.00018] | significant |
+
+Broken down by season, it is not a general effect:
+
+| season | n | outcome-0.30 | cb-0.30+fb-0.30 |
+|---|---|---|---|
+| 1516 | 1826 | +0.00000 | +0.00000 |
+| 1617 | 1826 | +0.00058 | -0.00086 |
+| 1718 | 1826 | -0.00043 | -0.00074 |
+| 1819 | 1826 | -0.00058 | +0.00080 |
+| 1920 | 1725 | -0.00027 | -0.00073 |
+| 2021 | 1826 | -0.00023 | -0.00065 |
+| 2122 | 1826 | -0.00018 | -0.00147 |
+| 2223 | 1826 | -0.00143 | -0.00156 |
+| 2324 | 1752 | +0.00051 | -0.00069 |
+| 2425 | 1752 | +0.00080 | +0.00060 |
+| 2526 | 1752 | +0.00012 | +0.00025 |
+| 2627 | 297 | +0.00065 | -0.00033 |
+| **improved in** | | **6/12** | **8/12** |
+
+By league, `cb-0.30+fb-0.30` improves in 4 of 5 and `outcome-0.30` in 2 of 5.
+1516 is exactly zero for both because the earliest fold trains with the strength
+features absent, so eleven seasons can move; 8 of 11 is p ≈ 0.11.
+
+The paired bootstrap resamples fixtures as if independent, but matches inside a
+season share a model fit, so the effective sample is nearer 12 than 20,060.
+**This pipeline cannot resolve RPS differences of 0.0005**, which the vintage
+drift says independently: rebuilding on a later day moved the baseline 0.36508
+to 0.36498 on a byte-identical config, because `_match_across_editions` couples
+seasons and re-fetching the season in progress re-resolves historical names.
+
+## Decision
+
+**Ship `CB team_defence: 0.30` with `defending: 0.32`. Leave full backs at
+zero.** The centre-back case rests on defensive validity, which replicates
+across every league and every outcome measure, with RPS neutral — not a gain,
+and no evidence of harm.
+
+**Why not the full-back extension**, despite better aggregates on every line.
+Its only advantage over the centre-back change was the RPS gain, and that is the
+claim that failed the consistency check. What is left is a validity gain bought
+at a steep editorial price: the full-back pool is 0.38, so taking 0.30 leaves a
+full back rated **8% on ball-winning and 30% on his club's clean sheets**. It
+was also the worst variant before the peak fix, so its case depends entirely on
+that fix, and 0.30 is the edge of the tested grid. It is a reasonable product
+decision, not a statistical conclusion, and it should be taken as one.
+
+**Why not `share-0.00`.** It is the worst of the four on RPS and clearly worse
+on validity (-0.463 against -0.544), and it leaves a centre-back's composite
+made entirely of involvement, creation and finishing — **no defensive content at
+all** — behind a bar the page labels "Ball-winning". It also moves the wrong
+clubs: Werder Bremen's back line *improves* from 66.5 to 69.0, rank 51st to
+36th. What it does establish, and it is the more important finding, is that
+deleting 62% of a centre-back's composite does not make the model worse. That is
+what a backwards signal looks like from the other side.
+
+**Why not 0.45.** It buys the best correlation of the `outcome` arm, -0.544, and
+predicts no better. Past some point the club's record crowds out what the rating
+knows about the player.
+
+## What it does to the published ratings
+
+2025/26, the last completed season:
+
+| defender | club `team_defence` | before | after |
+|---|---|---|---|
+| William Saliba (Arsenal) | 98 | 79 | **85** |
+| Gabriel (Arsenal) | 98 | 80 | **85** |
+| Rúben Dias (Manchester City) | 90 | 77 | **83** |
+| Alessandro Bastoni (Inter) | 95 | 84 | **87** |
+| Marquinhos (PSG) | 96 | 77 | **81** |
+| Virgil van Dijk (Liverpool) | 59 | 79 | **83** |
+| Marc Guehi (Crystal Palace) | 53 | 83 | **81** |
+| Tiago Gabriel (Lecce) | 41 | 65 | **62** |
+
+Arsenal's back line goes 77.0 to 79.6, 7th to 4th of 96, and their
+`strength_defence` 79.6 to 82.8, second only to Bayern. Every full back is
+unchanged. The distribution barely moves: CB mean 68.46 to 68.43, sd 6.74 to
+7.23, p95 80 to 82.
 
 ## Limitations
 
-1. **The effect on prediction is tiny.** -0.00045 on a base of 0.36508 is 0.12%.
-   It is statistically solid on 20,060 paired fixtures and it is not worth much
-   in a forecast. `strength_defence` ranks 93rd of 125 features in the match
-   model; this was never going to move RPS far, and the case for the change is
-   that the published ratings stop being indefensible.
-2. **`team_defence` is a club number.** Every centre-back at a club gets the
-   same value, so it separates Arsenal's back line from Werder Bremen's and
-   cannot separate Saliba from Gabriel. It also makes a player's rating depend
-   partly on his teammates, which is a real change to what the number means and
-   is not how EA's ratings work.
-3. **The baseline correlation here, -0.452, is not the -0.489 quoted in
-   `config/player_rating.yaml`.** That figure was measured over 1,052 completed
-   team-seasons with a different aggregation. Every number in the table above
-   comes from one function applied identically across variants, so the
-   comparisons hold; the levels are not interchangeable with the older note.
-4. **Hyperparameters fixed to production**, as in every other experiment here.
-5. **One sweep, chosen post-hoc.** Eight variants were measured and the best was
-   taken, so the winning margin is optimistically biased. The monotone
-   correlation trend and the significant `share-0.00` result are the parts that
-   do not depend on picking a winner.
+1. **It is not a prediction gain, and is not claimed as one.** The RPS delta is
+   -0.00010 with a CI including zero, and the variant that did reach
+   significance failed to replicate season by season. `strength_defence` ranks
+   93rd of 125 features in the match model; the case is that the published
+   ratings stop being indefensible.
+2. **`team_defence` is a club number and cannot be read as an individual
+   contribution.** Saliba and Gabriel both take Arsenal's 98 and both land on
+   85; it separates Arsenal's back line from Werder Bremen's and cannot separate
+   teammates. It makes a player's rating depend partly on who he plays with,
+   which is a real change to what the number means and is not how EA's ratings
+   work.
+3. **Marc Guehi pays for it**, 83 down to 81 — a well-regarded defender charged
+   for a leaky side, the mirror image of the Van Dijk complaint that started
+   this. That is the honest cost of a club-level component, not a bug.
+4. **The weight was chosen post-hoc from thirteen variants across three runs**,
+   so any winning margin is optimistically biased. The parts that do not depend
+   on the choice are the monotone correlation trend, the 15-of-15 league and
+   metric consistency, and the `share-0.00` result.
+5. **The second metric is the one that decided it**, and it is a correlation
+   against an outcome the component is partly built from, one season removed.
+   Next-season framing and the full-back control guard against the obvious
+   failure; they do not make it causal evidence about individual defenders.
+6. **Hyperparameters fixed to production**, as in every other experiment here.
+7. **The baseline levels are not interchangeable with older notes.** The -0.489
+   in `config/player_rating.yaml` came from 1,052 completed team-seasons with a
+   different aggregation. Every number above comes from one function applied
+   identically across variants, so the comparisons hold; the levels do not.
 
 ## Second stage: do full backs want the same thing?
 
 They share the centre backs' defending definition exactly, so they share its
-defect. Measured on top of the chosen CB setting:
+defect. Measured on top of the chosen setting, via `--stage fb --cb-share 0.30`:
 
 | variant | CB team_defence | FB team_defence | RPS | delta | 95% CI | defence vs next GA |
 |---------|-----------------|-----------------|-----|-------|--------|--------------------|
-| baseline | 0.00 | 0.00 | 0.36508 | — | — | -0.452 |
-| **cb-0.30 only** | 0.30 | 0.00 | **0.36463** | **-0.00045** | [-0.00063, -0.00027] | -0.528 |
-| cb-0.30 + fb-0.15 | 0.30 | 0.15 | 0.36473 | -0.00035 | [-0.00054, -0.00017] | -0.541 |
-| cb-0.30 + fb-0.30 | 0.30 | 0.30 | 0.36486 | -0.00022 | [-0.00041, -0.00004] | **-0.555** |
+| baseline | 0.00 | 0.00 | 0.36515 | — | — | -0.442 |
+| **cb-0.30 only** | 0.30 | 0.00 | 0.36505 | -0.00010 | [-0.00028, +0.00008] | -0.523 |
+| cb-0.30 + fb-0.15 | 0.30 | 0.15 | 0.36501 | -0.00014 | [-0.00033, +0.00004] | -0.544 |
+| cb-0.30 + fb-0.30 | 0.30 | 0.30 | **0.36469** | **-0.00046** | [-0.00065, -0.00028] | **-0.555** |
 
-**No.** Every step toward full backs improves the defence correlation and makes
-the model worse, monotonically, until at `fb-0.30` the correlation reaches
-exactly the -0.555 ceiling — a team's own previous conceding — while RPS has
-travelled half way back to baseline.
+Before the peak fix this table ran the other way: every step toward full backs
+improved the correlation and made RPS worse, monotonically. That was an artefact
+of the leak — FB `team_defence` was already reaching every variant including
+baseline, so adding weight was partly double-counting.
 
-That is the clearest result in either sweep, and it is a warning about the
-second metric rather than about full backs. The correlation can be driven to its
-ceiling by making the rating progressively *less* about the player and more
-about his club's last season. Taken alone it would have recommended the worst
-variant tested. It is reported here because it detects the original defect,
-which RPS alone barely does; it is not the thing being optimised.
+With the leak closed, the full-back extension is the best variant on both
+columns, and its RPS advantage is the one that does not replicate across
+seasons. Note also that the combined line reaches **-0.555 to -0.559**, at or
+past what a team's *own* previous conceding scores. An earlier draft of this
+section argued that approaching that number was the signature of a rating
+decaying into "last season's goals conceded"; exceeding it is evidence against
+that reading, but the RPS result that would have settled it did not hold up, so
+the question is open rather than answered.
 
-Shipped: `CB team_defence: 0.30` with `defending: 0.32`, full backs unchanged.
-The definition is kept in the `FB` block at zero weight so the measurement can
-be repeated rather than re-derived.
-
-One honest cost of the winner: accuracy moves 0.52986 to 0.52941, marginally
-down, while RPS improves. RPS is this project's headline metric because it is
-proper and rewards calibration rather than only the argmax, and the two
-disagreeing by 0.0005 on 20,060 fixtures is noise rather than a finding — but it
-is the direction nobody would choose to report.
+The weight is left at zero and the definition kept in the `FB` block, so the
+measurement can be repeated rather than re-derived.

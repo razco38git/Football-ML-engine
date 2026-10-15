@@ -299,6 +299,53 @@ def _weighted(
     )
 
 
+def _peak_over_rated_sub_ratings(
+    work: pd.DataFrame, config: dict, present: list[str] | None = None
+) -> pd.Series:
+    """Each player's best sub-rating, among the ones his role is rated on.
+
+    Among, not over all of them. A sub-rating weighted zero is defined but not
+    published -- that is how the config can hold `team_defence` for full backs
+    and `workload` for keepers while the sweep that would switch them on is
+    still pending -- and a plain `max` over every defined column quietly broke
+    that, because a weight of zero keeps a term out of the composite but not
+    out of the peak.
+
+    It was not a theoretical hole. Rebuilding with `team_defence` defined at
+    zero weight for full backs moved 807 of 3,904 of them, by up to 4 points,
+    with no full-back weight and no full-back sub-rating changed: a left back
+    at a mean-defence club was being credited for being "outstanding" at his
+    club's clean sheets. `usable_weights` already filters `w != 0` for the
+    composite, and this makes the peak agree with it.
+
+    Args:
+        work: The in-progress frame, carrying ``role`` and the ``sub_*``
+            columns.
+        config: The rating configuration.
+        present: The ``sub_*`` columns to consider. Defaults to every one the
+            frame carries.
+
+    Returns:
+        A float series on ``work``'s index, NaN where the role is rated on
+        nothing.
+    """
+    if present is None:
+        present = [c for c in work.columns if c.startswith("sub_")]
+    peak = pd.Series(np.nan, index=work.index)
+    for group, block in work.groupby("role", observed=True, sort=False):
+        spec = config["positions"].get(group)
+        if spec is None:
+            continue
+        rated_on = [
+            f"sub_{name}"
+            for name, weight in spec["sub_rating_weights"].items()
+            if weight != 0 and f"sub_{name}" in present
+        ]
+        if rated_on:
+            peak.loc[block.index] = block[rated_on].astype(float).max(axis=1)
+    return peak
+
+
 def rate_players(
     players: pd.DataFrame, config: dict[str, Any] | None = None
 ) -> pd.DataFrame:
@@ -481,9 +528,25 @@ def rate_players(
     peak_weight = float(config.get("peak_weight", 0.0))
     if peak_weight > 0 and sub_columns:
         present = [c for c in sub_columns if c in work.columns]
+        # Per role, and only over the sub-ratings that role is actually rated
+        # on. A sub-rating weighted zero is defined but not published -- that
+        # is the whole reason the config can hold `team_defence` for full backs
+        # and `workload` for keepers while the sweep that would switch them on
+        # is still pending -- and taking a plain `max` over every column
+        # quietly broke that, because a weight of zero keeps a term out of the
+        # composite but not out of the peak.
+        #
+        # It is not a theoretical hole. Rebuilding with `team_defence` defined
+        # at zero weight for full backs moved 807 of 3,904 of them, by up to 4
+        # points, with no full-back weight changed and no full-back sub-rating
+        # changed: a left back at a mean-defence club was being credited for
+        # being "outstanding" at his club's clean sheets. `usable_weights`
+        # already filters `w != 0` for the composite; this makes the peak agree
+        # with it.
+        #
         # Sub-ratings are 0-1 here -- they are only scaled to 0-99 at the very
         # end -- so the peak is already on the composite's own scale.
-        peak = work[present].astype(float).max(axis=1)
+        peak = _peak_over_rated_sub_ratings(work, config, present)
         # A row with no sub-rating at all keeps its composite rather than being
         # pulled toward a NaN: `max` of an empty row is NaN, and blending that
         # in would silently unrate the player.

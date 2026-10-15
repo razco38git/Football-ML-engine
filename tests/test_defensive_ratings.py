@@ -13,13 +13,17 @@ miss was then papered over.
 
 from __future__ import annotations
 
+import copy
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
 
-from footballml.players import ingest
+from footballml.players import ingest, rating
 from footballml.players.fbref import _is_same_name, _tokens, match_players
 from footballml.players.rating import MAX_MISSING_WEIGHT, _weighted, load_config
+from pipelines import build_players
 from pipelines import defending_sweep as sweep
 
 # --- one name contains the other ----------------------------------------------
@@ -317,22 +321,47 @@ def test_a_zero_weighted_sub_rating_changes_nothing() -> None:
     assert with_zero.iloc[0] == without.iloc[0]
 
 
-def test_the_shipped_config_weights_team_defence_at_zero() -> None:
-    """Nothing from the `outcome` arm ships until the sweep is re-run.
+def test_the_shipped_config_is_what_the_sweep_chose() -> None:
+    """0.30 on centre backs, nothing on full backs.
 
-    A first sweep chose 0.30, on a join that silently missed 26.6% of
-    defenders. The definition stays so the measurement can be repeated; the
-    weight does not.
+    Chosen on defensive validity, not prediction: the centre-back line against
+    next season's conceding moves -0.381 to -0.544, improving in all five
+    leagues on all three outcome measures, while **no variant in the sweep was
+    significant on RPS**. Two earlier runs were discarded, one for a club-name
+    join missing 26.6% of defenders and one because `peak_weight` let
+    zero-weighted groups into the published rating.
+
+    Full backs stay at zero deliberately. `--stage fb` scored better on every
+    aggregate, including the only significant RPS result in the experiment,
+    and that result improved in just 8 of 11 movable seasons -- while the
+    weight would leave a full back rated 8% on ball-winning.
     """
     config = load_config()
-    for role in ("CB", "FB"):
-        weights = config["positions"][role]["sub_rating_weights"]
-        assert weights["team_defence"] == 0.0
-        assert sum(weights.values()) == pytest.approx(1.0)
-        # And the definition is there to be switched on.
-        assert set(config["positions"][role]["sub_ratings"]["team_defence"]) == {
-            "team_xga_per_match", "team_ga_per_match", "team_clean_sheet_pct",
+    cb = config['positions']['CB']['sub_rating_weights']
+    assert cb['team_defence'] == pytest.approx(0.30)
+    assert cb['defending'] == pytest.approx(0.32)
+    fb = config['positions']['FB']['sub_rating_weights']
+    assert fb['team_defence'] == 0.0
+    assert fb['defending'] == pytest.approx(0.38), 'full backs keep production weights'
+    for role in ('CB', 'FB'):
+        weights = config['positions'][role]['sub_rating_weights']
+        assert sum(weights.values()) == pytest.approx(1.0), role
+        # The definition is present for both, whatever it is weighted at.
+        assert set(config['positions'][role]['sub_ratings']['team_defence']) == {
+            'team_xga_per_match', 'team_ga_per_match', 'team_clean_sheet_pct',
         }
+
+
+def test_the_defending_group_keeps_a_real_share_of_a_centre_back() -> None:
+    """`share-0.00` was rejected, so a centre back is never rated on no defending.
+
+    Deleting the group did not make the model worse, but it leaves the
+    composite entirely made of involvement, creation and finishing -- nothing
+    defensive -- behind a bar the page labels "Ball-winning". If the weight
+    ever reaches zero, that label in `web/src/components/PlayerDatabase.tsx`
+    has to change with it.
+    """
+    assert load_config()["positions"]["CB"]["sub_rating_weights"]["defending"] > 0.0
 
 
 def test_conceding_counts_against_a_defender() -> None:
@@ -376,9 +405,40 @@ def test_the_outcome_variant_only_moves_defending() -> None:
     base = config["positions"]["CB"]["sub_rating_weights"]
     moved = sweep._outcome_variant(config, 0.30)["positions"]["CB"]["sub_rating_weights"]
     assert moved["team_defence"] == pytest.approx(0.30)
-    assert moved["defending"] == pytest.approx(base["defending"] - 0.30)
+    # Against the pool, not against `base["defending"]`: the two defensive
+    # groups share a fixed 0.62 between them, and now that 0.30 of it ships as
+    # `team_defence` a builder that subtracted from `defending` again would
+    # leave the weights summing to 0.70. `_pool` is what keeps every variant
+    # describing the same experiment whatever is currently shipped.
+    assert moved["defending"] == pytest.approx(sweep._pool(base) - 0.30)
+    assert sweep._pool(moved) == pytest.approx(sweep._pool(base))
     for group in ("involvement", "creation", "finishing"):
         assert moved[group] == pytest.approx(base[group])
+
+
+def test_the_fb_stage_builds_on_the_setting_it_is_given() -> None:
+    """The second stage must never extend a winner the current numbers rejected.
+
+    `CB_WINNER` is a constant recording what one sweep chose. When the first
+    stage is re-run and picks differently, the full-back stage has to be told,
+    or it quietly measures full backs on top of a centre-back setting nobody
+    selected -- which is how the invalidated run would have propagated.
+    """
+    config = load_config()
+    names = [name for name, _ in sweep.variants(config, stage="fb", cb_share=0.15)]
+    assert names == ["baseline", "cb-0.15-only", "cb-0.15+fb-0.15", "cb-0.15+fb-0.30"]
+
+    for _, variant in sweep.variants(config, stage="fb", cb_share=0.15)[1:]:
+        assert variant["positions"]["CB"]["sub_rating_weights"]["team_defence"] == pytest.approx(
+            0.15
+        )
+
+
+def test_the_fb_stage_defaults_to_the_recorded_winner() -> None:
+    """Omitting it keeps the documented behaviour rather than silently zeroing."""
+    config = load_config()
+    names = [name for name, _ in sweep.variants(config, stage="fb")]
+    assert names[1] == f"cb-{sweep.CB_WINNER:.2f}-only"
 
 
 def test_the_baseline_variant_is_the_shipped_config() -> None:
@@ -436,3 +496,178 @@ def test_the_sweep_never_writes_the_shipped_strength_file() -> None:
     )
     assert "to_csv" not in source, "the sweep must not write any frame to disk"
     assert "shutil" not in source, "nothing to copy if nothing is overwritten"
+    # Every other way a frame or file reaches disk, because the point is not
+    # that one API is banned -- it is that an interrupted experiment cannot
+    # leave anything behind. A `finally` does not run when the process is
+    # killed, which is exactly how the corruption happened, so the guarantee
+    # has to be that there is no write to interrupt.
+    for forbidden in (
+        "to_pickle", "to_parquet", "to_feather", "to_json", "to_hdf",
+        "os.replace", "os.remove", "os.rename", "unlink(", "write_text",
+        "write_bytes", "mkdir(", "savetxt", "np.save",
+    ):
+        assert forbidden not in source, f"the sweep must not call {forbidden}"
+    # `open` only ever for reading, if at all.
+    for line in source.splitlines():
+        if "open(" in line and "fileno" not in line:
+            assert not any(m in line for m in ('"w"', "'w'", '"a"', "'a'", '"x"', "'x'")), line
+
+
+def test_the_sweep_never_imports_a_module_that_writes_production() -> None:
+    """`build_players` is the only thing allowed to write the two artifacts.
+
+    An experiment that imported it could call `main()` and overwrite them
+    without any of the string checks above noticing.
+    """
+    import inspect
+
+    source = inspect.getsource(sweep)
+    assert "build_players" not in source
+    assert "from pipelines.build_players" not in source
+
+
+# --- the artifacts the winner gets written to ---------------------------------
+
+def test_the_ratings_artifacts_are_written_atomically() -> None:
+    """A kill part-way through a write must not leave a readable, wrong file.
+
+    This is the failure that actually happened: a timeout left
+    `team_strength.csv` holding an experiment's numbers, 1,160 of 1,170 rows
+    wrong, and the API served them. A truncated CSV still parses, so nothing
+    downstream can tell it from a complete one.
+    """
+    source = Path(build_players.__file__).read_text(encoding="utf-8")
+    assert "to_csv(OUTPUT" not in source, "write the ratings through _write_csv"
+    assert "to_csv(TEAM_OUTPUT" not in source, "write the strength through _write_csv"
+    assert "tmp.replace(path)" in source
+
+
+def test_the_atomic_write_leaves_no_temporary_file_behind(tmp_path: Path) -> None:
+    """And the finished file holds exactly what was handed to it."""
+    target = tmp_path / "ratings.csv"
+    frame = pd.DataFrame({"Player": ["William Saliba"], "rating": [85]})
+    build_players._write_csv(frame, target)
+    assert target.exists()
+    assert list(tmp_path.iterdir()) == [target]
+    pd.testing.assert_frame_equal(pd.read_csv(target), frame)
+
+
+def test_the_atomic_write_replaces_rather_than_appends(tmp_path: Path) -> None:
+    """Writing twice must not grow the file, which `mode="a"` by accident would."""
+    target = tmp_path / "strength.csv"
+    build_players._write_csv(pd.DataFrame({"Team": ["Arsenal"], "v": [1]}), target)
+    build_players._write_csv(pd.DataFrame({"Team": ["Inter"], "v": [2]}), target)
+    out = pd.read_csv(target)
+    assert len(out) == 1
+    assert out["Team"].iloc[0] == "Inter"
+
+
+# --- a zero weight has to mean zero everywhere --------------------------------
+
+def test_a_zero_weighted_sub_rating_stays_out_of_the_peak() -> None:
+    """`peak_weight` blends in a player's best sub-rating, and it used to take
+    the max over *every* defined sub-rating -- including ones weighted zero.
+
+    So a weight of zero kept a term out of the composite but not out of the
+    published rating. Rebuilding with `team_defence` defined at zero weight for
+    full backs moved 807 of 3,904 of them by up to 4 points, with no full-back
+    weight and no full-back sub-rating changed.
+
+    Here a full back is outstanding at the zero-weighted group and mediocre at
+    everything he is actually rated on. His rating must not know about it.
+    """
+    config = copy.deepcopy(load_config())
+    config["peak_weight"] = 0.15
+    weights = config["positions"]["FB"]["sub_rating_weights"]
+    assert weights["team_defence"] == 0.0, "the fixture depends on this shipping at zero"
+
+    frame = pd.DataFrame({
+        "role": ["FB", "FB"],
+        "Season": ["2526", "2526"],
+        "sub_defending": [0.5, 0.5],
+        "sub_creation": [0.5, 0.5],
+        "sub_involvement": [0.5, 0.5],
+        "sub_finishing": [0.5, 0.5],
+        "sub_team_defence": [0.02, 0.98],
+    })
+    peak = rating._peak_over_rated_sub_ratings(frame, config)
+    assert peak.iloc[0] == pytest.approx(peak.iloc[1]), (
+        "the club's clean sheets changed a full back's peak"
+    )
+    assert peak.iloc[0] == pytest.approx(0.5)
+
+
+def test_the_peak_ignores_every_role_s_zero_weighted_sub_ratings() -> None:
+    """Across every role in the config, not just the two this sweep touched.
+
+    `GK` carries a zero-weighted `workload` and has done since long before
+    `team_defence` existed, so the keepers were being credited for being
+    outstanding at something the config says they are not rated on. Measured:
+    459 of 1,799 keepers moved when the peak was narrowed, by up to 5 points,
+    while every outfield role came back bit-identical.
+
+    Parameterising over the config rather than naming roles means a new
+    zero-weighted group cannot be added without this covering it.
+    """
+    config = copy.deepcopy(load_config())
+    config["peak_weight"] = 0.15
+    for role, spec in config["positions"].items():
+        weights = spec["sub_rating_weights"]
+        zeroed = [name for name, weight in weights.items() if weight == 0]
+        if not zeroed:
+            continue
+        rated_on = [name for name, weight in weights.items() if weight != 0]
+        # Mediocre at everything he is rated on, outstanding at what he is not.
+        row = {f"sub_{name}": 0.5 for name in rated_on}
+        row |= {f"sub_{name}": 0.99 for name in zeroed}
+        frame = pd.DataFrame([row | {"role": role, "Season": "2526"}])
+        peak = rating._peak_over_rated_sub_ratings(frame, config)
+        assert peak.iloc[0] == pytest.approx(0.5), (
+            f"{role}: {zeroed} reached the peak despite being weighted zero"
+        )
+
+
+def test_the_peak_is_the_best_of_what_the_role_is_rated_on() -> None:
+    """For every role, including those with nothing zero-weighted.
+
+    The narrowing must not quietly drop a group that carries real weight --
+    that would cost a specialist the credit `peak_weight` exists to give.
+    """
+    config = copy.deepcopy(load_config())
+    config["peak_weight"] = 0.15
+    for role, spec in config["positions"].items():
+        rated_on = [n for n, w in spec["sub_rating_weights"].items() if w != 0]
+        for standout in rated_on:
+            row = {f"sub_{name}": 0.3 for name in rated_on}
+            row[f"sub_{standout}"] = 0.9
+            row |= {
+                f"sub_{n}": 0.0 for n, w in spec["sub_rating_weights"].items() if w == 0
+            }
+            frame = pd.DataFrame([row | {"role": role, "Season": "2526"}])
+            peak = rating._peak_over_rated_sub_ratings(frame, config)
+            assert peak.iloc[0] == pytest.approx(0.9), f"{role}/{standout}"
+
+
+def test_a_role_the_config_does_not_know_gets_no_peak() -> None:
+    """Rather than a peak taken over columns that mean nothing for it."""
+    config = copy.deepcopy(load_config())
+    frame = pd.DataFrame([
+        {"role": "SWEEPER", "Season": "2526", "sub_defending": 0.9},
+        {"role": "CB", "Season": "2526", "sub_defending": 0.9},
+    ])
+    peak = rating._peak_over_rated_sub_ratings(frame, config)
+    assert pd.isna(peak.iloc[0])
+    assert peak.iloc[1] == pytest.approx(0.9)
+
+
+def test_the_peak_survives_a_sub_rating_the_frame_never_got() -> None:
+    """A season where a whole group is absent must not blank the peak.
+
+    FBref served no `keeper` table for 2015/16 and no `misc` table for
+    2014/15, so a frame legitimately arrives missing columns the config names.
+    The peak should be taken over what is there.
+    """
+    config = copy.deepcopy(load_config())
+    frame = pd.DataFrame([{"role": "CB", "Season": "1415", "sub_involvement": 0.7}])
+    peak = rating._peak_over_rated_sub_ratings(frame, config)
+    assert peak.iloc[0] == pytest.approx(0.7)

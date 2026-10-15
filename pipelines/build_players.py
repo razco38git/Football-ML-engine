@@ -15,6 +15,8 @@ import logging
 import sys
 from pathlib import Path
 
+import pandas as pd
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from footballml.data import PROCESSED_DIR  # noqa: E402
@@ -26,6 +28,24 @@ from footballml.players.team_strength import team_strength  # noqa: E402
 
 OUTPUT = PROCESSED_DIR / "player_ratings.csv"
 TEAM_OUTPUT = PROCESSED_DIR / "team_strength.csv"
+
+
+def _write_csv(frame: pd.DataFrame, path: Path) -> None:
+    """Write via a temporary file and a replace, so a kill cannot truncate it.
+
+    `player_ratings.csv` is 25 MB and `team_strength.csv` is read by the API on
+    every request. A bare `to_csv` killed part-way through leaves a file that
+    parses -- just with the last rows missing -- and nothing downstream can tell
+    that from a complete one. That is not hypothetical here: a timeout once left
+    `team_strength.csv` holding an experiment's numbers, 1,160 of 1,170 rows
+    wrong, while the API served them.
+
+    `Path.replace` is atomic on both POSIX and Windows, and the temporary file
+    sits in the same directory so the replace never crosses a filesystem.
+    """
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    frame.to_csv(tmp, index=False)
+    tmp.replace(path)
 
 
 def main() -> None:
@@ -82,7 +102,7 @@ def main() -> None:
 
     rated = rate_players(players)
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
-    rated.to_csv(OUTPUT, index=False)
+    _write_csv(rated, OUTPUT)
     log.info("Wrote %s", OUTPUT)
 
     print("\n=== Coverage ===")
@@ -109,7 +129,7 @@ def main() -> None:
 
     strength = team_strength(rated, method=args.team_method, best_n=args.squad_size)
     if not strength.empty:
-        strength.to_csv(TEAM_OUTPUT, index=False)
+        _write_csv(strength, TEAM_OUTPUT)
         log.info("Wrote %s", TEAM_OUTPUT)
 
         strength["Season"] = strength["Season"].astype(str)

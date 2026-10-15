@@ -40,8 +40,11 @@ const ATTRIBUTES: Record<string, { key: keyof PlayerRating; label: string; short
     { key: 'sub_creation', label: 'Creation', short: 'CRE' },
     { key: 'sub_finishing', label: 'Finishing', short: 'FIN' },
   ],
-  // Full backs carry the bar but not the weight: measured, it bought a better
-  // defence correlation and a worse model. See EXPERIMENTS.md.
+  // No team-defence bar here, because full backs are not rated on it. Measured
+  // at 0.30 it scored better on every aggregate, including the only
+  // significant RPS result in the experiment -- which then improved in just 8
+  // of the 11 seasons that can move. It would also leave a full back rated 8%
+  // on ball-winning and 30% on his club's clean sheets. See EXPERIMENTS.md.
   FB: [
     { key: 'sub_defending', label: 'Ball-winning', short: 'BWN' },
     { key: 'sub_creation', label: 'Creation & crossing', short: 'CRE' },

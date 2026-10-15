@@ -128,7 +128,9 @@ def _fb_variant(config: dict, cb_share: float, fb_share: float) -> dict:
     return out
 
 
-def variants(config: dict, stage: str = "cb") -> list[tuple[str, dict]]:
+def variants(
+    config: dict, stage: str = "cb", cb_share: float | None = None
+) -> list[tuple[str, dict]]:
     """The runs for one stage. ``cb`` chooses a centre-back setting, ``fb`` extends it.
 
     Two stages rather than one grid, because the full-back question only makes
@@ -136,12 +138,21 @@ def variants(config: dict, stage: str = "cb") -> list[tuple[str, dict]]:
     definition exactly, so they share its defect, but a full back is judged 38%
     on defending against a centre back's 62% and the right amount of team
     outcome need not be the same.
+
+    Args:
+        config: The shipped configuration, which every variant is built from.
+        stage: ``cb`` chooses a centre-back setting, ``fb`` extends it.
+        cb_share: The centre-back setting the ``fb`` stage builds on. Defaults
+            to :data:`CB_WINNER`. Passed explicitly when a re-run of the first
+            stage chooses differently, so the second stage never silently
+            extends a setting the current numbers did not pick.
     """
     if stage == "fb":
+        chosen = CB_WINNER if cb_share is None else cb_share
         built = [("baseline", copy.deepcopy(config))]
-        built.append((f"cb-{CB_WINNER:.2f}-only", _outcome_variant(config, CB_WINNER)))
+        built.append((f"cb-{chosen:.2f}-only", _outcome_variant(config, chosen)))
         built += [
-            (f"cb-{CB_WINNER:.2f}+fb-{f:.2f}", _fb_variant(config, CB_WINNER, f))
+            (f"cb-{chosen:.2f}+fb-{f:.2f}", _fb_variant(config, chosen, f))
             for f in (0.15, 0.30)
         ]
         return built
@@ -205,6 +216,10 @@ def main() -> int:
         "--stage", choices=("cb", "fb"), default="cb",
         help="cb chooses a centre-back setting; fb extends the winner to full backs.",
     )
+    parser.add_argument(
+        "--cb-share", type=float, default=None,
+        help=f"The centre-back team_defence the fb stage builds on (default {CB_WINNER}).",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -236,7 +251,7 @@ def main() -> int:
 
     results: list[dict] = []
     per_variant: dict[str, pd.DataFrame] = {}
-    for name, variant in variants(config, stage=args.stage):
+    for name, variant in variants(config, stage=args.stage, cb_share=args.cb_share):
         weights = variant["positions"]["CB"]["sub_rating_weights"]
         logger.info(
             "--- %s: CB defending=%.2f team_defence=%.2f | FB team_defence=%.2f ---",

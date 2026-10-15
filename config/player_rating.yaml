@@ -333,20 +333,36 @@ positions:
       finishing:
         np_xg_per90: 1.0
         np_goals_per90: 1.0
-      # Defined and weighted **zero**, which is a result rather than an
+      # Defined and weighted **zero**, which is a decision rather than an
       # omission. Full backs share the centre backs' defending definition
-      # exactly, so the same fix was measured here on top of the chosen CB
-      # setting, and it trades the model away for a prettier correlation:
+      # exactly, so they share its defect, and the same fix was measured here
+      # on top of the chosen CB setting (`--stage fb --cb-share 0.30`):
       #
-      #   FB team_defence  RPS       delta            defence vs next GA
-      #   0.00             0.36463   -0.00045          -0.528   <- this
-      #   0.15             0.36473   -0.00035          -0.541
-      #   0.30             0.36486   -0.00022          -0.555
+      #   FB team_defence  RPS       delta (95% CI)               defence vs next GA
+      #   0.00             0.36505   -0.00010 [-0.00028,+0.00008]  -0.523   <- this
+      #   0.15             0.36501   -0.00014 [-0.00033,+0.00004]  -0.544
+      #   0.30             0.36469   -0.00046 [-0.00065,-0.00028]  -0.555
       #
-      # The correlation reaches the ceiling exactly as RPS returns to baseline,
-      # which is the clearest demonstration in either sweep that the
-      # correlation can be driven up by making the rating *less* about the
-      # player. Left at zero, and the definition kept so the measurement can be
+      # On those aggregates 0.30 wins outright, and it is still not shipped.
+      # Its RPS advantage -- the only significant result anywhere in this
+      # experiment -- improved in just 8 of the 11 seasons that can move,
+      # p ~ 0.11, carried by 2122 and 2223 and cancelled by 1819 and 2425.
+      # Matches inside a season share a model fit, so the paired bootstrap's
+      # effective sample is nearer 12 than 20,060 and a CI of
+      # [-0.00065, -0.00028] can sit on top of a coin-flip season record.
+      #
+      # What is left is a validity gain at a steep editorial price. The pool
+      # here is 0.38, so taking 0.30 would leave a full back rated 8% on
+      # ball-winning and 30% on his club's clean sheets -- the variant where a
+      # player's published number is least about the player. That is a product
+      # decision, not a statistical conclusion, and it has not been taken.
+      #
+      # Worth recording for whoever runs this next: before the `peak_weight`
+      # leak was closed this table ran the *other* way, every step toward full
+      # backs improving the correlation and worsening RPS. The reversal is
+      # real -- the leak was feeding FB `team_defence` into every variant
+      # including baseline -- but it means this arm's history is not a guide.
+      # Left at zero, and the definition kept so the measurement can be
       # repeated rather than re-derived.
       team_defence:
         team_xga_per_match: -2.0
@@ -426,39 +442,68 @@ positions:
       # while the defenders in front of him are rated 0% on them. Same sign
       # convention: negative means lower is better.
       #
-      # WEIGHTED ZERO PENDING A RE-RUN. A first sweep chose 0.30 and the
-      # numbers below are real, but they were measured before the club-name
-      # bug in `add_team_defence` was found: Understat spellings were joined
-      # against football-data's, so 26.6% of defenders had no team-defence
-      # value at all, led by Milan, Atletico, PSG and both Manchester clubs.
-      # The join now reaches 100%, which changes the inputs the sweep measured,
-      # so nothing here ships until `python -m pipelines.defending_sweep` has
-      # been run again. Superseded figures, kept for comparison:
+      # Weighted 0.30, chosen by `python -m pipelines.defending_sweep` over
+      # 20,060 walk-forward fixtures. Two earlier runs reached a number and
+      # were thrown away: one had a club-name join missing 26.6% of defenders,
+      # one had `peak_weight` letting zero-weighted groups into the published
+      # rating, so its baseline was not production behaviour. These are the
+      # figures from the third run, on a 100% join and a peak that respects a
+      # zero weight:
       #
-      #   variant        RPS       delta (95% CI)              defence vs next GA
-      #   baseline       0.36508   --                          -0.452
-      #   share-0.00     0.36482   -0.00026 [-0.00044,-0.00008] -0.491
-      #   team_def 0.15  0.36496   -0.00012 [-0.00030,+0.00005] -0.497
-      #   team_def 0.30  0.36463   -0.00045 [-0.00063,-0.00027] -0.528   <- this
-      #   team_def 0.45  0.36536   +0.00028 [+0.00010,+0.00046] -0.548
+      #   variant        RPS       delta (95% CI)               defence vs next GA
+      #   baseline       0.36515   --                           -0.442
+      #   share-0.00     0.36529   +0.00014 [-0.00005,+0.00033]  -0.485
+      #   team_def 0.15  0.36510   -0.00005 [-0.00023,+0.00013]  -0.488
+      #   team_def 0.30  0.36505   -0.00010 [-0.00028,+0.00008]  -0.523   <- this
+      #   team_def 0.45  0.36517   +0.00002 [-0.00016,+0.00020]  -0.544
       #
-      # Two things that table settles. Deleting `defending` outright --
-      # `share-0.00`, 62% of the composite -- *improves* the model, which is
-      # what a backwards signal looks like from the other side. And 0.45 buys
-      # the best correlation in the sweep while predicting significantly worse:
-      # past some point the club's record crowds out what the rating knows
-      # about the player, and the correlation keeps rising precisely because
-      # the number is turning into last season's goals conceded.
+      # **No predictive improvement is established, and none is claimed.** Not
+      # one variant is significant on RPS, the chosen one included. The one
+      # setting that did reach significance (extending this to full backs,
+      # -0.00046) improved in only 8 of 11 movable seasons, p ~ 0.11, so it was
+      # rejected: matches inside a season share a model fit, which makes the
+      # paired bootstrap's effective sample nearer 12 than 20,060. The
+      # measurement floor is close by independently -- rebuilding on a later
+      # day moved the baseline 0.36508 -> 0.36498 on a byte-identical config,
+      # because `_match_across_editions` couples seasons and re-fetching the
+      # season in progress re-resolves historical names.
+      #
+      # It ships on defensive validity, which does replicate. Centre-back line
+      # against the *next* season's conceding, with full-back weights held
+      # fixed as a control that does not move:
+      #
+      #                  vs GA    vs xGA   vs npxGA   vs EA `fifa_overall`
+      #   baseline       -0.381   -0.400   -0.368     +0.778
+      #   share-0.00     -0.463   -0.465   -0.435     +0.803
+      #   team_def 0.30  -0.544   -0.558   -0.531     +0.833
+      #
+      # It improves in all five leagues on all three outcome measures, 15 cells
+      # of 15, and it agrees *more* with EA's independently scouted overall --
+      # the part that is hardest to explain as fitting our own second metric.
+      #
+      # Two things the sweep settles beyond the choice. Deleting `defending`
+      # outright -- `share-0.00`, 62% of the composite -- does not make the
+      # model worse, which is what a backwards signal looks like from the other
+      # side; it is rejected because it leaves a centre-back rated on
+      # involvement, creation and finishing with no defensive content at all,
+      # behind a bar the page labels "Ball-winning". And 0.45 buys a better
+      # correlation while predicting no better: past some point the club's
+      # record crowds out what the rating knows about the player.
+      #
+      # The honest limitation: this is a *club* number, so Saliba and Gabriel
+      # both take Arsenal's 98 and both land on 85, and Marc Guehi drops 83 to
+      # 81 for playing well in a leaky side. It fixes the between-club problem
+      # and not the within-club one.
       team_defence:
         team_xga_per_match: -2.0
         team_ga_per_match: -1.0
         team_clean_sheet_pct: 1.0
     sub_rating_weights:
-      defending: 0.62
+      defending: 0.32
       involvement: 0.24
       creation: 0.07
       finishing: 0.07
-      team_defence: 0.0
+      team_defence: 0.30
 
   GK:
     label: Goalkeeper
