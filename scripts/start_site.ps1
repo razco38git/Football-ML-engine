@@ -47,6 +47,71 @@ function Test-PortListening {
     $null -ne (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
 }
 
+function Get-NewestSourceWrite {
+    <#
+        The last time anything the API imports was edited. `__pycache__` is
+        excluded because Python rewrites it *as a consequence* of a restart,
+        which would otherwise make the API look permanently stale and restart
+        it on every run of this script.
+    #>
+    param([string] $SourceDir)
+
+    if (-not (Test-Path $SourceDir)) { return $null }
+    Get-ChildItem -Path $SourceDir -Recurse -File -Filter *.py -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -notmatch '__pycache__' } |
+        Measure-Object -Property LastWriteTime -Maximum |
+        Select-Object -ExpandProperty Maximum
+}
+
+function Stop-StaleApi {
+    <#
+        Stop the API if it is older than the code it is meant to be running.
+
+        `POST /admin/reload` re-reads the CSVs, not the Python, so a server
+        started before a code change serves the old code indefinitely and looks
+        like a data problem. That is not hypothetical: a `sub_team_defence`
+        added to the player endpoints came back null in the UI for hours,
+        because the process predated the field.
+
+        `uvicorn --reload` is the obvious answer and does not work here --
+        measured 2026-10-15, including with a direct launch and no wrapper. The
+        reloader detects the edit, logs "Reloading...", and the worker never
+        shuts down; uvicorn never even reaches "Shutting down". So the check
+        lives here instead, where it costs a restart only when there is a
+        reason for one.
+
+        Compared against process start, not against a marker file, so it is
+        still right after a reboot, a manual `uvicorn`, or an edit made while
+        the server was down.
+    #>
+    param([int] $Port, [string] $SourceDir)
+
+    $newest = Get-NewestSourceWrite -SourceDir $SourceDir
+    if ($null -eq $newest) { return }
+
+    $running = Get-CimInstance Win32_Process -Filter "Name like '%python%'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -and $_.CommandLine -match 'uvicorn.+footballml\.api\.app' }
+    if (-not $running) { return }
+
+    $oldest = ($running | Measure-Object -Property CreationDate -Minimum).Minimum
+    if ($oldest -ge $newest) { return }
+
+    Write-Host ("  api is older than src ({0:HH:mm:ss} < {1:HH:mm:ss}) -- restarting it" -f $oldest, $newest)
+    foreach ($proc in $running) {
+        # -Force, because a graceful stop waits on the fixture warmer, and that
+        # is an uncancellable `asyncio.to_thread` around a rate-limited scrape:
+        # 85 seconds of page fetches on a good day. Nothing here needs a clean
+        # shutdown -- the API holds no unsaved state, only caches it rebuilds.
+        Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    # Give the port a moment to come free, or Start-Background sees it listening
+    # and leaves the corpse alone.
+    $deadline = (Get-Date).AddSeconds(15)
+    while ((Get-Date) -lt $deadline -and (Test-PortListening -Port $Port)) {
+        Start-Sleep -Milliseconds 200
+    }
+}
+
 function Start-Background {
     param([string] $Name, [string] $Exe, [string[]] $Arguments, [int] $Port)
 
@@ -67,6 +132,9 @@ if (-not (Test-Path $python)) {
 }
 
 Write-Host "FootballML:"
+# Before the "already listening" shortcut below, so an API running older code
+# than the working tree is replaced rather than left alone.
+Stop-StaleApi -Port $ApiPort -SourceDir (Join-Path $root "src")
 Start-Background -Name "api" -Exe $python -Port $ApiPort -Arguments @(
     "-m", "uvicorn", "footballml.api.app:app", "--host", "127.0.0.1", "--port", "$ApiPort"
 )
