@@ -68,13 +68,14 @@ from footballml.data import (
 from footballml.entities import load_aliases
 from footballml.features.build import (
     LEAGUE_CODES,
+    add_team_strength,
     build_match_features,
     build_upcoming_features,
 )
 from footballml.features.elo import START as ELO_START
 from footballml.form import build_index, recent_form
 from footballml.ingest.european import SHOWN_COMPETITIONS
-from footballml.ingest.matchhistory import LEAGUES, fetch_fixtures
+from footballml.ingest.matchhistory import LEAGUES, current_season_label, fetch_fixtures
 from footballml.labels import humanise
 from footballml.league_adjust import adjust as adjust_for_league
 from footballml.league_adjust import fitted_model_version
@@ -398,6 +399,84 @@ def _likely_scores(row: pd.Series) -> list[LikelyScore]:
 #: probability; it is only the *picture* that stops at 5, because a 11x11 grid
 #: of mostly-zero cells is harder to read and says less.
 SCORE_GRID_MAX = 5
+
+
+def _scoreline_detail(
+    mu_home: float, mu_away: float, modal_home: int, modal_away: int
+) -> dict:
+    """Scoreline grid, likely scores and modal probability from two goal rates.
+
+    For rows that come from the prediction store rather than the scored frame.
+    A store row carries the two goal rates and the modal score and nothing
+    else, so the expanded card for a European tie had an empty score grid, no
+    likely scores and no modal probability, while a domestic tie beside it had
+    all three. Same component, same schema, visibly less in it.
+
+    This is a *reconstruction*, not a back-fill from today's model, and the
+    distinction is the whole argument for doing it. The two rates are the
+    prediction's own output; running them back through the same Dixon-Coles
+    matrix recovers the distribution they came from. The only thing borrowed
+    from the current model is ``rho_``, a single fitted constant.
+
+    `_likely_scores` deliberately refuses the equivalent for its own columns,
+    and that is a different case: it is handed a frame that may simply lack
+    them, and inventing scorelines a stored prediction never made would be
+    putting words in its mouth. Here the rates *are* the prediction.
+    """
+    model = state.model
+    if model is None or not np.isfinite([mu_home, mu_away]).all():
+        return {}
+
+    matrix = score_matrix(
+        np.array([mu_home]), np.array([mu_away]),
+        rho=getattr(model, "rho_", 0.0),
+        max_goals=getattr(model, "max_goals", 10),
+    )[0]
+
+    size = SCORE_GRID_MAX + 1
+    grid = [[round(float(matrix[h][a]), 5) for a in range(size)] for h in range(size)]
+
+    flat = sorted(
+        ((float(matrix[h][a]), h, a) for h in range(len(matrix)) for a in range(len(matrix[0]))),
+        reverse=True,
+    )
+    likely = [
+        LikelyScore(home=h, away=a, probability=round(p, 4))
+        for p, h, a in flat[:TOP_SCORES]
+    ]
+
+    modal = None
+    if 0 <= modal_home < len(matrix) and 0 <= modal_away < len(matrix[0]):
+        modal = round(float(matrix[modal_home][modal_away]), 4)
+
+    return {"score_grid": grid, "likely_scores": likely, "prob_modal_score": modal}
+
+
+def _with_strength(rows: pd.DataFrame) -> pd.DataFrame:
+    """Join squad strength onto store rows the way the model does.
+
+    Through `add_team_strength` rather than a lookup written here, because the
+    join has three properties that are easy to miss and expensive to get wrong,
+    and all three were wrong in the first attempt at this:
+
+    - Strength carries Understat's club names ("Manchester City", "Paris Saint
+      Germain") and the store carries football-data's ("Man City", "Paris SG"),
+      so it needs the alias map.
+    - It keys on season and team without league, which is what lets a European
+      tie between two divisions match on both sides.
+    - It joins the *previous* season. That is the leakage guard, and it is also
+      the only thing that works: `team_strength.csv` has no 2026/27 rows at all,
+      because ratings need a minimum of minutes and the season in progress has
+      not accumulated them.
+
+    Reusing it means these rows cannot drift from the features behind the
+    prediction, which is the same reason the domestic path reads strength off
+    the scored frame rather than the CSV.
+    """
+    if state.strength is None or state.strength.empty or rows.empty:
+        return rows
+    seasoned = rows.assign(Season=[current_season_label(d) for d in rows["Date"]])
+    return add_team_strength(seasoned, state.strength)
 
 
 def _score_grid(mu_home: float, mu_away: float) -> list[list[float]]:
@@ -911,10 +990,11 @@ def _recent_from_store(known_through: pd.Timestamp, league: str | None) -> list[
         return []
 
     out = []
-    for _, r in rows.sort_values("Date", ascending=False).iterrows():
+    rows = _with_strength(rows.sort_values("Date", ascending=False))
+    for _, r in rows.iterrows():
         goals_home, goals_away = r.get("actual_home_goals"), r.get("actual_away_goals")
-        out.append(
-            Prediction(
+        modal_home, modal_away = int(r["modal_score_home"]), int(r["modal_score_away"])
+        entry = Prediction(
                 league=str(r["League"]),
                 date=str(r["Date"].date()),
                 home_team=str(r["HomeTeam"]),
@@ -926,11 +1006,17 @@ def _recent_from_store(known_through: pd.Timestamp, league: str | None) -> list[
                 prob_draw=float(r["prob_draw"]),
                 prob_away_win=float(r["prob_away_win"]),
                 predicted_outcome=str(r["predicted_outcome"]),
-                modal_score_home=int(r["modal_score_home"]),
-                modal_score_away=int(r["modal_score_away"]),
+                modal_score_home=modal_home,
+                modal_score_away=modal_away,
                 prob_over_2_5=float(r["prob_over_2_5"]),
                 prob_btts=float(r["prob_btts"]),
                 predicted_before_kickoff=True,
+                # Rebuilt from the stored goal rates, so the expanded card for
+                # a European tie shows the same analysis as a domestic one.
+                **_scoreline_detail(
+                    float(r["expected_goals_home"]), float(r["expected_goals_away"]),
+                    modal_home, modal_away,
+                ),
                 **_stored_market(r),
                 actual_home_goals=None if pd.isna(goals_home) else int(goals_home),
                 actual_away_goals=None if pd.isna(goals_away) else int(goals_away),
@@ -944,7 +1030,15 @@ def _recent_from_store(known_through: pd.Timestamp, league: str | None) -> list[
                 form_home=_form_for(str(r["HomeTeam"]), r["Date"]),
                 form_away=_form_for(str(r["AwayTeam"]), r["Date"]),
             )
-        )
+
+        # Read exactly as the domestic path reads it, off the joined frame.
+        for side in ("home", "away"):
+            for metric in ("overall", "attack", "defence"):
+                value = r.get(f"{side}_strength_{metric}")
+                if pd.notna(value):
+                    setattr(entry, f"strength_{side}_{metric}", round(float(value), 1))
+
+        out.append(entry)
     return out
 
 

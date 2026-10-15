@@ -663,13 +663,13 @@ export function MatchCard({ p, leagues }: {
           <div className="pt-4 grid gap-4" style={{ gridTemplateColumns: '1fr 1fr' }}>
             <div>
               <div className="text-xs font-display font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--muted-foreground)' }}>
-                {p.home_team} · Last 5 xG
+                {p.home_team} · xG, last 5 games
               </div>
               <XGBar values={p.form_home?.xg_for ?? []} color="#00e676" />
             </div>
             <div>
               <div className="text-xs font-display font-bold uppercase tracking-wider mb-2 text-right" style={{ color: 'var(--muted-foreground)' }}>
-                {p.away_team} · Last 5 xG
+                {p.away_team} · xG, last 5 games
               </div>
               <div className="flex justify-end">
                 <XGBar values={p.form_away?.xg_for ?? []} color="#3b82f6" />
@@ -713,7 +713,7 @@ export function MatchCard({ p, leagues }: {
 
           <div className="mt-4 grid gap-3" style={{ gridTemplateColumns: '1fr 1fr' }}>
             <div>
-              <div className="text-xs mb-1" style={{ color: 'var(--muted-foreground)' }}>Shots last 5</div>
+              <div className="text-xs mb-1" style={{ color: 'var(--muted-foreground)' }}>Shots, last 5 games</div>
               <div className="flex gap-1">
                 {(p.form_home?.shots ?? []).map((s, i) => (
                   <div key={i} className="text-center">
@@ -724,7 +724,7 @@ export function MatchCard({ p, leagues }: {
               </div>
             </div>
             <div>
-              <div className="text-xs mb-1 text-right" style={{ color: 'var(--muted-foreground)' }}>Shots last 5</div>
+              <div className="text-xs mb-1 text-right" style={{ color: 'var(--muted-foreground)' }}>Shots, last 5 games</div>
               <div className="flex gap-1 justify-end">
                 {(p.form_away?.shots ?? []).map((s, i) => (
                   <div key={i} className="text-center">

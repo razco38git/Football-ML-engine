@@ -18,6 +18,7 @@ is flagged rather than quietly blended in.
 from __future__ import annotations
 
 import importlib
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -168,3 +169,158 @@ def test_an_unreadable_store_does_not_break_the_page(monkeypatch) -> None:
 def test_an_empty_store_adds_nothing(monkeypatch) -> None:
     monkeypatch.setattr(api.store, "settled", lambda *a, **k: pd.DataFrame())
     assert api._recent_from_store(pd.Timestamp("2026-09-20"), None) == []
+
+
+# --- the expanded card, for a row that came from the store --------------------
+#
+# A store row carries the two goal rates and the modal score and nothing else,
+# so the expanded card for a European tie had an empty score grid, no likely
+# scores, no modal probability and no squad strength -- while a domestic tie
+# beside it, re-scored from the feature table, had all four. Same component,
+# same schema, visibly less in it.
+#
+# These are *reconstructed* from the stored rates rather than back-filled from
+# today's model, and the test that matters is the one below pinning that the
+# reconstruction agrees with what the prediction itself recorded.
+
+@pytest.fixture
+def scoring_model(monkeypatch):
+    """A model stub, because the grid is rebuilt through the Dixon-Coles matrix.
+
+    `_scoreline_detail` needs only the two fitted constants, which is the point:
+    the goal rates come from the stored prediction and nothing else about
+    today's model enters the reconstruction.
+    """
+    monkeypatch.setattr(
+        api.state, "model", SimpleNamespace(rho_=-0.0567642328, max_goals=10)
+    )
+
+
+def _european(home: str = "Roma", away: str = "Real Madrid") -> pd.DataFrame:
+    rows = _stored(["2026-10-14"])
+    return rows.assign(
+        competition="UCL", League="I1", HomeTeam=home, AwayTeam=away,
+        expected_goals_home=1.7, expected_goals_away=1.42,
+    )
+
+
+def test_a_stored_row_gets_a_score_grid(monkeypatch, scoring_model) -> None:
+    monkeypatch.setattr(api.store, "settled", lambda *a, **k: _european())
+    out = api._recent_from_store(pd.Timestamp("2026-09-20"), None)[0]
+
+    size = api.SCORE_GRID_MAX + 1
+    assert len(out.score_grid) == size
+    assert all(len(row) == size for row in out.score_grid)
+    assert sum(sum(row) for row in out.score_grid) == pytest.approx(1.0, abs=0.02)
+
+
+def test_the_reconstruction_agrees_with_the_stored_modal_score(monkeypatch, scoring_model) -> None:
+    """The property that makes rebuilding the grid honest rather than invented.
+
+    The two goal rates are the prediction's own output, so running them back
+    through the same Dixon-Coles matrix must recover the scoreline the
+    prediction actually recorded. If these ever disagree, the grid being drawn
+    is not the distribution the forecast came from.
+    """
+    rows = _european().assign(modal_score_home=1, modal_score_away=1)
+    monkeypatch.setattr(api.store, "settled", lambda *a, **k: rows)
+    out = api._recent_from_store(pd.Timestamp("2026-09-20"), None)[0]
+
+    top = out.likely_scores[0]
+    assert (top.home, top.away) == (out.modal_score_home, out.modal_score_away)
+    assert out.prob_modal_score == pytest.approx(top.probability, abs=1e-4)
+
+
+def test_likely_scores_are_ordered_and_capped(monkeypatch, scoring_model) -> None:
+    monkeypatch.setattr(api.store, "settled", lambda *a, **k: _european())
+    out = api._recent_from_store(pd.Timestamp("2026-09-20"), None)[0]
+
+    assert len(out.likely_scores) == api.TOP_SCORES
+    probabilities = [s.probability for s in out.likely_scores]
+    assert probabilities == sorted(probabilities, reverse=True)
+
+
+def test_squad_strength_reaches_both_sides_of_a_european_tie(monkeypatch) -> None:
+    """The join keys on season and team without league, which is why this works.
+
+    A UEFA tie has one side in Serie A and the other in La Liga. Keyed on
+    league as well, the away side would match nothing and be shown with no
+    strength at all.
+    """
+    strength = pd.DataFrame({
+        "League": ["I1", "SP1"],
+        "Season": ["2526", "2526"],
+        "Team": ["Roma", "Real Madrid"],
+        "strength_overall": [75.2, 81.5],
+        "strength_attack": [75.2, 84.2],
+        "strength_defence": [75.6, 78.9],
+    })
+    monkeypatch.setattr(api.store, "settled", lambda *a, **k: _european())
+    monkeypatch.setattr(api.state, "strength", strength)
+
+    out = api._recent_from_store(pd.Timestamp("2026-09-20"), None)[0]
+    assert out.strength_home_overall == 75.2
+    assert out.strength_away_overall == 81.5
+    assert out.strength_away_attack == 84.2
+
+
+def test_strength_comes_from_the_previous_season(monkeypatch) -> None:
+    """Not a nicety: `team_strength.csv` has no rows for the season in progress.
+
+    Ratings need a minimum of minutes, so four weeks into 2026/27 there were
+    none. Joining the match's own season would show an empty panel on every
+    current fixture, which is what the first attempt at this did.
+    """
+    strength = pd.DataFrame({
+        "League": ["I1"], "Season": ["2526"], "Team": ["Roma"],
+        "strength_overall": [75.2], "strength_attack": [75.2], "strength_defence": [75.6],
+    })
+    monkeypatch.setattr(api.store, "settled", lambda *a, **k: _european())
+    monkeypatch.setattr(api.state, "strength", strength)
+
+    # The match is in 2627 and the only strength row is 2526.
+    out = api._recent_from_store(pd.Timestamp("2026-09-20"), None)[0]
+    assert out.strength_home_overall == 75.2
+
+
+def test_club_names_are_translated_before_the_join(monkeypatch) -> None:
+    """Strength carries Understat's names and the store carries football-data's.
+
+    "Man City" against "Manchester City" fails as a left merge -- silently, as
+    a NaN -- so without the alias map the biggest clubs are exactly the ones
+    that show no strength.
+    """
+    strength = pd.DataFrame({
+        "League": ["E0"], "Season": ["2526"], "Team": ["Manchester City"],
+        "strength_overall": [80.8], "strength_attack": [83.7], "strength_defence": [78.0],
+    })
+    rows = _european(home="Man City", away="Paris SG").assign(League="E0")
+    monkeypatch.setattr(api.store, "settled", lambda *a, **k: rows)
+    monkeypatch.setattr(api.state, "strength", strength)
+
+    out = api._recent_from_store(pd.Timestamp("2026-09-20"), None)[0]
+    assert out.strength_home_overall == 80.8
+
+
+def test_no_strength_table_is_not_an_error(monkeypatch, scoring_model) -> None:
+    """An empty panel beats a 500."""
+    monkeypatch.setattr(api.store, "settled", lambda *a, **k: _european())
+    monkeypatch.setattr(api.state, "strength", pd.DataFrame())
+
+    out = api._recent_from_store(pd.Timestamp("2026-09-20"), None)[0]
+    assert out.strength_home_overall is None
+    assert len(out.score_grid) == api.SCORE_GRID_MAX + 1
+
+
+def test_an_unrated_club_simply_has_no_strength(monkeypatch) -> None:
+    """A newly promoted side has no previous-season row in its new league."""
+    strength = pd.DataFrame({
+        "League": ["I1"], "Season": ["2526"], "Team": ["Roma"],
+        "strength_overall": [75.2], "strength_attack": [75.2], "strength_defence": [75.6],
+    })
+    monkeypatch.setattr(api.store, "settled", lambda *a, **k: _european())
+    monkeypatch.setattr(api.state, "strength", strength)
+
+    out = api._recent_from_store(pd.Timestamp("2026-09-20"), None)[0]
+    assert out.strength_home_overall == 75.2
+    assert out.strength_away_overall is None
