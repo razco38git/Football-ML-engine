@@ -16,8 +16,30 @@ function FormBadge({ result }: { result: string }) {
   return <span className={`form-pill ${cls}`}>{result}</span>;
 }
 
+/*
+  Tallest a bar may draw, in px, and the room it has.
+
+  The row is 48px. A 9px label takes about 13.5px of it and the gap takes 2,
+  which leaves 32. The old code drew 36 against a hardcoded scale maximum of 4,
+  so an ordinary 4.0 xG match already overflowed by two pixels and anything
+  above 4 rode up over the heading -- which is what a 5-plus xG Barcelona
+  performance did.
+*/
+const BAR_MAX_PX = 32;
+
+/*
+  Lowest the scale may top out at.
+
+  Scaling to the data alone would make a quiet run of 0.3 xG matches draw the
+  same full-height bars as a run of 3.0, which flatters a poor five games and
+  makes two teams side by side incomparable. Holding the floor at 4 keeps the
+  usual case on a fixed scale and only stretches it when a match genuinely
+  exceeds it.
+*/
+const XG_SCALE_FLOOR = 4;
+
 function XGBar({ values, color }: { values: number[]; color: string }) {
-  const max = 4;
+  const max = Math.max(XG_SCALE_FLOOR, ...values);
   return (
     <div className="flex gap-1 items-end h-12">
       {values.map((v, i) => (
@@ -25,7 +47,42 @@ function XGBar({ values, color }: { values: number[]; color: string }) {
           <span className="text-[9px] font-data" style={{ color: '#94a3b8' }}>{v.toFixed(1)}</span>
           <div
             className="rounded-sm w-4 transition-all"
-            style={{ height: `${(v / max) * 36}px`, background: color, opacity: 0.85, minHeight: 4 }}
+            style={{
+              height: `${Math.max(4, (v / max) * BAR_MAX_PX)}px`,
+              background: color,
+              opacity: 0.85,
+            }}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/*
+  Shots over the same window. Scaled like the xG bars and for the same reason:
+  the denominator was a hardcoded 25, so a 30-shot game drew past its row.
+*/
+const SHOTS_SCALE_FLOOR = 25;
+
+function ShotsBar({ values, color, align }: {
+  values: number[];
+  color: string;
+  align: 'left' | 'right';
+}) {
+  const max = Math.max(SHOTS_SCALE_FLOOR, ...values);
+  return (
+    <div className={`flex gap-1 ${align === 'right' ? 'justify-end' : ''}`}>
+      {values.map((s, i) => (
+        <div key={i} className="text-center">
+          <div className="text-xs font-data font-bold text-white">{s}</div>
+          <div
+            className="w-4 rounded-sm mt-0.5"
+            style={{
+              height: `${Math.max(2, (s / max) * 24)}px`,
+              background: `${color}44`,
+              border: `1px solid ${color}`,
+            }}
           />
         </div>
       ))}
@@ -714,25 +771,11 @@ export function MatchCard({ p, leagues }: {
           <div className="mt-4 grid gap-3" style={{ gridTemplateColumns: '1fr 1fr' }}>
             <div>
               <div className="text-xs mb-1" style={{ color: 'var(--muted-foreground)' }}>Shots, last 5 games</div>
-              <div className="flex gap-1">
-                {(p.form_home?.shots ?? []).map((s, i) => (
-                  <div key={i} className="text-center">
-                    <div className="text-xs font-data font-bold text-white">{s}</div>
-                    <div className="w-4 rounded-sm mt-0.5" style={{ height: `${(s / 25) * 24}px`, background: '#00e67644', border: '1px solid #00e676' }} />
-                  </div>
-                ))}
-              </div>
+              <ShotsBar values={p.form_home?.shots ?? []} color="#00e676" align="left" />
             </div>
             <div>
               <div className="text-xs mb-1 text-right" style={{ color: 'var(--muted-foreground)' }}>Shots, last 5 games</div>
-              <div className="flex gap-1 justify-end">
-                {(p.form_away?.shots ?? []).map((s, i) => (
-                  <div key={i} className="text-center">
-                    <div className="text-xs font-data font-bold text-white">{s}</div>
-                    <div className="w-4 rounded-sm mt-0.5" style={{ height: `${(s / 25) * 24}px`, background: '#3b82f644', border: '1px solid #3b82f6' }} />
-                  </div>
-                ))}
-              </div>
+              <ShotsBar values={p.form_away?.shots ?? []} color="#3b82f6" align="right" />
             </div>
           </div>
 
