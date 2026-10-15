@@ -13,6 +13,9 @@ Run with::
 
     python -m pipelines.fetch_european
     python -m pipelines.fetch_european --start-season 2223 --competitions UCL
+
+A narrower ``--start-season`` refreshes only those seasons and leaves the rest
+of the file alone; see `merge_seasons`.
 """
 
 from __future__ import annotations
@@ -45,6 +48,74 @@ TMH = PROCESSED_DIR / "team_match_history_all.csv"
 REVIEW_ROWS = 25
 
 logger = logging.getLogger("fetch_european")
+
+
+def merge_seasons(
+    existing: pd.DataFrame, fetched: pd.DataFrame, seasons: list[str]
+) -> pd.DataFrame:
+    """Replace only the seasons this run fetched, keeping the rest.
+
+    This used to be ``fetched.to_csv(...)``, which made ``--start-season`` a
+    destructive flag rather than a narrowing one: asking for 2026/27 alone
+    rewrote the file with 2026/27 alone, discarding ten seasons of European
+    results. Nothing warned, and the loss only shows up later and indirectly,
+    in `fit_league_adjustment` quietly refitting the cross-league correction on
+    a fraction of the ties it was derived from.
+
+    A season this run asked for is replaced wholesale rather than merged
+    row-by-row, because that is what a refetch means: a tie dropped from the
+    source, or recognised as a duplicate, must disappear from our copy too.
+    Seasons the run did not ask for are untouched.
+    """
+    if existing.empty:
+        return fetched
+    if fetched.empty:
+        # Nothing fetched is not a reason to delete what is already there.
+        return existing
+
+    keep = existing[~existing["Season"].astype(str).isin([str(s) for s in seasons])]
+    if keep.empty:
+        return fetched
+
+    merged = pd.concat([keep, fetched], ignore_index=True)
+    logger.info(
+        "Kept %d row(s) from %d season(s) this run did not fetch",
+        len(keep), keep["Season"].nunique(),
+    )
+    return merged.sort_values(["Season", "Date", "HomeTeam"]).reset_index(drop=True)
+
+
+#: The column the merge cannot work without.
+REQUIRED_COLUMN = "Season"
+
+
+def _read(path: Path) -> pd.DataFrame:
+    """What is already on disk, or an empty frame when there is nothing.
+
+    Refuses rather than overwrites when the file is there but unusable. This
+    fails *closed*, unlike the player cache, and for the opposite reason: a
+    cache that cannot be read costs a refetch, whereas this file may hold ten
+    seasons the current run is not fetching, and overwriting it destroys
+    exactly what the merge exists to protect.
+
+    The schema check is the part that matters. ``pd.read_csv`` raises on very
+    little -- handed binary rubbish it returns a cheerful one-column frame --
+    so a parse that merely succeeds proves nothing.
+    """
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        frame = pd.read_csv(path)
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"Could not read {path.name} ({exc}). Not overwriting it.") from exc
+
+    if not frame.empty and REQUIRED_COLUMN not in frame.columns:
+        raise SystemExit(
+            f"{path.name} has no {REQUIRED_COLUMN!r} column, so the seasons it "
+            f"holds cannot be identified. Not overwriting it; move it aside to "
+            f"rebuild from scratch."
+        )
+    return frame
 
 
 def season_labels(start: str, end: str) -> list[str]:
@@ -83,6 +154,9 @@ def main() -> int:
     kept, dropped = big_five_only(matches, tmh)
 
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+    # Merge, never replace. See `merge_seasons`.
+    kept = merge_seasons(_read(MATCHES_OUT), kept, seasons)
+    dropped = merge_seasons(_read(DROPPED_OUT), dropped, seasons)
     kept.to_csv(MATCHES_OUT, index=False)
     dropped.to_csv(DROPPED_OUT, index=False)
 
