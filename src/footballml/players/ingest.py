@@ -107,6 +107,26 @@ def _add_team_relative(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+#: Six of these never arrive, and cannot be made to. Do not try again.
+#:
+#: Only ``interceptions`` and ``tackles_won`` are ever populated, both from
+#: FBref's ``misc`` table. The rest were written for FBref's *defensive
+#: actions* page, which soccerdata does not list among its valid stat types --
+#: so on 2026-10-15 that page was fetched directly through soccerdata's own
+#: session, parsed by ``data-stat`` attribute, and found to serve the columns
+#: with **every cell blank**:
+#:
+#:     season  tackles      clearances   blocks       interceptions
+#:     2223    0 of 1226    0 of 1226    0 of 1226    1178 of 1226
+#:     2425    0 of 1236    0 of 1236    0 of 1236    1188 of 1236
+#:     2526    0 of 1190    0 of 1190    0 of 1190    1142 of 1190
+#:
+#: The headers are there and the values are not, in every season, which is the
+#: same way aerial duels disappeared earlier. Reaching the page is not the
+#: problem and no wrapper upgrade will fix it; FBref has stopped publishing the
+#: numbers. Clearances, blocks and duels would have to come from a different
+#: provider entirely.
+#:
 #: Defensive actions distorted by how much a team has the ball.
 #:
 #: Every one of these is a *count* of something that can only happen while the
