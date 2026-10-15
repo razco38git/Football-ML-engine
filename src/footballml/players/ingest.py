@@ -344,5 +344,120 @@ def fetch_player_seasons(
     # tackles and interceptions, so every `_padj` column the config referenced
     # was quietly absent.
     out = _add_possession_adjusted(out)
+    out = add_team_defence(out)
 
     return out.sort_values(["Season", "League", "Player"]).reset_index(drop=True)
+
+
+#: How a club's own defensive record reaches the players in front of the keeper.
+#:
+#: Negative weights elsewhere mean "lower is better", and these are written to
+#: be used that way -- see the `GK` block in ``config/player_rating.yaml``, which
+#: already rates a keeper on ``goals_against_per90: -2.0``.
+TEAM_DEFENCE_COLUMNS = (
+    "team_xga_per_match",
+    "team_ga_per_match",
+    "team_clean_sheet_pct",
+)
+
+
+def add_team_defence(players: pd.DataFrame, history: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Attach the club's own defensive record to each player-season.
+
+    Measured across 859 team-seasons, the back line's `sub_defending` correlates
+    **+0.10** with the goals its team conceded: not weak, *backwards*. Teams
+    whose defenders rank higher on "defending" concede more. Every input to it
+    reduces to tackles won, interceptions and fouls, which count how often a
+    defender makes a defensive action -- and he makes more of them when his team
+    defends worse. All the real signal in a defender's rating comes from EA's
+    overall (-0.52) and from involvement (-0.50).
+
+    So this supplies the thing the defending group never had: what actually
+    happened at the other end. It is not a new idea in this codebase, it is an
+    existing one never applied past the goalkeeper, who is already rated 97% on
+    outcomes while the centre-backs ahead of him are rated 0% on them.
+
+    The honest limitation is that it is a *club* number. Every centre-back at a
+    club gets the same value, so it cannot separate Saliba from Gabriel; it can
+    only stop Arsenal's back line scoring the same as Werder Bremen's. It also
+    makes a player's rating depend on his teammates, which is a real change to
+    what the number means.
+
+    Inert until the rating config references these columns.
+
+    Args:
+        players: The player-season frame being built.
+        history: ``team_match_history_all.csv``. Read from disk when omitted.
+
+    Returns:
+        ``players`` with :data:`TEAM_DEFENCE_COLUMNS` joined on league, season
+        and team. Clubs with no history keep NaN, which `_weighted` treats as
+        absent evidence rather than filling.
+    """
+    if history is None:
+        from footballml.data import PROCESSED_DIR
+
+        path = PROCESSED_DIR / "team_match_history_all.csv"
+        if not path.exists():
+            logger.warning(
+                "No %s; team-defence columns will be absent. Run build_dataset first.",
+                path.name,
+            )
+            return players
+        history = pd.read_csv(path, low_memory=False)
+
+    needed = {"League", "Season", "Team", "GoalsAgainst"}
+    if not needed <= set(history.columns):
+        logger.warning("Match history is missing %s", sorted(needed - set(history.columns)))
+        return players
+
+    frame = history.assign(Season=history["Season"].astype(str))
+    grouped = frame.groupby(["League", "Season", "Team"], observed=True)
+    # Club names have to be translated before anything is joined, exactly as
+    # `add_team_strength` does. Player data carries Understat's spellings
+    # ("Manchester City", "Atletico Madrid", "Paris Saint Germain") and the
+    # match history carries football-data's ("Man City", "Ath Madrid",
+    # "Paris SG"). Left untranslated the merge fails silently -- a left join
+    # just leaves NaN -- and it fails hardest on the biggest clubs, which is
+    # the worst possible place: 26.6% of defenders went unjoined, led by Milan,
+    # Atletico, PSG, both Manchester clubs and Athletic.
+    team = grouped.agg(
+        team_ga_per_match=("GoalsAgainst", "mean"),
+        matches=("GoalsAgainst", "size"),
+    )
+    # A clean sheet is the outcome a defence is actually trying to produce, and
+    # it is not the same question as the mean: a side that keeps ten and then
+    # loses 5-0 is not the side that concedes one every week.
+    team["team_clean_sheet_pct"] = grouped["GoalsAgainst"].apply(lambda s: (s == 0).mean())
+    if "xGAgainst" in frame.columns:
+        # Understat starts at 1415, so earlier seasons get NaN here and lean on
+        # the goals columns. `_weighted` renormalises over what is present.
+        team["team_xga_per_match"] = grouped["xGAgainst"].mean()
+
+    # Match on a temporary key rather than casting `Season` in place, for the
+    # reason `add_team_strength` spells out: callers compare seasons
+    # numerically -- `run_backtest` filters `s >= start_season` against an int
+    # -- so quietly turning the column into strings breaks them a long way from
+    # here, with an error that points nowhere near this function.
+    team = team.reset_index().drop(columns=["matches"]).rename(columns={"Season": "_season_key"})
+    from footballml.entities import load_aliases
+
+    # Idempotent: a frame that already carries these is re-joined cleanly
+    # rather than growing `_x`/`_y` pairs that every later lookup then misses.
+    players = players.drop(columns=list(TEAM_DEFENCE_COLUMNS), errors="ignore")
+    out = players.assign(
+        _season_key=players["Season"].astype(str),
+        _team_key=players["Team"].replace(load_aliases("understat")),
+    ).merge(
+        team.rename(columns={"Team": "_team_key"}),
+        on=["League", "_season_key", "_team_key"],
+        how="left",
+        validate="many_to_one",
+    )
+    out = out.drop(columns=["_season_key", "_team_key"])
+    present = [c for c in TEAM_DEFENCE_COLUMNS if c in out.columns]
+    logger.info(
+        "Team defence joined for %d of %d player-seasons",
+        int(out[present[0]].notna().sum()) if present else 0, len(out),
+    )
+    return out

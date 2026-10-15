@@ -15,9 +15,12 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
+from footballml.players import ingest
 from footballml.players.fbref import _is_same_name, _tokens, match_players
-from footballml.players.rating import MAX_MISSING_WEIGHT, _weighted
+from footballml.players.rating import MAX_MISSING_WEIGHT, _weighted, load_config
+from pipelines import defending_sweep as sweep
 
 # --- one name contains the other ----------------------------------------------
 
@@ -170,3 +173,266 @@ def test_the_refusal_threshold_is_the_one_already_configured() -> None:
     assert MAX_MISSING_WEIGHT == 0.5
     out = _weighted(_percentiles([{"a": 0.6, "b": np.nan}]), weights)
     assert out.iloc[0] == 0.6
+
+
+# --- the club's own defensive record ------------------------------------------
+#
+# `sub_defending` correlates +0.10 with the goals a team concedes, across 859
+# team-seasons: not weak, backwards. Every input counts defensive *actions*, and
+# a defender makes more of those when his side defends worse. What the group
+# never had is what happened at the other end -- which the goalkeeper has been
+# rated on all along, at 97% of his composite, while the defenders in front of
+# him are rated on it at 0%.
+
+def _history(rows: list[tuple[str, str, str, list[int]]]) -> pd.DataFrame:
+    """League, season, team and the goals conceded in each match."""
+    out = []
+    for league, season, team, conceded in rows:
+        out.extend(
+            {
+                "League": league, "Season": season, "Team": team,
+                "GoalsAgainst": ga, "xGAgainst": float(ga) + 0.1,
+            }
+            for ga in conceded
+        )
+    return pd.DataFrame(out)
+
+
+def _players(rows: list[tuple[str, str, str, str]]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [{"League": lg, "Season": s, "Team": t, "Player": p} for lg, s, t, p in rows]
+    )
+
+
+def test_the_club_record_reaches_its_defenders() -> None:
+    history = _history([("E0", "2526", "Arsenal", [0, 0, 1, 2])])
+    out = ingest.add_team_defence(
+        _players([("E0", "2526", "Arsenal", "William Saliba")]), history
+    )
+    row = out.iloc[0]
+    assert row["team_ga_per_match"] == pytest.approx(0.75)
+    assert row["team_clean_sheet_pct"] == pytest.approx(0.5)
+    assert row["team_xga_per_match"] == pytest.approx(0.85)
+
+
+def test_it_separates_a_good_defence_from_a_bad_one() -> None:
+    """The whole point. These two were indistinguishable on `sub_defending`.
+
+    Arsenal conceded 0.71 a game in 2025/26 and Werder Bremen 1.76, and their
+    centre-backs rated 53.5 and 60.6 -- the wrong way round.
+    """
+    history = _history([
+        ("E0", "2526", "Arsenal", [0, 0, 1, 1]),
+        ("D1", "2526", "Werder Bremen", [2, 2, 3, 1]),
+    ])
+    out = ingest.add_team_defence(
+        _players([
+            ("E0", "2526", "Arsenal", "William Saliba"),
+            ("D1", "2526", "Werder Bremen", "Karim Coulibaly"),
+        ]),
+        history,
+    )
+    arsenal, bremen = out.iloc[0], out.iloc[1]
+    assert arsenal["team_ga_per_match"] < bremen["team_ga_per_match"]
+    assert arsenal["team_clean_sheet_pct"] > bremen["team_clean_sheet_pct"]
+
+
+def test_every_defender_at_a_club_gets_the_same_number() -> None:
+    """Stated as a limitation, not hidden: this cannot separate teammates.
+
+    It fixes the cross-club problem and not the within-club one, and it makes a
+    player's rating depend partly on who he plays with.
+    """
+    history = _history([("E0", "2526", "Arsenal", [0, 1])])
+    out = ingest.add_team_defence(
+        _players([
+            ("E0", "2526", "Arsenal", "William Saliba"),
+            ("E0", "2526", "Arsenal", "Gabriel"),
+        ]),
+        history,
+    )
+    teammates = out["team_ga_per_match"]
+    assert (teammates == teammates.iloc[0]).all()
+
+
+def test_the_season_dtype_survives() -> None:
+    """`run_backtest` filters seasons numerically.
+
+    `add_team_strength` carries the same warning: casting `Season` to string in
+    place breaks callers a long way downstream, with an error pointing nowhere
+    near the function that did it.
+    """
+    players = _players([("E0", "2526", "Arsenal", "William Saliba")])
+    players["Season"] = players["Season"].astype(int)
+    out = ingest.add_team_defence(players, _history([("E0", "2526", "Arsenal", [0, 1])]))
+    assert out["Season"].dtype == players["Season"].dtype
+    assert "_season_key" not in out.columns
+
+
+def test_a_club_with_no_history_is_left_blank_not_guessed() -> None:
+    """NaN is absent evidence; `_weighted` renormalises rather than filling."""
+    out = ingest.add_team_defence(
+        _players([("E0", "2526", "Promoted", "Someone")]),
+        _history([("E0", "2526", "Arsenal", [0, 1])]),
+    )
+    assert pd.isna(out.iloc[0]["team_ga_per_match"])
+
+
+def test_xg_is_optional_so_pre_2014_seasons_still_work() -> None:
+    """Understat starts at 1415; the goals columns carry the earlier ones."""
+    history = _history([("E0", "1112", "Arsenal", [0, 2])]).drop(columns=["xGAgainst"])
+    out = ingest.add_team_defence(_players([("E0", "1112", "Arsenal", "Someone")]), history)
+    assert out.iloc[0]["team_ga_per_match"] == pytest.approx(1.0)
+    assert "team_xga_per_match" not in out.columns
+
+
+def test_a_player_moving_club_gets_each_club_s_record() -> None:
+    """One row per player per team per season, so the join must be per row."""
+    history = _history([
+        ("E0", "2526", "Arsenal", [0, 0]),
+        ("E0", "2526", "Burnley", [3, 3]),
+    ])
+    out = ingest.add_team_defence(
+        _players([
+            ("E0", "2526", "Arsenal", "Journeyman"),
+            ("E0", "2526", "Burnley", "Journeyman"),
+        ]),
+        history,
+    )
+    assert sorted(out["team_ga_per_match"]) == [0.0, 3.0]
+
+
+# --- the definition is inert until it is weighted -----------------------------
+
+def test_a_zero_weighted_sub_rating_changes_nothing() -> None:
+    """`team_defence` ships at 0.0 so the config can hold it without publishing it.
+
+    `usable_weights` filters `w != 0` from both the usable set and the total, so
+    a zero weight contributes to neither. `GK`'s `workload` has relied on this
+    all along.
+    """
+    frame = pd.DataFrame([{"a": 0.8, "b": 0.4, "unused": 0.1}])
+    with_zero = _weighted(frame, {"a": 3.0, "b": 1.0, "unused": 0.0})
+    without = _weighted(frame, {"a": 3.0, "b": 1.0})
+    assert with_zero.iloc[0] == without.iloc[0]
+
+
+def test_the_shipped_config_weights_team_defence_at_zero() -> None:
+    """Nothing from the `outcome` arm ships until the sweep is re-run.
+
+    A first sweep chose 0.30, on a join that silently missed 26.6% of
+    defenders. The definition stays so the measurement can be repeated; the
+    weight does not.
+    """
+    config = load_config()
+    for role in ("CB", "FB"):
+        weights = config["positions"][role]["sub_rating_weights"]
+        assert weights["team_defence"] == 0.0
+        assert sum(weights.values()) == pytest.approx(1.0)
+        # And the definition is there to be switched on.
+        assert set(config["positions"][role]["sub_ratings"]["team_defence"]) == {
+            "team_xga_per_match", "team_ga_per_match", "team_clean_sheet_pct",
+        }
+
+
+def test_conceding_counts_against_a_defender() -> None:
+    """Sign convention, matching the keeper's `goals_against_per90: -2.0`.
+
+    Positive weights here would rate the leakiest defence in the division top.
+    """
+    config = load_config()
+    metrics = config["positions"]["CB"]["sub_ratings"]["team_defence"]
+    assert metrics["team_xga_per_match"] < 0
+    assert metrics["team_ga_per_match"] < 0
+    assert metrics["team_clean_sheet_pct"] > 0
+
+
+# --- the sweep itself ---------------------------------------------------------
+
+def test_every_variant_still_sums_to_one() -> None:
+    """A composite whose weights do not sum to 1 is not on the same scale."""
+    config = load_config()
+    for name, variant in sweep.variants(config):
+        weights = variant["positions"]["CB"]["sub_rating_weights"]
+        assert sum(weights.values()) == pytest.approx(1.0), name
+
+
+def test_the_share_variant_keeps_the_other_groups_in_proportion() -> None:
+    """Only one thing varies: how much of the composite rests on defending."""
+    config = load_config()
+    base = config["positions"]["CB"]["sub_rating_weights"]
+    moved = sweep._share_variant(config, 0.30)["positions"]["CB"]["sub_rating_weights"]
+    assert moved["defending"] == pytest.approx(0.30)
+    # creation and finishing were equal before and must stay equal.
+    assert moved["creation"] == pytest.approx(moved["finishing"])
+    assert moved["involvement"] / moved["creation"] == pytest.approx(
+        base["involvement"] / base["creation"]
+    )
+
+
+def test_the_outcome_variant_only_moves_defending() -> None:
+    """So it is isolated from the share sweep and the two can be told apart."""
+    config = load_config()
+    base = config["positions"]["CB"]["sub_rating_weights"]
+    moved = sweep._outcome_variant(config, 0.30)["positions"]["CB"]["sub_rating_weights"]
+    assert moved["team_defence"] == pytest.approx(0.30)
+    assert moved["defending"] == pytest.approx(base["defending"] - 0.30)
+    for group in ("involvement", "creation", "finishing"):
+        assert moved[group] == pytest.approx(base[group])
+
+
+def test_the_baseline_variant_is_the_shipped_config() -> None:
+    """Otherwise every delta is measured against something nobody ships."""
+    config = load_config()
+    name, variant = sweep.variants(config)[0]
+    assert name == "baseline"
+    assert (
+        variant["positions"]["CB"]["sub_rating_weights"]
+        == config["positions"]["CB"]["sub_rating_weights"]
+    )
+
+
+def test_the_defence_correlation_looks_at_the_following_season() -> None:
+    """Same-season would flatter the outcome variant by construction.
+
+    It is built from a season's own results, so scoring it against that same
+    season's goals conceded would be marking its own homework. The model only
+    ever reads strength joined from the previous season anyway.
+    """
+    strength = pd.DataFrame({
+        "League": ["E0", "E0"], "Season": ["2425", "2425"],
+        "Team": ["Arsenal", "Burnley"], "strength_defence": [85.0, 60.0],
+    })
+    history = _history([
+        ("E0", "2526", "Arsenal", [0] * 20),
+        ("E0", "2526", "Burnley", [3] * 20),
+        # The same-season rows are deliberately the wrong way round: if the
+        # function looked at these, the correlation would come back positive.
+        ("E0", "2425", "Arsenal", [3] * 20),
+        ("E0", "2425", "Burnley", [0] * 20),
+    ])
+    assert sweep.next_season_defence(strength, history, min_rows=2) < 0
+
+
+def test_the_sweep_never_writes_the_shipped_strength_file() -> None:
+    """A finally does not survive the process being killed.
+
+    The first version swapped `team_strength.csv` per variant and restored it
+    in a `finally`. A timeout cut the smoke test short, the `finally` never
+    ran, and the shipped file was left holding a variant's numbers -- 1,160 of
+    1,170 rows wrong by up to 5.3 points, with the API serving them.
+
+    It was never necessary: `build_match_features` takes the strength frame, so
+    the experiment holds its variants in memory and the file on disk is not
+    part of the experiment at all.
+    """
+    import inspect
+
+    # Checked against the code rather than the prose: the module comment names
+    # the file deliberately, to say it does not write it.
+    source = "\n".join(
+        line for line in inspect.getsource(sweep).split("\n")
+        if not line.lstrip().startswith("#")
+    )
+    assert "to_csv" not in source, "the sweep must not write any frame to disk"
+    assert "shutil" not in source, "nothing to copy if nothing is overwritten"

@@ -579,6 +579,11 @@ def test_a_fully_measured_pool_blends_fifty_fifty_as_before() -> None:
     """
     squad = _defenders()
     squad["fifa_overall"] = np.linspace(60, 90, len(squad))
+    # `team_defence` is defined for CB and FB, so a pool missing it is not
+    # "fully measured" even while the group is weighted zero.
+    squad["team_xga_per_match"] = np.linspace(0.8, 2.0, len(squad))
+    squad["team_ga_per_match"] = np.linspace(0.7, 2.1, len(squad))
+    squad["team_clean_sheet_pct"] = np.linspace(0.5, 0.1, len(squad))
 
     rated = rate_players(squad)
     rated = rated[rated["rated"] & rated["fifa_overall"].notna()]

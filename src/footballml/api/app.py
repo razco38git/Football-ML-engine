@@ -1268,6 +1268,7 @@ def accuracy(league: str | None = Query(None)) -> Accuracy:
 #: Sub-rating and stat columns surfaced by the player endpoints.
 _PLAYER_SUBS = (
     "finishing", "creation", "involvement", "volume", "defending",
+    "team_defence",
     "shot_stopping", "reliability", "workload", "penalties",
 )
 _PLAYER_STATS = (

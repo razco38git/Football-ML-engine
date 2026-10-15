@@ -311,6 +311,7 @@ export interface PlayerRating {
   sub_involvement: number | null;
   sub_volume: number | null;
   sub_defending: number | null;
+  sub_team_defence: number | null;
   sub_shot_stopping: number | null;
   sub_reliability: number | null;
   sub_workload: number | null;

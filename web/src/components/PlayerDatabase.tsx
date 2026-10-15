@@ -27,14 +27,23 @@ const ATTRIBUTES: Record<string, { key: keyof PlayerRating; label: string; short
     { key: 'sub_workload', label: 'Workload faced', short: 'WRK' },
     { key: 'sub_penalties', label: 'Penalties', short: 'PEN' },
   ],
+  // Two separate questions, shown separately, because they disagree and the
+  // disagreement is the information. "Ball-winning" counts tackles and
+  // interceptions -- Saliba is 32nd percentile, because a defender at a
+  // dominant side rarely has to make them. "Team defence" is what his side
+  // actually concedes, where Arsenal are 98. Merged into one bar labelled
+  // "Defending" that read 32, which is how this was found.
   CB: [
-    { key: 'sub_defending', label: 'Defending', short: 'DEF' },
+    { key: 'sub_team_defence', label: 'Team defence', short: 'TDF' },
+    { key: 'sub_defending', label: 'Ball-winning', short: 'BWN' },
     { key: 'sub_involvement', label: 'Build-up', short: 'BLD' },
     { key: 'sub_creation', label: 'Creation', short: 'CRE' },
     { key: 'sub_finishing', label: 'Finishing', short: 'FIN' },
   ],
+  // Full backs carry the bar but not the weight: measured, it bought a better
+  // defence correlation and a worse model. See EXPERIMENTS.md.
   FB: [
-    { key: 'sub_defending', label: 'Defending', short: 'DEF' },
+    { key: 'sub_defending', label: 'Ball-winning', short: 'BWN' },
     { key: 'sub_creation', label: 'Creation & crossing', short: 'CRE' },
     { key: 'sub_involvement', label: 'Build-up', short: 'BLD' },
     { key: 'sub_finishing', label: 'Finishing', short: 'FIN' },
@@ -42,7 +51,7 @@ const ATTRIBUTES: Record<string, { key: keyof PlayerRating; label: string; short
   // A holder leads with winning the ball back; a number eight with creating.
   // Same four bars, ordered by what the role is for.
   DM: [
-    { key: 'sub_defending', label: 'Defending', short: 'DEF' },
+    { key: 'sub_defending', label: 'Ball-winning', short: 'BWN' },
     { key: 'sub_involvement', label: 'Build-up', short: 'BLD' },
     { key: 'sub_creation', label: 'Creation', short: 'CRE' },
     { key: 'sub_finishing', label: 'Finishing', short: 'FIN' },
@@ -50,7 +59,7 @@ const ATTRIBUTES: Record<string, { key: keyof PlayerRating; label: string; short
   MID: [
     { key: 'sub_creation', label: 'Creation', short: 'CRE' },
     { key: 'sub_involvement', label: 'Build-up', short: 'BLD' },
-    { key: 'sub_defending', label: 'Defending', short: 'DEF' },
+    { key: 'sub_defending', label: 'Ball-winning', short: 'BWN' },
     { key: 'sub_finishing', label: 'Finishing', short: 'FIN' },
   ],
   AMW: [

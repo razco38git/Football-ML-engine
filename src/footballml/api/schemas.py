@@ -222,6 +222,7 @@ class PlayerRating(BaseModel):
     sub_involvement: int | None = None
     sub_volume: int | None = None
     sub_defending: int | None = None
+    sub_team_defence: int | None = None
     sub_shot_stopping: int | None = None
     sub_reliability: int | None = None
     sub_workload: int | None = None

@@ -333,11 +333,31 @@ positions:
       finishing:
         np_xg_per90: 1.0
         np_goals_per90: 1.0
+      # Defined and weighted **zero**, which is a result rather than an
+      # omission. Full backs share the centre backs' defending definition
+      # exactly, so the same fix was measured here on top of the chosen CB
+      # setting, and it trades the model away for a prettier correlation:
+      #
+      #   FB team_defence  RPS       delta            defence vs next GA
+      #   0.00             0.36463   -0.00045          -0.528   <- this
+      #   0.15             0.36473   -0.00035          -0.541
+      #   0.30             0.36486   -0.00022          -0.555
+      #
+      # The correlation reaches the ceiling exactly as RPS returns to baseline,
+      # which is the clearest demonstration in either sweep that the
+      # correlation can be driven up by making the rating *less* about the
+      # player. Left at zero, and the definition kept so the measurement can be
+      # repeated rather than re-derived.
+      team_defence:
+        team_xga_per_match: -2.0
+        team_ga_per_match: -1.0
+        team_clean_sheet_pct: 1.0
     sub_rating_weights:
       defending: 0.38
       creation: 0.32
       involvement: 0.25
       finishing: 0.05
+      team_defence: 0.0
 
   CB:
     label: Centre back
@@ -395,11 +415,50 @@ positions:
       finishing:
         np_xg_per90: 1.0
         np_goals_per90: 1.0          # set-piece goals are real value from a CB
+      # What actually happened at the other end, which the group above cannot
+      # see. Measured across 859 team-seasons, the back line's `defending`
+      # correlates **+0.10** with the goals its team conceded -- not weak,
+      # backwards -- because every input counts defensive *actions*, and a
+      # defender makes more of them when his side defends worse.
+      #
+      # This is not a new idea here. The `GK` block below already rates a
+      # keeper 97% on outcomes (`goals_against_per90: -2.0`, `clean_sheet_pct`)
+      # while the defenders in front of him are rated 0% on them. Same sign
+      # convention: negative means lower is better.
+      #
+      # WEIGHTED ZERO PENDING A RE-RUN. A first sweep chose 0.30 and the
+      # numbers below are real, but they were measured before the club-name
+      # bug in `add_team_defence` was found: Understat spellings were joined
+      # against football-data's, so 26.6% of defenders had no team-defence
+      # value at all, led by Milan, Atletico, PSG and both Manchester clubs.
+      # The join now reaches 100%, which changes the inputs the sweep measured,
+      # so nothing here ships until `python -m pipelines.defending_sweep` has
+      # been run again. Superseded figures, kept for comparison:
+      #
+      #   variant        RPS       delta (95% CI)              defence vs next GA
+      #   baseline       0.36508   --                          -0.452
+      #   share-0.00     0.36482   -0.00026 [-0.00044,-0.00008] -0.491
+      #   team_def 0.15  0.36496   -0.00012 [-0.00030,+0.00005] -0.497
+      #   team_def 0.30  0.36463   -0.00045 [-0.00063,-0.00027] -0.528   <- this
+      #   team_def 0.45  0.36536   +0.00028 [+0.00010,+0.00046] -0.548
+      #
+      # Two things that table settles. Deleting `defending` outright --
+      # `share-0.00`, 62% of the composite -- *improves* the model, which is
+      # what a backwards signal looks like from the other side. And 0.45 buys
+      # the best correlation in the sweep while predicting significantly worse:
+      # past some point the club's record crowds out what the rating knows
+      # about the player, and the correlation keeps rising precisely because
+      # the number is turning into last season's goals conceded.
+      team_defence:
+        team_xga_per_match: -2.0
+        team_ga_per_match: -1.0
+        team_clean_sheet_pct: 1.0
     sub_rating_weights:
       defending: 0.62
       involvement: 0.24
       creation: 0.07
       finishing: 0.07
+      team_defence: 0.0
 
   GK:
     label: Goalkeeper
