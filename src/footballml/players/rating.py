@@ -269,11 +269,34 @@ def _weighted(
         return pd.Series(np.nan, index=frame.index)
 
     total = sum(abs(w) for w in usable.values())
+
+    # The same rule, applied per *player* rather than per column.
+    #
+    # The guard above asks whether a metric covers enough of the pool to mean
+    # anything. It cannot see a player who is missing from a column the rest of
+    # the pool fills, and `fillna(0.5)` then handed that player the exact
+    # middle of every distribution -- which for a centre-back missing all five
+    # defending inputs published a defending rating of precisely 50 out of 100,
+    # invented end to end. Thirty of 402 centre-backs in 2025/26 were scored
+    # that way, Gabriel and Bremer and Konsa among them: first-choice defenders
+    # whose only problem was that their name is spelled differently by two
+    # sources.
+    #
+    # So: a missing metric is absent evidence, the rest is renormalised over
+    # what is actually there, and a player missing more than
+    # `max_missing_weight` of it comes back blank. That is the philosophy this
+    # function already states for columns; a row deserves the same reading.
+    # Where nothing is missing -- the overwhelming majority -- the arithmetic is
+    # unchanged, because `present` equals `total`.
+    present = sum(frame[c].notna().astype(float) * abs(w) for c, w in usable.items())
     stacked = sum(
-        (frame[c].fillna(0.5) if w > 0 else 1.0 - frame[c].fillna(0.5)) * abs(w)
+        (frame[c] if w > 0 else 1.0 - frame[c]).fillna(0.0) * abs(w)
         for c, w in usable.items()
     )
-    return stacked / total
+    measured_share = present / total
+    return (stacked / present.replace(0.0, np.nan)).where(
+        measured_share >= 1.0 - max_missing_weight
+    )
 
 
 def rate_players(

@@ -160,6 +160,32 @@ def _name_keys(name: str) -> list[str]:
     return keys
 
 
+def _tokens(name: str) -> frozenset[str]:
+    """The normalised name as a set of words, for subset comparison."""
+    return frozenset(normalise_name(name).split())
+
+
+def _is_same_name(a: frozenset[str], b: frozenset[str]) -> bool:
+    """True when one name is the other with words added, and not otherwise.
+
+    The rule behind the last matching pass, and the reason it is safe. Sources
+    disagree about how much of a name to print, in both directions:
+
+        Understat "Gabriel"                 FBref "Gabriel Magalhães"
+        Understat "Pierre Kalulu Kyatengwa" FBref "Pierre Kalulu"
+        Understat "Alejandro Catena"        FBref "Catena"
+
+    Every one of those is a subset relation. What it refuses is the case that
+    makes a looser rule dangerous: Werder Bremen's "Karim Coulibaly" against
+    FBref's "Abdoul Coulibaly" share a surname and nothing else, neither
+    contains the other, and they are not the same man. A shared-token rule
+    would have paired them and given a defender another player's numbers.
+    """
+    if not a or not b:
+        return False
+    return a <= b or b <= a
+
+
 def match_players(
     left: pd.DataFrame,
     right: pd.DataFrame,
@@ -212,6 +238,15 @@ def match_players(
     if not extra:
         return merged.drop(columns=["_norm"], errors="ignore")
 
+    # Which right-hand players are already spoken for, per group. The last pass
+    # needs this to tell "the only Gabriel left" from "a Gabriel".
+    taken: dict[tuple, set[str]] = {}
+    matched_exactly = merged[extra[0]].notna()
+    for keys in ([on] + ([fallback_on] if fallback_on else [])):
+        for idx in merged.index[matched_exactly]:
+            group = tuple(merged.at[idx, c] for c in keys)
+            taken.setdefault(group, set()).add(str(merged.at[idx, "_norm"]))
+
     def _rate() -> float:
         return float(merged[extra[0]].notna().mean())
 
@@ -256,9 +291,59 @@ def match_players(
                 if hit is not None:
                     for col in extra:
                         merged.at[idx, col] = hit[col]
+                    taken.setdefault(group, set()).add(str(hit["_norm"]))
                     break
 
         logger.info("After fuzzy pass on %s: %.0f%%", "+".join(keys), _rate() * 100)
+
+    # Fourth pass: one name contains the other, and only one candidate is left.
+    #
+    # The keys above assume the two sources disagree about *middle* names. They
+    # do not cover a source printing one word where the other prints two
+    # ("Gabriel" / "Gabriel Magalhães", "Bremer" / "Gleison Bremer"), nor an
+    # extra word on the end rather than in the middle ("Pierre Kalulu
+    # Kyatengwa" / "Pierre Kalulu") -- the first-plus-last key reads that as
+    # "pierre kyatengwa" and misses.
+    #
+    # Thirty of 402 centre-backs reached this point with no defensive data at
+    # all, among them Gabriel, Bremer, Kalulu, Konsa and Ndicka -- first-choice
+    # defenders at Arsenal, Juventus, Aston Villa and Roma. They did not come
+    # back empty: `_weighted` filled the gap with 0.5, so each was published
+    # with a defending rating of exactly 50 out of 100, invented.
+    #
+    # Two guards make it safe. `_is_same_name` demands containment, not overlap.
+    # And a candidate already matched to somebody else is unavailable, which is
+    # what resolves Gabriel: "gabriel" alone cannot tell Magalhães from Jesus,
+    # but Jesus matched exactly on the first pass, so only one Gabriel is left
+    # to take.
+    for keys in ([on] + ([fallback_on] if fallback_on else [])):
+        unmatched = merged[extra[0]].isna()
+        if not unmatched.any():
+            break
+
+        by_group: dict[tuple, list] = {}
+        for _, row in right.iterrows():
+            by_group.setdefault(tuple(row[c] for c in keys), []).append(row)
+
+        for idx in merged.index[unmatched]:
+            group = tuple(merged.at[idx, c] for c in keys)
+            mine = _tokens(str(merged.at[idx, "Player"]))
+            spoken_for = taken.get(group, set())
+            candidates = [
+                row
+                for row in by_group.get(group, [])
+                if str(row["_norm"]) not in spoken_for
+                and _is_same_name(mine, _tokens(str(row["Player"])))
+            ]
+            if len(candidates) == 1:
+                hit = candidates[0]
+                for col in extra:
+                    merged.at[idx, col] = hit[col]
+                taken.setdefault(group, set()).add(str(hit["_norm"]))
+
+        logger.info(
+            "After containment pass on %s: %.0f%%", "+".join(keys), _rate() * 100
+        )
 
     return merged.drop(columns=["_norm"], errors="ignore")
 
