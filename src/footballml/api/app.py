@@ -16,11 +16,10 @@ control possible in the UI.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import threading
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -333,18 +332,24 @@ def _load_state(startup: bool = False) -> dict[str, int]:
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Load the model and history once, at startup; warm the cache after.
 
-    The warmer is a task rather than an await: its first pass takes a minute or
-    two, and holding the port closed for that long would turn a restart from
+    The warmer runs alongside rather than before: its first pass takes a minute
+    or two, and holding the port closed for that long would turn a restart from
     "the tab is briefly slow" into "the site is down".
     """
     _load_state(startup=True)
-    warmer = asyncio.create_task(_warm_upcoming())
+    stop = threading.Event()
+    warmer = threading.Thread(
+        target=_warm_upcoming, args=(stop,), name="fixture-warmer", daemon=True
+    )
+    warmer.start()
     try:
         yield
     finally:
-        warmer.cancel()
-        with suppress(asyncio.CancelledError):
-            await warmer
+        # Flagged, never joined. The thread may be halfway through a scrape
+        # rate-limited to seven seconds a page, and waiting for it is what made
+        # a graceful stop take minutes. `daemon=True` lets the interpreter exit
+        # without it; the cache it is filling does not survive the process.
+        stop.set()
 
 
 app = FastAPI(
@@ -758,7 +763,7 @@ def _refresh_upcoming() -> None:
         state._upcoming_at = datetime.now(UTC)
 
 
-async def _warm_upcoming() -> None:
+def _warm_upcoming(stop: threading.Event) -> None:
     """Keep the fixture cache full, so no request pays to build it.
 
     Scoring upcoming fixtures needs the season schedule, and fetching that goes
@@ -773,15 +778,23 @@ async def _warm_upcoming() -> None:
     tab its freshness, not the whole process: `upcoming` still serves whatever
     was last cached, and `_score_upcoming` falls back to the published fixture
     file on its own.
+
+    A thread with a stop flag rather than a task that gets cancelled, because
+    `asyncio.to_thread` cannot be cancelled. Shutdown used to cancel this task
+    and then `await` it, and that await could only return once the scrape
+    underneath had finished: 85 seconds of rate-limited fetches on a good day,
+    unbounded while soccerdata retries. So every graceful stop of the API hung
+    on a web scrape, for a cache that is thrown away on exit anyway.
+
+    `stop.wait` doubles as the sleep, so stopping takes effect at the end of
+    the current pass rather than one interval later.
     """
-    while True:
+    while not stop.is_set():
         try:
-            await asyncio.to_thread(_refresh_upcoming)
-        except asyncio.CancelledError:
-            raise
+            _refresh_upcoming()
         except Exception:  # noqa: BLE001 - a warmer that dies is worse than one that retries
             logger.exception("Could not warm the fixture cache; will retry")
-        await asyncio.sleep(FIXTURE_WARM_INTERVAL.total_seconds())
+        stop.wait(FIXTURE_WARM_INTERVAL.total_seconds())
 
 
 def _score_upcoming() -> list[Prediction]:

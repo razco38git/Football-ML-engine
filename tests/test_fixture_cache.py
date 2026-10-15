@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import threading
+import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -107,17 +108,94 @@ def test_the_warmer_keeps_going_after_a_failure(stale_cache, monkeypatch):
     monkeypatch.setattr(app_module, "_refresh_upcoming", flaky)
     monkeypatch.setattr(app_module, "FIXTURE_WARM_INTERVAL", timedelta(seconds=0))
 
-    async def run_briefly():
-        task = asyncio.create_task(app_module._warm_upcoming())
-        while len(calls) < 3:
-            await asyncio.sleep(0)
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
+    stop = threading.Event()
 
-    asyncio.run(asyncio.wait_for(run_briefly(), timeout=10))
+    def flaky_then_stop():
+        flaky()
+        if len(calls) >= 3:
+            stop.set()
 
+    monkeypatch.setattr(app_module, "_refresh_upcoming", flaky_then_stop)
+    warmer = threading.Thread(target=app_module._warm_upcoming, args=(stop,), daemon=True)
+    warmer.start()
+    warmer.join(timeout=10)
+
+    assert not warmer.is_alive(), "the warmer ignored its stop flag"
     assert len(calls) >= 3
+
+
+def test_shutting_down_does_not_wait_for_a_scrape_in_flight(monkeypatch):
+    """The API must stop promptly while the warmer is mid-fetch.
+
+    `_refresh_upcoming` drives a headless browser at seven seconds a page --
+    85s measured for the six competitions, and unbounded while soccerdata
+    retries. The warmer used to be an `asyncio.to_thread` task that shutdown
+    cancelled and then awaited; `to_thread` cannot be cancelled, so the await
+    only returned when the scrape did.
+
+    Every graceful stop therefore hung on a web scrape, for a cache that does
+    not survive the process. It also made `uvicorn --reload` useless and sent
+    `scripts/start_site.ps1` to `Stop-Process -Force`.
+
+    This drives the real lifespan, not the warmer in isolation, because the
+    await that blocked lived in the lifespan rather than in the loop.
+    """
+    started, release = threading.Event(), threading.Event()
+
+    def slow_scrape():
+        started.set()
+        release.wait(timeout=30)
+
+    monkeypatch.setattr(app_module, "_refresh_upcoming", slow_scrape)
+    monkeypatch.setattr(app_module, "_load_state", lambda startup=False: None)
+
+    async def start_then_stop():
+        async with app_module.lifespan(app_module.app):
+            # Yield to the loop rather than blocking it. A `threading.Event`
+            # wait here would starve a warmer implemented as a task, and this
+            # test would then pass for the wrong reason -- reporting "never
+            # started" when what it exists to catch is "stopped too slowly".
+            deadline = time.monotonic() + 10
+            while not started.is_set() and time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+            assert started.is_set(), "the warmer never started"
+
+    began = time.monotonic()
+    try:
+        asyncio.run(asyncio.wait_for(start_then_stop(), timeout=20))
+        elapsed = time.monotonic() - began
+    finally:
+        release.set()
+
+    assert elapsed < 2.0, f"shutdown waited {elapsed:.1f}s for the scrape"
+
+
+def test_the_warmer_thread_cannot_hold_the_process_open(monkeypatch):
+    """A daemon, so a scrape in flight does not delay interpreter exit.
+
+    `stop.set()` ends the loop at the *end* of the current pass, so without
+    this a stop during a fetch would still wait out the fetch at exit.
+    """
+    seen = {}
+    real_thread = threading.Thread
+
+    def capture(*args, **kwargs):
+        thread = real_thread(*args, **kwargs)
+        seen["daemon"] = thread.daemon
+        seen["name"] = thread.name
+        return thread
+
+    monkeypatch.setattr(app_module, "_load_state", lambda startup=False: None)
+    monkeypatch.setattr(app_module, "_refresh_upcoming", lambda: None)
+    monkeypatch.setattr(app_module.threading, "Thread", capture)
+
+    async def start_then_stop():
+        async with app_module.lifespan(app_module.app):
+            pass
+
+    asyncio.run(asyncio.wait_for(start_then_stop(), timeout=20))
+    assert seen.get("daemon") is True
+    assert seen.get("name") == "fixture-warmer"
 
 
 def test_the_warmer_ticks_sooner_than_the_cache_expires():
