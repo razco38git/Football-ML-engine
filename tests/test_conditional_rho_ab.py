@@ -14,6 +14,7 @@ from __future__ import annotations
 import ast
 import inspect
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -57,20 +58,53 @@ def test_every_declared_arm_is_present() -> None:
     assert set(rho.ARMS) == {"production", "per-league", "shrunk", "per-lambda"}
 
 
+PER_LEAGUE = pd.Series({"D1": -0.130, "E0": -0.043, "F1": -0.045,
+                        "I1": -0.052, "SP1": -0.033})
+COUNTS = pd.Series({"D1": 3402, "E0": 4239, "F1": 3911,
+                    "I1": 4230, "SP1": 4256})
+
+
 def test_shrinkage_pulls_a_noisy_league_toward_the_pool() -> None:
-    per_league = pd.Series({"D1": -0.130, "E0": -0.043, "F1": -0.045,
-                            "I1": -0.052, "SP1": -0.033})
-    counts = pd.Series({"D1": 3402, "E0": 4239, "F1": 3911,
-                        "I1": 4230, "SP1": 4256})
-    shrunk = rho.shrink(per_league, pooled=-0.0567, counts=counts)
-    assert abs(shrunk["D1"] - -0.0567) < abs(per_league["D1"] - -0.0567)
-    assert ((shrunk - -0.0567).abs() <= (per_league - -0.0567).abs()).all()
+    variances = pd.Series({k: 3.5e-4 for k in PER_LEAGUE.index})
+    shrunk = rho.shrink(PER_LEAGUE, -0.0567, COUNTS, variances)
+    assert abs(shrunk["D1"] - -0.0567) < abs(PER_LEAGUE["D1"] - -0.0567)
+    assert ((shrunk - -0.0567).abs() <= (PER_LEAGUE - -0.0567).abs()).all()
+
+
+def test_shrinkage_is_partial_not_total() -> None:
+    """The bug this arm shipped with on its first run.
+
+    The original factor was `1 - (k - 2) / (k * spread)` with no sampling
+    variance in it, which implicitly sets sigma^2 = 1. Rho deviations are ~0.07
+    so `spread` is ~0.001, the factor hit its floor of zero on every fold, and
+    the `shrunk` arm was production in disguise -- reporting a delta of exactly
+    0.000000 against itself across all 18,212 fixtures and all five leagues.
+
+    A collapse to the pooled value must now require the data to say so, not the
+    units.
+    """
+    variances = pd.Series({k: 3.5e-4 for k in PER_LEAGUE.index})
+    shrunk = rho.shrink(PER_LEAGUE, -0.0567, COUNTS, variances)
+    assert not np.allclose(shrunk.to_numpy(), -0.0567), "collapsed to pooled again"
+    assert not np.allclose(shrunk.to_numpy(), PER_LEAGUE.to_numpy())
+
+
+def test_a_huge_sampling_variance_does_collapse_to_pooled() -> None:
+    """When the per-league estimates really are indistinguishable from noise."""
+    variances = pd.Series({k: 10.0 for k in PER_LEAGUE.index})
+    assert rho.shrink(PER_LEAGUE, -0.0567, COUNTS, variances).eq(-0.0567).all()
+
+
+def test_omitting_the_variances_applies_no_shrinkage() -> None:
+    """Rather than shrinking by an assumed one, which is what went wrong."""
+    assert rho.shrink(PER_LEAGUE, -0.0567, COUNTS).equals(PER_LEAGUE.astype("float64"))
 
 
 def test_shrinkage_of_an_already_pooled_set_is_a_no_op() -> None:
     per_league = pd.Series({"A": -0.05, "B": -0.05, "C": -0.05})
     counts = pd.Series({"A": 100, "B": 100, "C": 100})
-    assert rho.shrink(per_league, -0.05, counts).eq(-0.05).all()
+    variances = pd.Series({"A": 1e-4, "B": 1e-4, "C": 1e-4})
+    assert rho.shrink(per_league, -0.05, counts, variances).eq(-0.05).all()
 
 
 # --- the margins --------------------------------------------------------------

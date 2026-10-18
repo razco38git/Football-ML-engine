@@ -1669,3 +1669,151 @@ contributes twelve attackers, three defenders and *no goalkeeper*, which
    `LINE_BY_ROLE` defines, so it cannot express "at least two centre-backs" as
    distinct from "at least two full-backs".
 5. **Hyperparameters fixed to production**, as everywhere else here.
+
+---
+
+# Does every league want the same Dixon-Coles rho?
+
+## Hypothesis
+
+`rho` is a single scalar fitted in `MatchPredictor.fit` and applied to all five
+leagues. Profiling the Dixon-Coles likelihood per league on the committed
+backtest put the Bundesliga at **-0.1297 [-0.1784, -0.0787]**, an interval that
+**excludes the shipped -0.0566**, with rho also trending from -0.038 in the
+lowest total-lambda quartile to -0.070 in the highest.
+
+So one rho across five leagues was an undocumented assumption rather than a
+measured choice. The question is whether conditioning it survives out of sample.
+
+Pre-registered in `docs/PROTOCOLS.md` before the run.
+
+## What was run
+
+`pipelines/conditional_rho_ab.py`, **18,212 fixtures over 11 movable folds**.
+The earliest backtest season is excluded as a scored fold: there is no earlier
+out-of-sample data from which to fit a causal rho for it, so no arm can be read
+there -- the same convention the extended-Elo experiment uses.
+
+| arm | rho |
+|---|---|
+| production | one global rho |
+| per-league | rho per league |
+| shrunk | per-league rho, empirical-Bayes toward the pooled value |
+| per-lambda | rho linear in predicted total goals |
+
+**Every rho is fitted on strictly earlier folds**, routed through
+`fit_rho_within_fold`, which raises on any index overlap and names the
+offending rows. Verified two ways: the guard fires on a deliberately leaky
+split (1,826 overlapping rows reported), and all 11 real folds are asserted
+disjoint with the training maximum season strictly below the scored one.
+
+The **production arm reproduces the shipped scalar exactly** -- -0.0566 on the
+final fold, matching `METHODOLOGY.md` -- so the deltas are against the live
+configuration rather than a re-implementation of it.
+
+## Results: pooled, 18,212 fixtures
+
+| arm | logLik/match | delta | 95% CI | RPS | dRPS | exact% |
+|---|---|---|---|---|---|---|
+| production | -2.910518 | -- | -- | 0.19838 | -- | 12.876 |
+| per-league | -2.910381 | +0.000137 | [-0.000210, +0.000489] | 0.19839 | +0.000012 | 12.832 |
+| **shrunk** | -2.910434 | **+0.000084** | [-0.000057, +0.000225] | 0.19838 | -0.000000 | 12.860 |
+| per-lambda | -2.910681 | -0.000163 | [-0.000484, +0.000154] | 0.19838 | +0.000004 | 12.893 |
+
+Every interval includes zero.
+
+### Per league, which is where the hypothesis lived
+
+| league | n | per-league | shrunk | per-lambda |
+|---|---|---|---|---|
+| **D1** | 3,096 | **+0.001263** | +0.000397 | +0.000915 |
+| E0 | 3,859 | -0.000016 | +0.000013 | -0.000631 |
+| F1 | 3,531 | -0.000172 | -0.000029 | -0.000398 |
+| I1 | 3,850 | -0.000122 | -0.000011 | -0.000190 |
+| SP1 | 3,876 | -0.000070 | +0.000103 | -0.000317 |
+| **better** | | **1 of 5** | 3 of 5 | 1 of 5 |
+
+| arm | seasons better |
+|---|---|
+| per-league | 7 of 11 |
+| shrunk | 6 of 11 |
+| per-lambda | 4 of 11 |
+
+### Exact score, against the pre-declared 0.25pp tolerance
+
+| arm | decline (pp) | 95% paired CI | passes |
+|---|---|---|---|
+| per-league | +0.0439 | [-0.0933, +0.1757] | yes |
+| shrunk | +0.0165 | [-0.0439, +0.0824] | yes |
+| per-lambda | -0.0165 | [-0.1592, +0.1263] | yes |
+
+### RPS, which was not assumed insensitive
+
+| arm | dRPS | 95% CI |
+|---|---|---|
+| per-league | +0.000012 | [-0.000010, +0.000034] |
+| shrunk | -0.000000 | [-0.000009, +0.000008] |
+| per-lambda | +0.000004 | [-0.000014, +0.000021] |
+
+Rho **does** move RPS -- the intervals are not degenerate -- but at roughly two
+orders of magnitude below the 0.0005 floor.
+
+## Verdict: no-ship, all three arms
+
+The kill condition fired exactly as written: *per-league rho fitted on training
+folds fails to beat the global rho out of sample -- the heterogeneity is
+in-sample noise.*
+
+The shape of the failure is the finding. The per-league fit **is** large and
+stable: D1 takes -0.1281 against SP1's -0.0309 on the final fold, more than a
+factor of four apart. Out of sample that buys **+0.001263 in the Bundesliga and
+a small loss in every other league**, netting +0.000137 pooled with an interval
+straddling zero. The one league whose heterogeneity motivated the experiment is
+the one league that gains, and it does not clear its own interval.
+
+`shrunk` is the best-behaved arm -- 6 of 11 seasons, 3 of 5 leagues, the
+tightest interval -- and still fails both likelihood criteria. That is the
+expected ordering and is what a correctly-specified shrinkage should produce.
+
+## The bug this run shipped with, and what it looked like
+
+**The first execution reported `shrunk` as exactly 0.000000 against production
+on all 18,212 fixtures and all five leagues** -- not approximately, identically.
+
+The shrinkage factor was `1 - (k - 2) / (k * spread)` with **no sampling
+variance in it**, implicitly setting sigma^2 = 1. Rho deviations are ~0.07, so
+`spread` is ~0.001, `(k-2)/(k*spread)` is ~556, and the factor hit its floor of
+zero on every fold. **The `shrunk` arm was production in disguise.**
+
+It was caught because a delta of exactly zero across three metrics and five
+leagues is not a result, it is an identity -- the same tell as the RPS bug
+earlier in this file, where a score that did not change under a shuffled outcome
+was not measuring the outcome.
+
+Replaced with empirical-Bayes shrinkage taking each league's sampling variance
+from the curvature of its own likelihood, `tau^2` by method of moments. The
+variances are now a **required argument**: omitting them applies no shrinkage at
+all rather than shrinking by an assumed one. `per-league` and `per-lambda` do
+not route through `shrink` and were unaffected; their numbers are unchanged
+between the two runs.
+
+## Limitations
+
+1. **Rho is fitted on earlier folds' out-of-sample predictions, not on each
+   fold's own training set.** Production fits rho in-sample inside
+   `MatchPredictor.fit`. Refitting the GBMs per arm would cost hours for a
+   parameter that moves four cells; the production arm reproducing -0.0566
+   exactly is the evidence that this substitution is faithful, but it is a
+   substitution.
+2. **Eleven folds, not twenty thousand independent matches.** Matches inside a
+   season share a model fit, so the paired bootstrap's effective sample is
+   nearer 11 than 18,212 and every interval here is narrower than the
+   experiment earns. The per-season and per-league counts are reported for that
+   reason.
+3. **`per-lambda` is linear in total lambda**, which the quartile profile
+   (-0.038 to -0.070) suggested but did not establish. A non-linear form was
+   not tried, and trying one now would be fitting the answer.
+4. **The 2627 fold is 275 fixtures**, a part-season, and contributes a full
+   season-level vote in the counts above.
+5. **Hyperparameters and all production configuration fixed**, as everywhere
+   else in this file.

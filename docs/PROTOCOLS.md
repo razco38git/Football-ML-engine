@@ -7,8 +7,11 @@ before execution.
 Completed work lives in [`../EXPERIMENTS.md`](../EXPERIMENTS.md). A protocol
 leaves this file when it has been executed and written up there.
 
-**Status: awaiting approval. Neither experiment has been run. No production code
-or configuration has been changed.**
+**Status.** Direction 3 has been **executed** — results in
+[`../EXPERIMENTS.md`](../EXPERIMENTS.md), verdict no-ship on all three arms; its
+protocol is kept below as the pre-registration it was. **Direction 2 remains
+unexecuted and awaits explicit approval.** No production code, configuration or
+artifact has been changed by either.
 
 ---
 
@@ -102,22 +105,99 @@ retirement-and-decline signature. By age band, the unrecovered share runs 3.7%
 The CB-versus-FB contrast is therefore not threatened by differential
 missingness, which is the part of the design most exposed to it.
 
-### How age-related attrition could affect the conclusion
+### The treatment is missing too, not just the outcome
 
-A player who disappears has an undefined EA move, and he disappears *because* he
-declined. The observable consequence depends on whether that censoring differs
-between movers and stayers, which **cannot be measured directly** — mover status
-is only known for players who were recovered.
+Mover status is defined by EA club at `t+1` against `t`. An unrecovered player
+has **no `t+1` row at all**, so for those 1,490 player-seasons **both the
+outcome `Δ_EA` and the treatment `mover` are unobserved.** This is jointly
+missing treatment and outcome, which is a materially harder problem than missing
+outcome alone, and the previous draft understated it.
 
-The reasoned direction: a player who moves down out of professional football
-entirely leaves EA's database, while a declining stayer at a big-five club
-remains in it. Missingness should therefore remove **more bad mover outcomes
-than bad stayer outcomes**, inflating the mover slope and biasing **δ toward
-zero**.
+Mover share is observable only among the recovered: **CB 34.4%** (1,168 of
+3,397), **FB 33.1%** (956 of 2,889).
 
-If that reasoning holds, **a contamination finding is conservative and a null
-finding is weak** — exactly the asymmetry that must be stated before the result
-rather than after it.
+### What IPW identifies, and what it cannot
+
+IPW identifies the target estimand under
+
+> `P(R = 1 | X, A, Y) = P(R = 1 | X)`
+
+where `R` is recovery, `X` the pre-transfer covariates, `A` mover status and `Y`
+the EA move. That is **recovery independent of both treatment and outcome given
+the observed pre-transfer covariates.**
+
+The recovery model can only be fitted on `X`, because `A` is unobserved exactly
+when `R = 0`. So:
+
+- **IPW corrects differential missingness by observed pre-transfer
+  characteristics** — age, minutes, rating, `measured_share`, role, season,
+  league. On those it does real work: the imbalances are large (+0.57 on age,
+  −0.58 on minutes) and reweighting removes them.
+- **IPW cannot address differential missingness by mover status**, which is the
+  threat that matters. If a player who moves and fails leaves EA's database at a
+  different rate from a player who stays and fails, *conditional on X*, no
+  reweighting on `X` repairs it, and the data contain no information with which
+  to estimate that difference.
+
+**Consequence, stated plainly: the primary effect is not point-identified
+without an untestable assumption.** IPW is reported as the estimate under MAR
+in `X`; it is not a solution to selection on `A` or `Y`, and will not be
+described as one.
+
+### The direction of bias is a conjecture, not a result
+
+An earlier draft of this protocol asserted that missingness biases δ toward zero,
+on the reasoning that a player who drops out of professional football leaves EA's
+database while a declining stayer at a big-five club remains in it.
+
+**That reasoning is a conjecture and is withdrawn as a stated direction.** It is
+not supported by any analysis here and cannot be, because the quantity it is
+about — recovery rate by mover status — is unobservable. It is plausible; so is
+the reverse, since a declining stayer who loses his place is also invisible to a
+rating gate while remaining at his club, and EA retains squad players who no
+longer play.
+
+No claim about the direction of bias will be made in the write-up unless the
+sensitivity grid below supports one. The grid is what replaces the conjecture.
+
+### Pattern-mixture analysis over both unknowns
+
+Because `A` and `Y` are jointly missing, the sensitivity analysis is a **grid in
+two dimensions**, not a single imputation.
+
+**Dimension 1 — mover share among the unrecovered, `π`.** Scenarios:
+
+| π | reading |
+|---|---|
+| **0.33** | same as observed — missingness unrelated to mover status |
+| 0.50 | movers ~2× over-represented among the vanished |
+| 0.67 | movers ~4× over-represented |
+| 0.00 / 1.00 | the extreme anchors, reported as bounds rather than scenarios |
+
+**Dimension 2 — imputed `Δ_EA`, possibly differing by assigned status.** At each
+`π`, the unrecovered receive `Δ_EA` drawn from the observed distribution at the
+**10th percentile** (decline), the **median** (MAR), and separately with movers
+and stayers given *different* values so that the imputation can itself be
+adverse to the hypothesis.
+
+δ is re-estimated at every cell. Two things are reported:
+
+1. **the range of δ across the grid**, which is the honest statement of how much
+   the missingness could be doing;
+2. a **tipping-point**: the combination of `π` and imputed decline at which the
+   verdict first flips. If the verdict survives the whole plausible region
+   (`π ≤ 0.67`, decline down to the 10th percentile) the conclusion is robust to
+   this; if it flips at `π = 0.40`, it is not, and that is reported as the
+   headline rather than buried.
+
+### If the grid does not resolve it
+
+Then the protocol's answer is that **the primary effect cannot be identified from
+these data without an assumption the data cannot check**, and the experiment
+reports that rather than a number. That is a legitimate and pre-declared outcome,
+and it is why the EA-free corroborating outcome and the within-role decomposition
+exist — both are affected by missingness differently, and neither requires mover
+status to be known for the unrecovered.
 
 ### Missingness sensitivity analyses, pre-declared
 
@@ -591,10 +671,12 @@ except the outcome and the treatment definition.
 2. **EA is an external proxy, not ground truth.** It is lagged, noisy, and
    partly driven by club prestige and team success — the same contamination being
    tested. A positive result on EA alone is weak.
-**2b.** **7.3% of outcomes are unrecoverable, and not at random** — older, lower
-   minutes, lower rated. The reasoned direction of the bias is **toward zero**,
-   which makes a contamination finding conservative and a null finding weak.
-   Balanced across CB and FB (93.0% / 93.3%), so the role contrast is protected.
+**2b.** **7.3% of cases are unrecoverable, and both the outcome and the
+   treatment are missing for them** — the unrecovered are older, played less and
+   were rated lower. IPW addresses selection on observed pre-transfer
+   covariates only; selection on mover status is untestable, so **the primary
+   effect is not point-identified**. No direction of bias is claimed. Recovery is
+   balanced across CB and FB (93.0% / 93.3%), so the role contrast is protected.
 **2c.** **The residual is not "the player".** Club and player quality are genuinely
    correlated, so the projection removes real signal alongside any contamination
    and cannot separate them.
@@ -665,19 +747,27 @@ possible and will be measured rather than asserted away.
 thousand, which is noise. The margin is set the same way the RPS floor was — at
 the resolution of the measurement.
 
-Exact-score hit rate is ~12.8% over ~20,000 fixtures, so one sampling standard
-deviation is `sqrt(0.128 × 0.872 / 20,038) = 0.236` **percentage points**.
-
 > **Margin: 0.25 percentage points.** The criterion is that the **upper bound of
 > the 95% paired-bootstrap CI on the decline** sits below 0.25pp — not that the
 > point estimate is non-negative.
 
-That is about one sampling sd, and about 2% of the hit rate in relative terms —
-below the level at which the published figure would change at the precision the
-site quotes it. The paired CI will be considerably narrower than 0.236pp, since
-the arms share the same λ and differ only in ρ, so this margin is permissive by
-construction and that is deliberate: it exists to stop a noise-level decline
-vetoing a real log-likelihood gain, not to wave through a real decline.
+**This is a declared practical tolerance, not a quantity derived from a
+standard deviation.** The unpaired sampling sd of a 12.8% rate over 20,038
+fixtures — `sqrt(0.128 × 0.872 / 20,038) = 0.236pp` — is cited only as an
+**order-of-magnitude anchor**, and it is the wrong sd for this comparison: the
+arms are paired, sharing λ and every feature, and differ only in ρ, so the
+paired sd is much smaller. Deriving the margin from the unpaired figure would be
+a category error dressed as arithmetic.
+
+What justifies 0.25pp is practical: it is about 2% of the hit rate in relative
+terms, below the precision at which the site quotes the number, so a decline
+inside it would not change anything the project publishes. The margin is
+deliberately permissive — it exists to stop a noise-level decline vetoing a real
+log-likelihood gain, not to wave through a real one.
+
+**The paired-bootstrap point estimate and its full interval are reported
+explicitly for every arm**, pooled and per league, so a reader can apply a
+different tolerance without re-running anything.
 
 Reported with uncertainty, pooled and per league, like everything else.
 
