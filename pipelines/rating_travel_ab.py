@@ -277,3 +277,335 @@ def verdict(
         return "equivalent"
 
     return "inconclusive"
+
+
+# --- building the sample ------------------------------------------------------
+
+RATINGS = "data/processed/player_ratings.csv"
+EDITIONS = "data/raw/fifa/fifa_{season}.csv"
+
+
+def _next_season(label: str) -> str:
+    return f"{int(label[:2]) + 1:02d}{int(label[2:]) + 1:02d}"
+
+
+def edition_stats(season: str) -> tuple[float, float, pd.Series]:
+    """Mean, sd and the sorted overalls of one EA edition's **full worldwide**
+    export.
+
+    Standardising against the whole export rather than the big-five subset is
+    deliberate: the drift being removed is EA's, and EA sets its scale across
+    every league it ships.
+    """
+    frame = pd.read_csv(EDITIONS.format(season=season), low_memory=False)
+    overall = frame["overall"].dropna().astype("float64")
+    return float(overall.mean()), float(overall.std()), overall.sort_values()
+
+
+def recover_outcomes(rated: pd.DataFrame) -> pd.DataFrame:
+    """Attach each player's EA rating and club in edition ``t+1``.
+
+    Two tiers, and the second is the one that matters. Requiring a *rated*
+    season at ``t+1`` would condition on the player clearing the 450-minute gate
+    at his new club -- post-transfer information, selecting for successful
+    transfers, which is the thing under test. EA's exports are the whole
+    worldwide database, so the outcome is recoverable without that condition.
+
+    Tier 2 matches on normalised name with ``age`` within ``AGE_TOLERANCE`` of
+    ``age_t + 1``, and **requires the match to be unique**. Age consistency is a
+    strong disambiguator EA supplies for free: measured over the departed
+    player-seasons it leaves 3 ambiguous cases in 6,209.
+    """
+    from footballml.players.fifa import normalise_name
+
+    rated = rated.copy()
+    rated["next_label"] = rated["Season"].map(_next_season)
+
+    # Tier 1: the production matcher already placed him in t+1.
+    keyed = (
+        rated.dropna(subset=["fifa_overall"])
+        .drop_duplicates(subset=["Player", "Season"])
+        .set_index(["Player", "Season"])
+    )
+    pairs = pd.MultiIndex.from_arrays([rated["Player"], rated["next_label"]])
+    rated["next_overall"] = keyed["fifa_overall"].reindex(pairs).to_numpy()
+    rated["next_club"] = keyed["fifa_club"].reindex(pairs).to_numpy()
+    rated["tier"] = np.where(rated["next_overall"].notna(), 1, 0)
+
+    # Tier 2: the raw edition, for everyone tier 1 could not place.
+    for season, group in rated[rated["tier"] == 0].groupby("next_label"):
+        try:
+            edition = pd.read_csv(EDITIONS.format(season=season), low_memory=False)
+        except FileNotFoundError:
+            continue
+        edition["_n"] = edition["name"].astype(str).map(normalise_name)
+        edition = edition.dropna(subset=["_n"])
+        groups = edition.groupby("_n").groups
+        for idx, name, age in zip(
+            group.index, group["fifa_name"], group["fifa_age"], strict=True
+        ):
+            key = normalise_name(str(name))
+            if key not in groups or pd.isna(age):
+                continue
+            candidates = edition.loc[groups[key]]
+            candidates = candidates[(candidates["age"] - age).abs() <= AGE_TOLERANCE]
+            if len(candidates) != 1:
+                continue
+            rated.loc[idx, "next_overall"] = float(candidates["overall"].iloc[0])
+            rated.loc[idx, "next_club"] = str(candidates["club"].iloc[0])
+            rated.loc[idx, "tier"] = 2
+
+    rated["recovered"] = rated["next_overall"].notna()
+    # Mover status is defined within EA's own club naming, so no alias map is
+    # needed and a departure outside the big five classifies correctly.
+    rated["mover"] = np.where(
+        rated["recovered"],
+        rated["fifa_club"].astype(str) != rated["next_club"].astype(str),
+        np.nan,
+    )
+    return rated
+
+
+def build_sample() -> pd.DataFrame:
+    """Every rated player-season eligible for the EA-move analysis.
+
+    Excludes mid-season transfers (two club rows in one player-season), which
+    are a different treatment, and any season whose ``t+1`` edition is still
+    being populated.
+    """
+    players = pd.read_csv(RATINGS, low_memory=False)
+    players["Season"] = players["Season"].astype(str)
+    rated = players[players["rated"]].copy()
+
+    clubs_per_season = rated.groupby(["Player", "Season"])["Team"].transform("size")
+    rated = rated[clubs_per_season == 1]
+
+    rated = rated[
+        rated["fifa_overall"].notna()
+        & rated["fifa_age"].notna()
+        & rated["fifa_club"].notna()
+    ]
+    rated = rated[
+        ~rated["Season"].map(_next_season).isin(INCOMPLETE_EDITIONS)
+    ]
+    return recover_outcomes(rated)
+
+
+# --- estimation ---------------------------------------------------------------
+
+CONTROLS = ("fifa_age", "age_squared", "minutes", "measured_share", "z_prior")
+
+
+def prepare(
+    sample: pd.DataFrame, scale: str = "zscore", include_unrecovered: bool = False
+) -> pd.DataFrame:
+    """Attach the outcome, the standardised predictors and the controls.
+
+    Everything on the right-hand side is season-`t` information. The only `t+1`
+    quantities that enter are the outcome itself and the mover indicator, which
+    is the treatment definition rather than a conditioning variable.
+    """
+    # Standardisation runs over the full eligible set, so that the unrecovered
+    # rows the missingness grid needs carry comparable predictors. Which rows
+    # are *analysed* is decided at the end, not here.
+    frame = sample.copy()
+    frame["mover"] = frame["mover"].astype(float)
+
+    stats = {}
+    for season in set(frame["Season"]) | set(frame["Season"].map(_next_season)):
+        try:
+            stats[season] = edition_stats(season)
+        except FileNotFoundError:
+            continue
+
+    def standardise(values: pd.Series, seasons: pd.Series) -> pd.Series:
+        out = pd.Series(np.nan, index=values.index, dtype="float64")
+        for season, idx in seasons.groupby(seasons).groups.items():
+            if season not in stats:
+                continue
+            mean, sd, sorted_overall = stats[season]
+            if scale == "rank":
+                out.loc[idx] = np.searchsorted(
+                    sorted_overall.to_numpy(), values.loc[idx].to_numpy()
+                ) / len(sorted_overall)
+            else:
+                out.loc[idx] = (values.loc[idx] - mean) / sd
+        return out
+
+    frame["z_prior"] = standardise(frame["fifa_overall"], frame["Season"])
+    frame["z_next"] = standardise(frame["next_overall"], frame["Season"].map(_next_season))
+    frame["outcome"] = frame["z_next"] - frame["z_prior"]
+
+    frame["z_perf"] = standardise_within(frame, PREDICTOR, ["role", "Season"])
+    residual, diagnostics = residualise(frame)
+    frame["residual"] = residual
+    frame["z_perf_res"] = standardise_within(frame, "residual", ["role", "Season"])
+    frame.attrs["projection"] = diagnostics
+
+    frame["age_squared"] = frame["fifa_age"] ** 2
+    frame = frame.dropna(subset=["z_perf", *CONTROLS])
+    if include_unrecovered:
+        return frame
+    return frame.dropna(subset=["outcome", "mover"])
+
+
+def _design(frame: pd.DataFrame, predictor: str, extra: list[str] | None = None):
+    """Design matrix: predictor, mover, their interaction, controls and FE."""
+    pieces = [
+        np.ones((len(frame), 1)),
+        frame[[predictor]].to_numpy(),
+        frame[["mover"]].to_numpy(),
+        (frame[predictor] * frame["mover"]).to_numpy()[:, None],
+        frame[list(CONTROLS)].to_numpy(),
+    ]
+    names = ["const", "perf", "mover", "perf_x_mover", *CONTROLS]
+    for column in extra or []:
+        pieces.append(frame[[column]].to_numpy())
+        names.append(column)
+    for key in ("Season", "League"):
+        dummies = pd.get_dummies(frame[key], prefix=key, drop_first=True, dtype=float)
+        pieces.append(dummies.to_numpy())
+        names += list(dummies.columns)
+    return np.hstack(pieces), names
+
+
+def _ols(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    return np.linalg.lstsq(x, y, rcond=None)[0]
+
+
+def fit(frame: pd.DataFrame, predictor: str = "z_perf") -> dict[str, float]:
+    """Stayer slope, mover slope and their difference, in one model."""
+    x, names = _design(frame, predictor)
+    beta = _ols(x, frame["outcome"].to_numpy())
+    stayer = float(beta[names.index("perf")])
+    delta = float(beta[names.index("perf_x_mover")])
+    return {"stayer": stayer, "delta": delta, "mover": stayer + delta}
+
+
+def cluster_bootstrap(
+    frame: pd.DataFrame,
+    predictor: str = "z_perf",
+    resamples: int = BOOTSTRAP_RESAMPLES,
+    seed: int = SEED,
+) -> pd.DataFrame:
+    """Resample **players**, not rows.
+
+    A player contributes up to 11 consecutive-season pairs. A row-level
+    bootstrap would treat those as independent and understate every interval --
+    the same effective-sample point `player_rating.yaml` makes for the FB sweep.
+    """
+    rng = np.random.default_rng(seed)
+    blocks = {p: g.index.to_numpy() for p, g in frame.groupby("Player", observed=True)}
+    players = np.array(list(blocks), dtype=object)
+    draws = []
+    for _ in range(resamples):
+        picked = rng.integers(0, len(players), size=len(players))
+        rows = np.concatenate([blocks[players[i]] for i in picked])
+        try:
+            draws.append(fit(frame.loc[rows], predictor))
+        except np.linalg.LinAlgError:  # pragma: no cover - singular resample
+            continue
+    return pd.DataFrame(draws)
+
+
+def fieller(draws: pd.DataFrame, alpha: float = 0.05) -> tuple[float, float]:
+    """Fieller interval for ``mover / stayer``, the correct construction for a
+    ratio of normals.
+
+    A percentile interval on bootstrapped ratios is not valid when the
+    denominator approaches zero: the ratio's distribution is heavy-tailed and
+    its quantiles are not the quantiles of a ratio of means. Fieller returns an
+    unbounded interval in that case rather than a tidy wrong one.
+    """
+    from scipy import stats as sps
+
+    a, b = draws["mover"].to_numpy(), draws["stayer"].to_numpy()
+    va, vb, cov = a.var(ddof=1), b.var(ddof=1), np.cov(a, b)[0, 1]
+    a_hat, b_hat = a.mean(), b.mean()
+    t = sps.norm.ppf(1 - alpha / 2)
+
+    g = t**2 * vb / b_hat**2
+    if g >= 1.0:
+        return (-np.inf, np.inf)
+    ratio = a_hat / b_hat
+    centre = ratio - g * cov / vb
+    under = va - 2 * ratio * cov + ratio**2 * vb - g * (va - cov**2 / vb)
+    if under < 0:
+        return (-np.inf, np.inf)
+    half = (t / abs(b_hat)) * np.sqrt(under)
+    return (float((centre - half) / (1 - g)), float((centre + half) / (1 - g)))
+
+
+def bootstrap_fast(
+    frame: pd.DataFrame,
+    predictor: str = "z_perf",
+    extra: list[str] | None = None,
+    resamples: int = BOOTSTRAP_RESAMPLES,
+    seed: int = SEED,
+    weights: np.ndarray | None = None,
+) -> pd.DataFrame:
+    """`cluster_bootstrap`, with the design matrix built once.
+
+    Identical in what it estimates; `get_dummies` inside the resample loop made
+    the honest version take hours. The slow path is kept because it is the
+    readable definition and the tests check the two agree.
+    """
+    x, names = _design(frame, predictor, extra)
+    y = frame["outcome"].to_numpy()
+    w = np.ones(len(frame)) if weights is None else np.asarray(weights, dtype="float64")
+    i_perf, i_int = names.index("perf"), names.index("perf_x_mover")
+    three_way = "is_CB_x_perf_x_mover"
+    i_cb = names.index(three_way) if three_way in names else None
+
+    positions = {
+        player: np.flatnonzero(frame.index.isin(rows))
+        for player, rows in frame.groupby("Player", observed=True).groups.items()
+    }
+    players = np.array(list(positions), dtype=object)
+    rng = np.random.default_rng(seed)
+
+    draws = []
+    for _ in range(resamples):
+        picked = rng.integers(0, len(players), size=len(players))
+        rows = np.concatenate([positions[players[i]] for i in picked])
+        xb, yb, wb = x[rows], y[rows], w[rows]
+        root = np.sqrt(wb)[:, None]
+        try:
+            beta = _ols(xb * root, yb * np.sqrt(wb))
+        except np.linalg.LinAlgError:  # pragma: no cover - singular resample
+            continue
+        row = {
+            "stayer": beta[i_perf],
+            "delta": beta[i_int],
+            "mover": beta[i_perf] + beta[i_int],
+        }
+        if i_cb is not None:
+            row["delta_difference"] = beta[i_cb]
+        draws.append(row)
+    return pd.DataFrame(draws)
+
+
+def point_fit(
+    frame: pd.DataFrame,
+    predictor: str = "z_perf",
+    extra: list[str] | None = None,
+    weights: np.ndarray | None = None,
+) -> dict[str, float]:
+    x, names = _design(frame, predictor, extra)
+    y = frame["outcome"].to_numpy()
+    w = np.ones(len(frame)) if weights is None else np.asarray(weights, dtype="float64")
+    root = np.sqrt(w)
+    beta = _ols(x * root[:, None], y * root)
+    out = {
+        "stayer": float(beta[names.index("perf")]),
+        "delta": float(beta[names.index("perf_x_mover")]),
+    }
+    out["mover"] = out["stayer"] + out["delta"]
+    if extra and "is_CB_x_perf_x_mover" in names:
+        out["delta_difference"] = float(beta[names.index("is_CB_x_perf_x_mover")])
+    return out
+
+
+def ci(draws: pd.Series, alpha: float = 0.05) -> tuple[float, float]:
+    lo, hi = np.percentile(draws.dropna(), [100 * alpha / 2, 100 * (1 - alpha / 2)])
+    return float(lo), float(hi)

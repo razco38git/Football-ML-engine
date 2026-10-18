@@ -1711,7 +1711,20 @@ The **production arm reproduces the shipped scalar exactly** -- -0.0566 on the
 final fold, matching `METHODOLOGY.md` -- so the deltas are against the live
 configuration rather than a re-implementation of it.
 
-## Results: pooled, 18,212 fixtures
+## Results
+
+> **Every figure in this section is from the corrected run.** This experiment
+> was executed twice: the first run carried a shrinkage bug described in full
+> below, and **none of its numbers appear anywhere in this section or in any
+> table above.** The only figures the invalid run produced that are quoted
+> anywhere are the zeros that revealed the bug, and they appear solely inside
+> the bug section, labelled as such.
+>
+> `per-league` and `per-lambda` do not route through the broken function and
+> their figures are **identical across both runs**, which is itself the evidence
+> that the fault was confined to one arm.
+
+### Pooled, 18,212 fixtures
 
 | arm | logLik/match | delta | 95% CI | RPS | dRPS | exact% |
 |---|---|---|---|---|---|---|
@@ -1723,6 +1736,8 @@ configuration rather than a re-implementation of it.
 Every interval includes zero.
 
 ### Per league, which is where the hypothesis lived
+
+*Corrected run.*
 
 | league | n | per-league | shrunk | per-lambda |
 |---|---|---|---|---|
@@ -1775,7 +1790,7 @@ the one league that gains, and it does not clear its own interval.
 tightest interval -- and still fails both likelihood criteria. That is the
 expected ordering and is what a correctly-specified shrinkage should produce.
 
-## The bug this run shipped with, and what it looked like
+## The invalid first run: the bug, and what it looked like
 
 **The first execution reported `shrunk` as exactly 0.000000 against production
 on all 18,212 fixtures and all five leagues** -- not approximately, identically.
@@ -1793,9 +1808,19 @@ was not measuring the outcome.
 Replaced with empirical-Bayes shrinkage taking each league's sampling variance
 from the curvature of its own likelihood, `tau^2` by method of moments. The
 variances are now a **required argument**: omitting them applies no shrinkage at
-all rather than shrinking by an assumed one. `per-league` and `per-lambda` do
-not route through `shrink` and were unaffected; their numbers are unchanged
-between the two runs.
+all rather than shrinking by an assumed one.
+
+**The whole experiment was then re-executed end to end**, and every number in
+the Results section above comes from that second run. `per-league` and
+`per-lambda` do not route through `shrink`: their log-likelihoods, intervals,
+season counts, league counts, RPS and exact-score figures are **byte-identical
+between the two runs**, which confirms the fault was confined to the one arm
+rather than to the harness. The invalid run's `shrunk` column -- +0.000000
+everywhere, 0 of 11 seasons, 0 of 5 leagues -- is superseded and is recorded
+here only as the evidence that found the bug.
+
+Pinned by `test_shrinkage_is_partial_not_total` and
+`test_omitting_the_variances_applies_no_shrinkage`.
 
 ## Limitations
 
@@ -1817,3 +1842,230 @@ between the two runs.
    season-level vote in the counts above.
 5. **Hyperparameters and all production configuration fixed**, as everywhere
    else in this file.
+
+---
+
+# Does a defender's rating travel with him?
+
+## Hypothesis
+
+A centre back's rating correlates **+0.67** with his own club's defensive
+record, and `config/player_rating.yaml` gives **CB `team_defence: 0.30`**
+against **FB `0.0`** -- so 30% of a centre back's composite *is* his club's
+expected goals against, goals against and clean-sheet rate.
+
+If the number is about the player it should predict his next EA assessment
+equally well whether or not he changes club. If it is about the side he just
+left, it should attenuate on transfer.
+
+Pre-registered in [`docs/PROTOCOLS.md`](docs/PROTOCOLS.md) before execution,
+criteria declared as constants in `pipelines/rating_travel_ab.py`.
+
+## Sample
+
+Requiring a *rated* season at `t+1` would condition on the player clearing the
+450-minute gate at his new club -- post-transfer information, selecting for
+successful transfers. EA's exports are the whole worldwide database, so the
+outcome is recovered without that condition.
+
+| | n | share |
+|---|---|---|
+| eligible player-seasons | 20,474 | |
+| tier 1 -- production matcher placed him at `t+1` | 12,888 | 62.9% |
+| tier 2 -- raw edition, normalised name + age +/-1.5, unique | 5,316 | 26.0% |
+| **recovered** | **18,204** | **88.9%** |
+| unrecovered | 2,270 | 11.1% |
+
+| role | n | movers | stayers | players |
+|---|---|---|---|---|
+| CB | 3,569 | 1,269 | 2,300 | 1,109 |
+| FB | 3,046 | 1,072 | 1,974 | 1,010 |
+
+Predictor `performance_rating` (not `rating`, which is half `fifa_overall` and
+would have EA predicting itself); outcome the within-edition standardised move;
+`z(fifa_overall_t)` plus age, age^2, minutes and `measured_share` as controls,
+with season and origin-league fixed effects; bootstrap clustered on **player**.
+
+## Results
+
+**The power gate passes.** Stayer slopes are clearly non-zero and no bootstrap
+replicate flips their sign, so the ratio is interpretable.
+
+| role | stayer | mover | delta | ratio | 90% Fieller |
+|---|---|---|---|---|---|
+| CB | **+0.1403** [+0.1275, +0.1529] | +0.1366 [+0.1195, +0.1543] | -0.0037 [-0.0223, +0.0157] | 0.974 | [0.865, 1.091] |
+| FB | **+0.0929** [+0.0795, +0.1056] | +0.0810 [+0.0623, +0.0991] | -0.0119 [-0.0334, +0.0093] | 0.872 | [0.695, 1.071] |
+
+**No contamination.** Both delta intervals include zero; neither role meets the
+declared contamination condition.
+
+### Equivalence, at all three declared bound pairs
+
+| role | [0.85, 1.18] | [0.80, 1.25] | [0.90, 1.11] |
+|---|---|---|---|
+| CB | **equivalent** | equivalent | inconclusive |
+| FB | inconclusive | inconclusive | inconclusive |
+
+### The rank specification disagrees in sign
+
+| role | z-score delta | rank delta |
+|---|---|---|
+| CB | **-0.0037** | **+0.0037** [-0.0005, +0.0081] |
+| FB | **-0.0119** | **+0.0013** [-0.0038, +0.0063] |
+
+Both intervals include zero, but the point estimates point opposite ways.
+
+### Robustness
+
+| arm | CB delta | FB delta |
+|---|---|---|
+| headline | -0.0037 | -0.0119 |
+| age cap, 30 and under | -0.0086 | -0.0138 |
+| excluding `fifa_overall_t >= 88` | -0.0007 | -0.0119 |
+
+## Verdict: inconclusive
+
+Two independent pre-declared triggers fire.
+
+1. **Scale dependence.** The protocol says: *"If the z-score and rank
+   specifications disagree in sign, the result is reported as scale-dependent
+   and inconclusive."* They disagree, for both roles.
+2. **Threshold dependence.** CB is equivalent at the declared and loose bounds
+   and not at the strict one. The protocol says a verdict that flips across the
+   bounds *"depends on the threshold rather than on the data"* and is reported
+   as inconclusive.
+
+**This is not a null dressed as caution.** What can be said positively: no
+contamination was detected on any specification, and CB's attenuation is bounded
+within about 13% at 90% confidence. What cannot be said is that the rating is
+*demonstrably* unattenuated, because two scales of the same outcome disagree on
+the sign of an effect they both call indistinguishable from zero.
+
+## Missingness: the treatment is missing too
+
+An unrecovered player has **no `t+1` record at all**, so both the outcome and
+mover status are unobserved for all 2,270. The unrecovered are older (std. diff
++0.37), played less (-0.32) and were rated lower (-0.17); recovery is balanced
+across the two roles (CB 89.1%, FB 89.3%), which is what protects the contrast.
+
+**IPW does not solve this, and is not presented as solving it.** It identifies
+the estimand only under recovery independent of treatment *and* outcome given
+the pre-transfer covariates, and mover status is unobservable exactly when
+recovery fails. It moves the two roles in opposite directions:
+
+| role | unweighted delta | IPW delta |
+|---|---|---|
+| CB | -0.0037 | -0.0015 [-0.0211, +0.0183] |
+| FB | -0.0119 | -0.0172 [-0.0392, +0.0045] |
+
+### Pattern-mixture grid, and the tipping point
+
+`pi` is the assumed mover share among the unrecovered; the observed share among
+the recovered is ~0.34. Cells are the travel ratio.
+
+| pi | CB, MAR | CB, decline | CB, adverse | FB, MAR | FB, decline | FB, adverse |
+|---|---|---|---|---|---|---|
+| 0.00 | 1.062 | 1.002 | 1.062 | 0.942 | 0.904 | 0.942 |
+| **0.33** | 0.986 | 0.958 | 1.014 | 0.943 | 0.887 | 0.928 |
+| 0.50 | 0.921 | 0.916 | 0.904 | 0.864 | 0.868 | 0.923 |
+| 0.67 | 0.903 | 0.902 | 0.925 | 0.849 | 0.903 | 0.869 |
+| 1.00 | **0.836** | 0.882 | 0.882 | 0.793 | 0.879 | 0.879 |
+
+**Tipping point: CB's ratio stays above the 0.85 bound across the entire
+plausible region** -- every imputation at `pi` up to 0.67, i.e. movers twice
+over-represented among the vanished -- and crosses it only at `pi = 1.00` under
+MAR, the extreme anchor where *every* unrecovered player is assumed to be a
+mover. FB ranges 0.793 to 0.943 and is inconclusive throughout.
+
+**Robust across scenarios:** no contamination detected, for either role.
+**Driven by assumptions:** nothing in the headline. The single cell that would
+change CB's equivalence verdict requires an assumption the data contradict --
+the observed mover share is 0.34, not 1.00.
+
+## The finding that was not the hypothesis
+
+The decomposition says the club content is **overwhelmingly present** and
+**does not break on transfer**.
+
+| | projection R^2 | stayer slope, raw | stayer slope, residualised |
+|---|---|---|---|
+| CB | **0.526** [0.434, 0.652] | +0.1403 | **+0.0337** |
+| FB | 0.095 [0.045, 0.137] | +0.0929 | +0.0555 |
+
+The three club aggregates explain **52.6% of a centre back's performance
+rating** against **9.5%** of a full back's -- the asymmetry `team_defence: 0.30`
+against `0.0` predicts, and larger than expected. Removing them costs CB **76%**
+of its power to predict EA's next move, against 40% for FB.
+
+And yet:
+
+| role | delta | delta residualised | difference |
+|---|---|---|---|
+| CB | -0.0037 | +0.0080 [-0.0121, +0.0290] | -0.0117 |
+| FB | -0.0119 | -0.0095 [-0.0310, +0.0117] | -0.0023 |
+
+**The predicted pattern does not appear.** `delta_res` was supposed to shrink
+toward zero for CB and move little for FB; instead CB's is already ~0 and the
+residualised version is if anything positive.
+
+So a centre back's rating is **half his club's defensive record, and travels
+anyway**. The most economical reading is that club defensive quality is a
+*legitimate* predictor of how a defender will next be assessed -- not a
+contaminant that evaporates when he leaves. This is mechanism-consistent
+evidence against the hypothesis, not proof: the residual is orthogonal to three
+club numbers in one season, not to "the player".
+
+### CB versus FB
+
+`delta_CB - delta_FB = +0.0060 [-0.0223, +0.0349]` -- no difference detected.
+As pre-declared this was corroboration rather than identification in any case:
+the roles also differ 0.32 to 0.07 on creation weight, in the same direction.
+
+## The EA-free outcome agrees, and is the strongest single result
+
+Does a better-rated defender arriving predict his new club conceding fewer
+goals? Difference-in-differences on single-arrival club-seasons, league-season
+fixed effects, controlling previous goals conceded.
+
+| role | minutes floor | n | d(GA/match) per sd of arrival rating | 95% CI |
+|---|---|---|---|---|
+| CB | 900 | 306 | -0.0670 | [-0.1033, -0.0333] |
+| **CB** | **1,500** | **259** | **-0.0827** | **[-0.1218, -0.0464]** |
+| CB | 2,000 | 196 | -0.0735 | [-0.1167, -0.0336] |
+| FB | 900 | 257 | -0.0522 | [-0.0973, -0.0113] |
+| FB | 1,500 | 196 | -0.0437 | [-0.0958, -0.0009] |
+| FB | 2,000 | 127 | -0.0461 | [-0.1347, +0.0182] |
+
+A centre back one standard deviation better predicts about **0.08 fewer goals
+conceded per match** at his new club -- roughly three goals over a season --
+significant at all three thresholds, and containing no EA data at all.
+
+**Corroborating only, as declared.** It conditions on post-transfer minutes, so
+it estimates a conditional-on-playing effect; it attributes a team outcome to
+one arrival; and it cannot control managerial change, sub-threshold signings or
+departures.
+
+## Decision
+
+**Nothing ships. No production weight is changed.** The contamination hypothesis
+is not supported, the equivalence claim is scale- and threshold-dependent, and
+the corroborating evidence points away from contamination. There was no
+candidate reweighting to put through the `def_vs_ga` / `ovr_vs_pts` / RPS
+guards, so they were not run.
+
+## Limitations
+
+1. **Not point-identified.** Both treatment and outcome are missing for 11.1% of
+   cases, and the recovery model cannot condition on mover status. The grid
+   bounds the sensitivity; it does not remove the assumption.
+2. **Movers are not randomly assigned.** Clubs buy on information we do not
+   have, and matching on age, rating and minutes cannot remove that.
+3. **EA is an external proxy, not ground truth** -- lagged, noisy, and partly
+   driven by club prestige, which is the contamination being tested.
+4. **Low power by construction.** The effect hunted is a difference between two
+   small numbers.
+5. **The residual is not "the player"** -- club and player quality are genuinely
+   correlated, so the projection removes real signal alongside any
+   contamination.
+6. **The EA-free outcome conditions on post-treatment minutes.**
+7. **Production weights, hyperparameters and all configuration fixed.**

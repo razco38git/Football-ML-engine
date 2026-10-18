@@ -7,11 +7,12 @@ before execution.
 Completed work lives in [`../EXPERIMENTS.md`](../EXPERIMENTS.md). A protocol
 leaves this file when it has been executed and written up there.
 
-**Status.** Direction 3 has been **executed** — results in
-[`../EXPERIMENTS.md`](../EXPERIMENTS.md), verdict no-ship on all three arms; its
-protocol is kept below as the pre-registration it was. **Direction 2 remains
-unexecuted and awaits explicit approval.** No production code, configuration or
-artifact has been changed by either.
+**Status.** Both directions have been **executed**; results in
+[`../EXPERIMENTS.md`](../EXPERIMENTS.md). Direction 3: no-ship on all three
+arms. Direction 2: **inconclusive** on two pre-declared triggers, with no
+contamination detected and nothing to ship. Both protocols are kept below as
+the pre-registrations they were, unedited after the fact. No production code,
+configuration or artifact was changed by either.
 
 ---
 
