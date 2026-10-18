@@ -74,11 +74,69 @@ against `club` in edition `t+1`), so no alias map is needed and departures
 outside the big five are classified correctly. A "stayer" who fell below the
 minutes gate through injury is correctly a stayer.
 
-### Residual selection, stated not solved
+### Recovery is two-tier, and the audit of what it misses
 
-~6% of eligible player-seasons are unrecoverable — retirements, players dropping
-out of EA entirely. This correlates with age and decline. Mitigation: an age-cap
-sensitivity analysis (≤30 at `t`), reported alongside.
+| tier | definition | n | share |
+|---|---|---|---|
+| 1 | already EA-matched at `t+1` by the production matcher | 14,149 | 69.0% |
+| 2 | raw-edition lookup: normalised name, `age` within ±1.5 of `age_t + 1` | 4,852 | 23.7% |
+| | **recovered** | **19,001** | **92.7%** |
+| | unrecovered | 1,490 | **7.3%** |
+
+**The unrecovered are not missing at random.** Standardised differences against
+the recovered, on pre-transfer variables only:
+
+| variable | recovered | unrecovered | std. diff |
+|---|---|---|---|
+| `fifa_age` | 25.79 | **28.26** | **+0.57** |
+| `minutes` | 1,804 | **1,366** | **−0.58** |
+| `performance_rating` | 68.74 | 65.61 | −0.37 |
+| `fifa_overall` | 75.32 | 74.28 | −0.20 |
+| `measured_share` | 0.96 | 0.97 | +0.14 |
+
+Unrecovered players are **older, played less, and were rated lower** — the
+retirement-and-decline signature. By age band, the unrecovered share runs 3.7%
+(≤21), 4.7%, 6.8%, 12.2%, **25.5% (34+)**.
+
+**Recovery is balanced across the two roles under test**: CB 93.0%, FB 93.3%.
+The CB-versus-FB contrast is therefore not threatened by differential
+missingness, which is the part of the design most exposed to it.
+
+### How age-related attrition could affect the conclusion
+
+A player who disappears has an undefined EA move, and he disappears *because* he
+declined. The observable consequence depends on whether that censoring differs
+between movers and stayers, which **cannot be measured directly** — mover status
+is only known for players who were recovered.
+
+The reasoned direction: a player who moves down out of professional football
+entirely leaves EA's database, while a declining stayer at a big-five club
+remains in it. Missingness should therefore remove **more bad mover outcomes
+than bad stayer outcomes**, inflating the mover slope and biasing **δ toward
+zero**.
+
+If that reasoning holds, **a contamination finding is conservative and a null
+finding is weak** — exactly the asymmetry that must be stated before the result
+rather than after it.
+
+### Missingness sensitivity analyses, pre-declared
+
+1. **Inverse-probability weighting.** A logistic recovery model on pre-transfer
+   covariates only — age, age², minutes, `performance_rating`, `measured_share`,
+   role, season, origin league — with the analysis reweighted by the inverse
+   predicted probability. Weights trimmed at the 1st and 99th percentiles.
+   This is the MAR-based correction and is reported beside every
+   complete-case estimate.
+2. **Pattern-mixture departure from MAR.** Unrecovered rows imputed at the
+   observed **10th percentile** of `Δ_EA` (a decline assumption), then at the
+   observed median (MAR), and δ re-estimated under each. The reported quantity
+   is the **range of δ across the two**, which is a bound on how much the
+   missingness could be doing.
+3. **Age cap.** Restricted to `fifa_age ≤ 30` at `t`, where unrecovered is
+   3.7–6.8% rather than 25.5%.
+
+A conclusion that does not survive all three is reported as missingness-sensitive
+and does not support a weight change.
 
 ---
 
@@ -111,13 +169,39 @@ the window. The ceiling is thin but it bites exactly where it matters: a
 high-rated defender can only move down, which induces a mechanical negative
 relationship between level and move.
 
-Three responses, all pre-declared:
+**Tobit was specified in the previous draft and is withdrawn as a sensitivity
+analysis.** It assumes a continuous latent variable censored at a known,
+structural threshold, and neither condition holds here:
 
-1. `fifa_overall_t` (z-scored within edition) enters as a covariate — this is the
-   principal control for both the ceiling and mean reversion;
-2. a sensitivity analysis excluding `fifa_overall_t ≥ 88`;
-3. a censored-regression (Tobit) check with the upper limit at the edition
-   maximum, reported as a robustness column rather than the headline.
+- the per-edition maximum (91–94) is an **observed maximum, not a censoring
+  point** — EA's scale permits 99 and nobody reaches it;
+- there is **no mass point at the top**, which is the defining signature of
+  censoring. Counts approaching the 2025/26 maximum run 45, 30, 16, 22, 7, 13,
+  5, 2 — a smooth decline, not a pile-up;
+- the outcome is a **difference of two standardised scores**, so any bound
+  applies to the components rather than to the quantity being modelled.
+
+A Tobit here would invent a latent tail above 91 that nothing in the data
+supports. It is **labelled exploratory**, reported only if a reader asks for it,
+and no conclusion rests on it.
+
+Three defensible responses replace it, all pre-declared:
+
+1. **`z(fifa_overall_t)` as a covariate** — the principal control for both the
+   ceiling and mean reversion;
+2. **Top-band exclusion** — a sensitivity excluding `fifa_overall_t ≥ 88`;
+3. **Rank outcome, run in parallel to the primary.** `Δ_rank` built from
+   **within-edition percentile ranks** instead of z-scores. This respects the
+   bounded, ordinal nature of an EA rating by construction, is immune to scale
+   compression at the top, and makes no distributional assumption. If the z-score
+   and rank specifications disagree in sign, the result is reported as
+   scale-dependent and inconclusive.
+
+A median (quantile) regression on the z-score outcome is reported as a fourth
+robustness column, since it is insensitive to the asymmetric upper tail. A
+cumulative-link ordinal model on the `t+1` *level* with the `t` level as
+covariate is available and is not pre-declared, because it answers a slightly
+different question and would invite being selected after the fact.
 
 ### Regression to the mean
 
@@ -214,21 +298,46 @@ question is reported unresolved.
 A confidence interval containing 1.0 is **not** evidence of no effect. The
 decision is three-way, on the ratio, with equivalence bounds fixed here.
 
-### Equivalence interval: **[0.85, 1.18]**
+### Equivalence interval: **[0.85, 1.18]**, a declared threshold rather than a derivation
 
-That is "attenuation of less than 15%". The justification is mechanistic rather
-than conventional:
+The bounds are a **pre-declared practical threshold**. They are *informed* by the
+weight structure and do **not** follow from it mathematically — nothing implies
+that a 30% composite weight produces a 30% slope attenuation, and the previous
+draft overstated this.
 
-`team_defence` is **30% of a centre-back's composite weight**. If club
-contamination were proportional to that weight, removing the club's contribution
-by transfer should attenuate the slope on the order of 30%. An attenuation below
-**half** of what the mechanism predicts cannot be attributed to it with any
-confidence, and could not justify a weight change given the editorial cost the
-config already records for exactly this trade ("a full back rated 8% on
-ball-winning and 30% on his club's clean sheets — the variant where a player's
-published number is least about the player").
+What the 30% does is establish an **order of magnitude**: `team_defence` is 30%
+of a centre-back's composite, so if club contamination operates through it at
+all, the attenuation is plausibly in the tens of percent rather than the single
+digits. Setting the threshold at 15% — roughly half that scale — marks the point
+below which an effect is too small to attribute to the mechanism or to justify a
+weight change, given the editorial cost the config already records for this
+trade.
 
-1.18 is the reciprocal of 0.85, so the interval is symmetric in log-ratio.
+That is a judgement about what would change a decision, declared in advance so it
+cannot be adjusted afterwards. 1.18 is the reciprocal of 0.85, so the interval is
+symmetric in log-ratio.
+
+### The continuous estimates are the real output
+
+Verdicts are a convenience for the write-up. **What gets reported in every case,
+whatever the verdict:**
+
+- β (stayers) and β + δ (movers), each with a player-clustered 95% CI;
+- δ with its CI, on both the z-score and rank specifications;
+- the ratio with its Fieller interval and sign-flip diagnostic;
+- the same quantities under IPW, under the pattern-mixture bounds, and under the
+  age cap;
+- Δδ for the CB-versus-FB contrast with its CI.
+
+No conclusion is stated as a verdict without the interval beside it.
+
+### Alternative-bound sensitivity
+
+The equivalence decision is re-run at **[0.80, 1.25]** (a looser 20% threshold)
+and **[0.90, 1.11]** (a stricter 10%), and all three are tabulated. If the verdict
+flips across those bounds, the write-up says so plainly: the conclusion then
+depends on the threshold rather than on the data, which is itself the finding
+and is reported as inconclusive.
 
 ### The three verdicts
 
@@ -308,17 +417,81 @@ function, which adds genuine role-change noise to the FB arm.
 "consistent with / inconsistent with a `team_defence` mechanism", never as
 "attributable to `team_defence`".
 
-**The identifying test is the within-role decomposition**, which needs no
-cross-role comparison:
+**The within-role decomposition carries more weight**, because it needs no
+cross-role comparison. It is specified fully below.
 
-> Project the club-level defensive aggregates (`team_xga_per_match`,
-> `team_ga_per_match`, `team_clean_sheet_pct`, all at season `t`) out of
-> `performance_rating`, giving a club-orthogonal residual rating. Re-estimate δ
-> using the residual. **If contamination is the mechanism, δ should shrink toward
-> zero for CB and change little for FB.**
+---
 
-Everything in that projection is season-`t` information. This is the test the
-conclusion rests on; the CB/FB contrast supports it.
+## 5a. The residualisation procedure
+
+### Variables projected out
+
+Exactly the three club aggregates that constitute the `team_defence` sub-rating
+in `config/player_rating.yaml`, each at **season `t`**, for the club the player
+played for in season `t`:
+
+```
+team_xga_per_match      team_ga_per_match      team_clean_sheet_pct
+```
+
+No others. Adding further club covariates would project out legitimate player
+signal that correlates with club quality, and the question is specifically about
+*these* inputs.
+
+### Where the projection is estimated
+
+OLS of `performance_rating` on the three aggregates, with an intercept, fitted
+**within each (role, season) stratum** — matching the stratum the rating itself
+is percentile-ranked in.
+
+The projection is fitted on **all rated players in that (role, season)
+stratum**, not on the analysis sample. That superset is deliberate: it uses only
+season-`t` information, it does not condition on a player having an EA outcome at
+`t+1`, and it keeps the residual definition independent of which rows survive
+into the regression.
+
+Fitted on the full stratum, the projection involves **no outcome data of any
+kind**, so there is no path by which it can leak. This is asserted rather than
+argued — see the test table.
+
+### Scaling, so the comparison is fair
+
+Residualising necessarily shrinks variance, and a smaller-variance predictor
+produces a smaller coefficient **for that reason alone**. Comparing a raw δ to a
+residual δ without correcting for this would manufacture the result.
+
+Both predictors are therefore **re-standardised to unit variance within (role,
+season)** before entering any regression:
+
+```
+z_perf      = standardise( performance_rating ,  within (role, season) )
+z_perf_res  = standardise( residual           ,  within (role, season) )
+```
+
+so δ and δ_res are both "per standard deviation of the predictor as used" and are
+directly comparable.
+
+**The projection's R² is reported per role and season**, because it is the
+quantity that says how much of the rating these three club numbers account for
+in the first place. If R² is near zero for a role, the decomposition has nothing
+to remove there and δ_res ≈ δ is uninformative rather than reassuring — that case
+is pre-declared as such.
+
+### Prediction and interpretation
+
+> **If club contamination is the mechanism, δ_res should shrink toward zero for
+> CB and change little for FB.**
+
+The comparison reported is **δ − δ_res**, per role, with a player-clustered
+bootstrap CI, and the two roles' changes contrasted.
+
+**This is mechanism-consistent evidence, not causal proof.** The residual is the
+part of the rating orthogonal to three particular club measurements in one
+season; it is not "the player's true ability". Club quality and player quality
+are genuinely correlated, so projecting one out removes real signal along with
+any contamination, and the procedure cannot distinguish the two. A shrinking δ_res
+is consistent with contamination and also consistent with the residual simply
+being noisier. The write-up must say both.
 
 ---
 
@@ -418,6 +591,13 @@ except the outcome and the treatment definition.
 2. **EA is an external proxy, not ground truth.** It is lagged, noisy, and
    partly driven by club prestige and team success — the same contamination being
    tested. A positive result on EA alone is weak.
+**2b.** **7.3% of outcomes are unrecoverable, and not at random** — older, lower
+   minutes, lower rated. The reasoned direction of the bias is **toward zero**,
+   which makes a contamination finding conservative and a null finding weak.
+   Balanced across CB and FB (93.0% / 93.3%), so the role contrast is protected.
+**2c.** **The residual is not "the player".** Club and player quality are genuinely
+   correlated, so the projection removes real signal alongside any contamination
+   and cannot separate them.
 3. **Low baseline power.** The defender EA-move correlation is 0.04–0.06. The
    power gate exists because this experiment may simply not resolve the question.
 4. **Δδ cannot isolate `team_defence`** — the CB/FB weight vectors differ on
@@ -479,12 +659,37 @@ insensitive to ρ.** ρ moves mass between the 0-0, 0-1, 1-0 and 1-1 cells, and
 those cells sit on both sides of the draw/win boundary, so an RPS effect is
 possible and will be measured rather than asserted away.
 
+## Exact-score hit rate: a non-inferiority margin, not a zero-tolerance rule
+
+"Does not fall" would reject an arm on a decline of one match in twenty
+thousand, which is noise. The margin is set the same way the RPS floor was — at
+the resolution of the measurement.
+
+Exact-score hit rate is ~12.8% over ~20,000 fixtures, so one sampling standard
+deviation is `sqrt(0.128 × 0.872 / 20,038) = 0.236` **percentage points**.
+
+> **Margin: 0.25 percentage points.** The criterion is that the **upper bound of
+> the 95% paired-bootstrap CI on the decline** sits below 0.25pp — not that the
+> point estimate is non-negative.
+
+That is about one sampling sd, and about 2% of the hit rate in relative terms —
+below the level at which the published figure would change at the precision the
+site quotes it. The paired CI will be considerably narrower than 0.236pp, since
+the arms share the same λ and differ only in ρ, so this margin is permissive by
+construction and that is deliberate: it exists to stop a noise-level decline
+vetoing a real log-likelihood gain, not to wave through a real decline.
+
+Reported with uncertainty, pooled and per league, like everything else.
+
 ## Acceptance criteria
 
 - out-of-sample scoreline log-likelihood improves in **≥ 4 of 5 leagues**, and
 - pooled log-likelihood improvement has a bootstrap interval excluding zero, and
-- exact-score hit rate does not fall, and
+- exact-score hit rate decline has a **95% CI upper bound below 0.25pp**, and
 - RPS does not regress beyond **+0.0005** on the upper CI bound.
+
+All four are computed from constants declared in the harness source, asserted by
+tests, and reported with intervals whether or not they pass.
 
 ## Kill condition
 
@@ -539,6 +744,15 @@ Written into `tests/test_rating_travel_ab.py` and `tests/test_conditional_rho_ab
 | the power gate is computed from the declared constants and fires before any verdict is printed | an attenuation claim on top of a null stayer slope |
 | a group in which no arm can move is not counted as a pass | the counting bug from the extended-Elo run, pinned once and kept pinned |
 | the ratio is reported as undefined when >5% of bootstrap replicates flip the sign of β | a ratio built on a near-zero denominator being read as a finding |
+| equivalence is evaluated at all three bound pairs ([0.85,1.18], [0.80,1.25], [0.90,1.11]) and the harness refuses to print one alone | a threshold chosen to suit the answer |
+| the rank specification runs whenever the z-score one does, and a sign disagreement forces an inconclusive verdict | a scale-dependent result presented as a finding |
+| Tobit, if run at all, is tagged `exploratory=True` and cannot appear in the verdict | a mis-specified censoring model carrying a conclusion |
+| IPW weights, pattern-mixture bounds and the age-cap estimate are computed for every reported δ | a complete-case result standing alone |
+| the recovery model uses only season-`t` covariates | missingness correction reaching into the outcome |
+| the residual projection is fitted within (role, season) on the **full rated stratum**, and the harness raises if the fitting frame is the analysis sample | conditioning the residual on EA follow-up |
+| the projection uses exactly the three `team_defence` aggregates, asserted against the config | quietly widening what is projected out |
+| both `z_perf` and `z_perf_res` are asserted to have unit variance within (role, season) before entering any model | a smaller δ_res manufactured by a shrunken predictor |
+| the projection R² is reported per role and season | a decomposition with nothing to remove being read as reassurance |
 
 ## Direction 3 — fold discipline
 
@@ -548,4 +762,6 @@ Written into `tests/test_rating_travel_ab.py` and `tests/test_conditional_rho_ab
 | all arms are asserted to have scored the same fixture set | intervals comparing different populations |
 | arms are built from a declared constant list, with `production` first and equal to the shipped global ρ | measuring something nobody runs |
 | RPS is computed and reported for every arm | assuming ρ cannot move RPS |
+| the exact-score margin is the declared constant `0.25` pp and the criterion reads the CI upper bound, not the point estimate | a noise-level decline vetoing a real gain, or a real decline passing |
+| log-likelihood, RPS and exact-score are each reported pooled **and** per league, with intervals | a pooled number hiding a league that got worse |
 | the two harnesses cannot be imported into one process | Direction 3 picking up Direction 2 state |
