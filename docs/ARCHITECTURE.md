@@ -169,9 +169,13 @@ is confident about. The likeliest exact score sits underneath it, smaller,
 because a single scoreline is typically only a ~10% event — showing it first
 invited readers to treat it as the forecast.
 
-Team strength builds a notional 4-3-3: `select_eleven` fills each line by
-minutes, each line is a minutes-weighted mean rating, and the lines are then
-weighted `{goalkeeper: 1, defence: 4, midfield: 3, attack: 3}`.
+Team strength takes each club's **top 15 players by rating** (`method="best_n"`,
+`DEFAULT_BEST_N = 15`), groups them into lines, takes a minutes-weighted mean
+rating per line, and weights the lines
+`{goalkeeper: 1, defence: 4, midfield: 3, attack: 3}`. There is no formation and
+no positional quota: `select_eleven`, which fills a notional 4-3-3 by minutes,
+exists as `method="eleven"` but is not what production runs. This paragraph said
+otherwise until 2026-10-18. See METHODOLOGY §9 for the sweep behind the 15.
 
 The projection is mostly bookkeeping. The model already produces a full scoreline
 distribution per fixture, so playing the remaining ones out a few thousand times

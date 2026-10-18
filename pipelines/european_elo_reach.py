@@ -52,7 +52,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from footballml.data import PROCESSED_DIR, load_team_match_history  # noqa: E402
 from footballml.features.build import european_elo_rows  # noqa: E402
 from footballml.features.elo import START, add_elo, final_ratings  # noqa: E402
-from footballml.models.evaluate import rps_per_match  # noqa: E402
+from footballml.models.evaluate import paired_bootstrap, rps_per_match  # noqa: E402
 
 logger = logging.getLogger("european_elo_reach")
 
@@ -124,6 +124,44 @@ def fit_elo_only(domestic: pd.DataFrame) -> LogisticRegression:
     return model
 
 
+def walk_forward_probs(
+    domestic: pd.DataFrame, scored: pd.DataFrame, min_train: int = 2000
+) -> tuple[np.ndarray, pd.DataFrame]:
+    """Score each European season with a head fitted only on earlier matches.
+
+    The first version of this fitted one head on all 29,190 domestic matches and
+    applied it to ties from every season, so a 2017 tie was scored by a mapping
+    that had seen 2024. The ratings were always pre-match; the *calibration* was
+    not, and on a result this close to its benchmark that is not a detail to
+    wave through.
+
+    One fit per European season, on domestic matches strictly before that
+    season's first tie -- the convention `run_backtest` uses. The head is a
+    one-feature logistic regression, so eleven fits cost nothing.
+
+    Returns:
+        ``(probs, scored_rows)`` covering only the seasons with enough history
+        to train on, so the caller scores exactly the rows that were predicted.
+    """
+    chunks, kept_rows = [], []
+    for season, block in scored.groupby(scored["Season"].astype(str), sort=True):
+        cutoff = block["Date"].min()
+        train = domestic[domestic["Date"] < cutoff]
+        if len(train) < min_train or train["result"].nunique() < len(OUTCOMES):
+            # Not enough history to calibrate against. Dropping the season is
+            # honest; fitting it on the future is what this function exists to
+            # stop.
+            logger.info("  %s: only %d prior domestic matches, skipped", season, len(train))
+            continue
+        model = LogisticRegression(max_iter=1000)
+        model.fit(train[["elo_diff"]].to_numpy(), train["result"].to_numpy())
+        chunks.append(_probs(model, block))
+        kept_rows.append(block)
+    if not chunks:
+        return np.empty((0, len(OUTCOMES))), scored.head(0)
+    return np.vstack(chunks), pd.concat(kept_rows)
+
+
 def _probs(model: LogisticRegression, frame: pd.DataFrame) -> np.ndarray:
     """Columns ordered H, D, A, whatever order the fit put the classes in."""
     raw = model.predict_proba(frame[["elo_diff"]].to_numpy())
@@ -150,6 +188,19 @@ def _base_rate(fit_on: pd.DataFrame, frame: pd.DataFrame) -> np.ndarray:
     return np.tile(row, (len(frame), 1))
 
 
+def walk(domestic: pd.DataFrame, *european: pd.DataFrame) -> pd.DataFrame:
+    """One Elo walk over domestic plus whichever European results it may learn
+    from, returned one row per match with both sides' pre-match rating.
+
+    Production passes European ties to `add_elo` as ``extra=`` so they never
+    reach a rolling form window; the ratings that come out are the same either
+    way, and here the European rows are the subject, so they belong in the
+    frame.
+    """
+    frames = [domestic, *(f for f in european if f is not None and not f.empty)]
+    return _wide(add_elo(pd.concat(frames, ignore_index=True)))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--write", action="store_true", help="Save tables under experiments/.")
@@ -163,103 +214,140 @@ def main() -> int:
     big_five = set(kept["HomeTeam"]) | set(kept["AwayTeam"])
     everyone = big_five | set(dropped["HomeTeam"]) | set(dropped["AwayTeam"])
     others = everyone - big_five
-    print(f"clubs: {len(big_five)} rateable, {len(others)} not")
+    print(f"clubs: {len(big_five)} rateable by the model, {len(others)} not")
 
     domestic_long = load_team_match_history(TMH)
-    euro_long = european_long(kept, dropped)
-    print(f"long rows: {len(domestic_long)} domestic, {len(euro_long)} European")
+    kept_long = european_long(kept, None)
+    dropped_long = european_long(None, dropped)
+    print(f"long rows: {len(domestic_long)} domestic, {len(kept_long)} kept, "
+          f"{len(dropped_long)} dropped")
 
-    # Everything in one walk, in date order, so a European tie updates the
-    # ratings the next domestic match carries in and vice versa. Production
-    # passes the European rows as `extra` instead, because there they must not
-    # reach a rolling form window; here they are the subject, so they belong in
-    # the frame.
-    walked = add_elo(pd.concat([domestic_long, euro_long], ignore_index=True))
-    ratings = final_ratings(pd.concat([domestic_long, euro_long], ignore_index=True))
+    # Two walks. `production` learns from exactly what `add_elo(extra=...)` is
+    # given today; `extended` also learns from the ties the model cannot
+    # predict. The difference between them is the whole question.
+    production = walk(domestic_long, kept_long)
+    extended = walk(domestic_long, kept_long, dropped_long)
 
-    print("\n=== 1. Does Elo actually learn anything about the other clubs? ===")
-    appearances = (
-        pd.concat([euro_long["Team"], euro_long["Opponent"]]).value_counts()
-    )
-    other_ratings = ratings[ratings.index.isin(others)]
-    big_ratings = ratings[ratings.index.isin(big_five)]
-    print(f"  rated non-big-five clubs: {len(other_ratings)} of {len(others)}")
-    for label, series in (("non-big-five", other_ratings), ("big five", big_ratings)):
-        if series.empty:
-            continue
+    comps = set(kept["League"].unique())
+    dom_p = production[~production["League"].isin(comps)]
+    euro_p = production[production["League"].isin(comps)]
+    euro_e = extended[extended["League"].isin(comps)]
+    dom_e = extended[~extended["League"].isin(comps)]
+
+    print("\n=== 1. What the extension does to the ratings ===")
+    ratings = final_ratings(pd.concat([domestic_long, kept_long, dropped_long], ignore_index=True))
+    other_r, big_r = ratings[ratings.index.isin(others)], ratings[ratings.index.isin(big_five)]
+    print(f"  rated non-big-five clubs: {len(other_r)} of {len(others)}")
+    for label, series in (("non-big-five", other_r), ("big five", big_r)):
         print(
             f"  {label:13s} n={len(series):4d}  mean={series.mean():7.1f}  "
-            f"sd={series.std():6.1f}  min={series.min():7.1f}  max={series.max():7.1f}  "
-            f"|rating-{START}|>50: {(series.sub(START).abs() > 50).mean():.1%}"
+            f"sd={series.std():6.1f}  spread={series.max() - series.min():6.1f}  "
+            f"|r-{START:.0f}|>50: {(series.sub(START).abs() > 50).mean():.1%}"
         )
-    euro_only = appearances[appearances.index.isin(others)]
-    print(
-        f"  European matches per non-big-five club: median {euro_only.median():.0f}, "
-        f"max {euro_only.max():.0f}"
-    )
-    print("  strongest and weakest of them:")
-    for team, value in pd.concat([other_ratings.head(5), other_ratings.tail(5)]).items():
-        print(f"    {str(team):28s} {value:7.1f}  ({int(appearances.get(team, 0))} matches)")
+    print("  strongest and weakest outside the big five:")
+    for team, value in pd.concat([other_r.head(4), other_r.tail(4)]).items():
+        print(f"    {str(team):26s} {value:7.1f}")
 
-    wide = _wide(walked)
-    domestic_wide = wide[~wide["League"].isin(kept["League"].unique())]
-    euro_wide = wide[wide["League"].isin(kept["League"].unique())]
-    print(f"\n  matches with both Elos: {len(domestic_wide)} domestic, {len(euro_wide)} European")
-
-    model = fit_elo_only(domestic_wide)
-    print(f"  Elo-only head fitted on {len(domestic_wide)} domestic matches")
-
-    print("\n=== 2. What does dropping to Elo alone cost, where both can be measured? ===")
+    print("\n=== 2. Does learning from the dropped ties help where we can check? ===")
     scored = pd.read_csv(SCORED, low_memory=False)
     scored["Date"] = pd.to_datetime(scored["Date"])
     scored["result"] = scored["FTR"]
-    both = scored.merge(
-        euro_wide[["Date", "HomeTeam", "AwayTeam", "elo_diff"]],
-        on=["Date", "HomeTeam", "AwayTeam"],
-        how="inner",
-    ).dropna(subset=["prob_home_win", "prob_draw", "prob_away_win", "elo_diff"])
-    print(f"  ties the full model and Elo both cover: {len(both)}")
-    if len(both):
-        full = both[["prob_home_win", "prob_draw", "prob_away_win"]].to_numpy()
-        elo_only = _probs(model, both)
-        base = _base_rate(both, both)
-        print(f"  full model  RPS {_rps(both, full):.5f}")
-        print(f"  Elo only    RPS {_rps(both, elo_only):.5f}")
-        print(f"  base rate   RPS {_rps(both, base):.5f}")
-        if ADJUSTMENT.exists():
-            holdout = json.loads(ADJUSTMENT.read_text(encoding="utf-8")).get("holdout", {})
-            print(
-                f"  (for reference, the shipped cross-league holdout: "
-                f"uncorrected {holdout.get('rps_uncorrected')}, "
-                f"corrected {holdout.get('rps_corrected')}, n={holdout.get('n')})"
-            )
 
-    print("\n=== 3. The ties nobody can predict today ===")
-    unrateable = euro_wide[
-        ~(euro_wide["HomeTeam"].isin(big_five) & euro_wide["AwayTeam"].isin(big_five))
+    arms = {}
+    for name, euro, dom in (("production", euro_p, dom_p), ("extended", euro_e, dom_e)):
+        both = scored.merge(
+            euro[["Date", "HomeTeam", "AwayTeam", "elo_diff"]],
+            on=["Date", "HomeTeam", "AwayTeam"], how="inner",
+        ).dropna(subset=["prob_home_win", "prob_draw", "prob_away_win", "elo_diff"])
+        probs, rows = walk_forward_probs(dom, both)
+        arms[name] = (rows, probs)
+
+    # The arms must score the same fixtures or the comparison is meaningless --
+    # asserted rather than trusted, as `align` in ablation_ladder puts it.
+    keys = [set(zip(r["Date"], r["HomeTeam"], r["AwayTeam"], strict=True))
+            for r, _ in arms.values()]
+    shared = set.intersection(*keys)
+    print(f"  ties scored by both arms: {len(shared)}")
+    assert len(shared) == len(arms["production"][0]) == len(arms["extended"][0]), (
+        "the two arms scored different fixtures; the comparison would be invalid"
+    )
+
+    rows, _ = arms["production"][0], None
+    full = rows[["prob_home_win", "prob_draw", "prob_away_win"]].to_numpy()
+    print(f"  full model          RPS {_rps(rows, full):.5f}")
+    for name, (r, probs) in arms.items():
+        print(f"  Elo only, {name:11s} RPS {_rps(r, probs):.5f}")
+    print(f"  base rate           RPS {_rps(rows, _base_rate(rows, rows)):.5f}")
+
+    # Paired on identical fixtures, so the interval is the right one to read.
+    # 827 ties is a fortieth of the walk-forward backtest, so the bar for
+    # believing a difference here is correspondingly higher.
+    pr, pp = arms["production"]
+    er, ep = arms["extended"]
+    boot = paired_bootstrap(
+        rps_per_match(pr["result"], pp), rps_per_match(er["result"], ep)
+    )
+    print(
+        f"  extended vs production: {boot['delta']:+.5f} "
+        f"[{boot['lo']:+.5f}, {boot['hi']:+.5f}] "
+        f"{'significant' if boot['excludes_zero'] else 'not significant'}"
+    )
+    vs_full = paired_bootstrap(
+        rps_per_match(rows["result"], full), rps_per_match(er["result"], ep)
+    )
+    print(
+        f"  extended vs full model: {vs_full['delta']:+.5f} "
+        f"[{vs_full['lo']:+.5f}, {vs_full['hi']:+.5f}] "
+        f"{'significant' if vs_full['excludes_zero'] else 'not significant'}"
+    )
+    # A bootstrap interval that nearly touches zero, on a fortieth of the
+    # backtest's sample, is exactly the shape this project has twice been
+    # misled by: the resampling treats fixtures as independent when matches
+    # within a season share a calibration. So require the season record too.
+    print()
+    print("  by season (negative = the extended walk is better):")
+    per = pr.assign(
+        d=rps_per_match(er["result"], ep) - rps_per_match(pr["result"], pp)
+    )
+    wins = 0
+    seasons = 0
+    for season, block in per.groupby(per["Season"].astype(str), sort=True):
+        if len(block) < 20:
+            continue
+        seasons += 1
+        wins += block["d"].mean() < 0
+        print(f"    {season}  n={len(block):4d}  {block['d'].mean():+.5f}")
+    print(f"  improved in {wins} of {seasons} seasons")
+
+    if ADJUSTMENT.exists():
+        h = json.loads(ADJUSTMENT.read_text(encoding="utf-8")).get("holdout", {})
+        print(f"  (shipped cross-league holdout: corrected {h.get('rps_corrected')}, "
+              f"n={h.get('n')})")
+
+    print("\n=== 3. The ties production cannot score at all ===")
+    unrateable = euro_e[
+        ~(euro_e["HomeTeam"].isin(big_five) & euro_e["AwayTeam"].isin(big_five))
     ]
-    print(f"  ties with at least one unrateable club: {len(unrateable)}")
-    if len(unrateable):
-        elo_only = _probs(model, unrateable)
-        base = _base_rate(unrateable, unrateable)
-        print(f"  Elo only    RPS {_rps(unrateable, elo_only):.5f}")
-        print(f"  base rate   RPS {_rps(unrateable, base):.5f}")
-        neither = unrateable[
-            ~(unrateable["HomeTeam"].isin(big_five) | unrateable["AwayTeam"].isin(big_five))
+    probs, rows = walk_forward_probs(dom_e, unrateable)
+    print(f"  ties with an unrateable club: {len(unrateable)}, scored {len(rows)}")
+    print("  production cannot score these: the clubs never enter its walk.")
+    if len(rows):
+        print(f"  Elo only, extended  RPS {_rps(rows, probs):.5f}")
+        print(f"  base rate           RPS {_rps(rows, _base_rate(rows, rows)):.5f}")
+        neither = rows[
+            ~(rows["HomeTeam"].isin(big_five) | rows["AwayTeam"].isin(big_five))
         ]
-        print(f"  of which neither side is rateable: {len(neither)}")
         if len(neither):
-            elo_neither = _rps(neither, _probs(model, neither))
-            base_neither = _rps(neither, _base_rate(neither, neither))
-            print(f"  Elo only, neither side  RPS {elo_neither:.5f}")
-            print(f"  base rate, neither side RPS {base_neither:.5f}")
+            idx = rows.index.get_indexer(neither.index)
+            print(f"  of which neither side is rateable: {len(neither)}")
+            print(f"  Elo only, neither   RPS {_rps(neither, probs[idx]):.5f}")
+            print(f"  base rate, neither  RPS {_rps(neither, _base_rate(neither, neither)):.5f}")
 
     print(
-        "\nRead it in this order: if Elo-only is far worse than the full model in"
-        "\nsection 2, a forward simulation would be built on that gap for two"
-        "\nthirds of its matches. And section 1 decides whether section 3's number"
-        "\nmeans anything -- ratings clustered at 1500 would make it an artefact of"
-        "\nthe rateable side of each tie."
+        "\nThe head is now fitted per season on earlier domestic matches only, so"
+        "\nno tie is scored by a calibration that saw its future. Shipping the"
+        "\nextended walk would change `elo` for domestic matches too and needs a"
+        "\nfull walk-forward backtest first -- not measured here."
     )
 
     if args.write:

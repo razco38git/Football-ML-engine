@@ -502,19 +502,47 @@ player-seasons but 11–18 of each season's top fifty.
 ```
 1. role -> line      GK -> goalkeeper, CB/FB -> defence,
                      DM/MID -> midfield, AMW/FWD -> attack
-2. pick the XI       4-3-3; within each line, top N by MINUTES
-3. per line          minutes-weighted mean of those players' ratings
+2. pick the squad    top 15 by RATING across the whole squad
+                     (method="best_n", DEFAULT_BEST_N = 15)
+3. per line          minutes-weighted mean of the selected players' ratings
 4. overall           lines weighted 1 / 4 / 3 / 3, normalised by weights present
 5. gate              MIN_RATED_PLAYERS = 11
 ```
 
-**Slots are filled by minutes, not by rating.** The question is who *will* play,
-and a manager's team selection is better evidence of that than our opinion of who
-deserves to.
+**Selection is by rating; minutes weight the aggregation.** Step 2 takes the
+best 15 players a club has, and step 3 then weights them by how much they
+actually played, so a fringe player who is rated highly on 500 minutes counts
+for little. It is **not a predicted lineup**, and no external lineup source is
+used for unplayed matches.
 
-State this precisely: it is **not a predicted lineup**. It is historical minutes
-used as a proxy for expected selection, and no external predicted lineup is used
-for unplayed matches.
+Two things follow that are easy to get wrong, and this document previously got
+the first of them wrong:
+
+**There is no formation and no positional quota.** `team_strength` also offers
+`method="eleven"` — `select_eleven`, which fills a 4-3-3 by minutes within each
+line — and this section used to describe that as the shipped method. It is not;
+production has run `best_n` since `9aa85de`. The practical consequence is that
+step 2 can hand a line very few players: nothing stops a club's top 15 being
+attack-heavy, leaving `strength_defence` to be computed from whoever remains.
+
+**The 15 is measured.** It was not until 2026-10-18, when
+`pipelines/squad_size_sweep.py` swept 13-17 against the *next* season's
+outcomes:
+
+| best_n | RPS | atk > GF | def > GA | ovr > pts |
+|--------|-----|----------|----------|-----------|
+| 13 | 0.19913 | 0.7325 | -0.5196 | 0.7546 |
+| 14 | 0.19922 | 0.7353 | -0.5231 | 0.7563 |
+| **15** | 0.19912 | **0.7408** | -0.5232 | 0.7562 |
+| 16 | 0.19904 | 0.7384 | -0.5280 | 0.7543 |
+| 17 | 0.19905 | 0.7331 | **-0.5316** | 0.7555 |
+
+Attack peaks exactly at 15 and falls away either side; defence keeps improving
+with squad size and had not levelled off at 17; overall is flat to within 0.002.
+No RPS difference is significant — the column spans 0.00018. So 15 stays, and
+the opposing trends are the evidence for the paragraph above: a larger N dilutes
+a thin attacking line more than a defensive one. Testing a per-line minimum is
+the open follow-up.
 
 `MIN_RATED_PLAYERS = 11` exists because five matchweeks into 2026/27 a fresh
 build produced 72 team ratings from a *median of two* rated players — numbers
@@ -642,6 +670,19 @@ strength → full). The walk-forward harness can produce it.
 - **The rating is better at attackers because the data is.** Correlated against
   EA's next-edition move: forwards 0.15, goalkeepers 0.23, centre-backs,
   full-backs and midfielders **0.04–0.06**, in every season.
+- **The Champions League is not projected forward, and the draw is not why.**
+  A draw is an ordinary Monte Carlo; the obstacle is that only **829 of 4,007**
+  European results on disk have two rateable clubs. **180 clubs** appear that
+  cannot be rated at all — no squad rating, no form, no xG, not even a canonical
+  name, because `derive_aliases` works from domestic fixtures — and **1,409**
+  ties have no rateable side. Measured (EXPERIMENTS.md), Elo *can* rate all 180
+  from results alone and ranks them recognisably, and an Elo-only predictor
+  matches the full model on the ties where both can be scored. But where
+  *neither* club is rateable it barely beats a base rate, 0.22024 against
+  0.22789, because those ratings are three times more compressed than the big
+  five's. A projection would rest on that for two thirds of its matches, with
+  form frozen from the projection date to May. The measurement is the
+  deliverable; the table is not.
 - **No event-level data**, so no xThreat, no VAEP, no carries or progressive
   actions, no duels, no post-shot xG, no open-play/set-piece split. Gaps in the
   sources, not the method: Understat and FBref publish season aggregates, and no

@@ -1254,3 +1254,162 @@ reason rather than a hunch behind it.
    clubs have fewer rated players than that. The largest arms are therefore
    slightly weaker treatments than their label suggests.
 5. **Hyperparameters fixed to production**, as everywhere else in this file.
+
+---
+
+# Why the Champions League is not projected forward
+
+## The question
+
+The site simulates domestic seasons to a projected table but stops at single
+Champions League ties. The reason usually offered is the knockout draw. That is
+not the obstacle — a draw is an ordinary Monte Carlo, and
+`src/footballml/projection.py` already simulates fixtures vectorised across
+10,000 seasons.
+
+The obstacle is coverage. A tie is predictable only when both clubs are in the
+big five, because `big_five_only` (`src/footballml/ingest/european.py`) drops the
+rest: a club outside England, Spain, Germany, Italy or France has no squad
+rating, no form and no xG here, and `config/team_aliases.yaml` cannot even name
+it, since `derive_aliases` works from domestic fixtures.
+
+| | |
+|---|---|
+| European results on disk | 4,007 |
+| kept (both clubs rateable) | **829** |
+| dropped | **3,178** |
+| distinct clubs that cannot be rated | **180** |
+| dropped ties with *no* rateable side | **1,409** |
+
+So a forward simulation would be inventing two thirds of its own inputs. Before
+building one, the prerequisite was measured: **is Elo, which needs only results,
+good enough to stand in where the other features are missing?**
+
+## What was run
+
+`pipelines/european_elo_reach.py`. `european_dropped.csv` has kept `FTHG`/`FTAG`
+all along and `european_elo_rows` converts whatever frame it is handed, so the
+results needed were already on disk.
+
+Two Elo walks over the same domestic history, differing only in which European
+results they learn from:
+
+- **production** — domestic + `european_matches.csv`, which is exactly what
+  `add_elo(extra=...)` is given today.
+- **extended** — domestic + kept + `european_dropped.csv`.
+
+Both are scored by a one-feature logistic head mapping the Elo gap to H/D/A,
+**fitted per season on domestic matches strictly earlier than that season's
+first tie**. An earlier draft fitted one head on all 29,190 domestic matches and
+applied it to every season, so a 2017 tie was scored by a calibration that had
+seen 2024; the ratings were always pre-match, the calibration was not. Removing
+that changed the headline by 0.00014, so the look-ahead was negligible — but it
+was not knowable in advance.
+
+## Result 1: Elo reaches all 180 clubs, and ranks them recognisably
+
+| | n | mean | sd | spread | more than 50 from 1500 |
+|---|---|---|---|---|---|
+| big five | 72 | 1538.7 | **96.7** | 465.5 | 61.1% |
+| everyone else | 180 | 1481.9 | **31.5** | 200.8 | 17.8% |
+
+Strongest outside the big five: Sporting CP 1583, Benfica 1554, Olympiacos 1549,
+Bodø/Glimt 1543. Weakest: Malmö 1382, Bordeaux 1389, Rosenborg 1414.
+
+**But covered is not known.** Their spread is three times tighter, because
+`SEASON_REGRESSION` pulls every rating a quarter of the way back to 1500 each
+summer and these clubs play six to eight European matches a year. Only 17.8% of
+them are more than 50 points from the start value, against 61.1% of the big five.
+
+## Result 2: the extended walk is better where it can be checked
+
+On the 827 ties the full model also predicts — the same fixtures in both arms,
+asserted rather than assumed:
+
+| predictor | RPS |
+|---|---|
+| full model (form, xG, squad strength, Elo) | 0.21691 |
+| Elo alone, **production** walk | 0.21760 |
+| Elo alone, **extended** walk | **0.21621** |
+| base rate | 0.23282 |
+
+| comparison | delta | 95% CI | |
+|---|---|---|---|
+| extended vs production | **-0.00139** | [-0.00274, -0.00008] | significant |
+| extended vs full model | -0.00071 | [-0.00391, +0.00248] | not significant |
+
+Per season, the extension improves **8 of 10**, and one of the two exceptions is
++0.00005 — a tie. The gains are largest in the most recent seasons
+(2425 -0.00271, 2526 -0.00330), which fits the mechanism: the longer the record,
+the better the extra ties anchor the ratings.
+
+Two readings, and the second is the one to hold:
+
+1. **Elo alone is not worse than the whole model on European ties.** That is
+   consistent with what this file already records — the model keeps about half
+   its usual edge across a league boundary, because Elo is the only feature that
+   crosses one.
+2. **The result is suggestive, not established.** 827 ties is a fortieth of the
+   walk-forward backtest; the interval's upper bound is -0.00008, and the season
+   record gives p ≈ 0.055. This project has twice been misled by a bootstrap at
+   smaller effect sizes.
+
+## Result 3: the ties production cannot score at all
+
+Production's walk never meets these clubs, so it has no rating for them — not a
+poor prediction, no prediction. The extended walk scores all 3,178:
+
+| | Elo (extended) | base rate |
+|---|---|---|
+| at least one unrateable club (3,178) | **0.20554** | 0.23188 |
+| *neither* side rateable (1,417) | **0.22024** | 0.22789 |
+
+So Elo carries real information when one side is a big-five club, and very
+little when neither is — exactly where the compressed spread in Result 1
+predicts it would fail.
+
+## Decision: possible, and not being built
+
+A league-phase projection is **feasible** — more so than the coverage numbers
+suggest, because the features we lack were not buying much on these ties anyway.
+It is not being built, for reasons that are about the product rather than the
+modelling:
+
+- Two thirds of its matches would rest on a predictor with **no edge worth the
+  name** where neither club is rateable (0.22024 against 0.22789).
+- Form would be frozen from the day of the projection through to May, a
+  limitation `pipelines/project_season.py` already documents for a domestic
+  season and which is far worse over nine months of a European campaign.
+- The machinery it needs does not exist: `remaining_fixtures` reconstructs a
+  fixture list by assuming a double round-robin, which a 36-team league phase is
+  not; nothing encodes seeding, bracket topology, two-legged aggregates or
+  penalties; and `fetch_schedule` discards the `round` column on the one path
+  that returns unplayed fixtures.
+
+A number on the page that says "Arsenal 23% to reach the quarter-finals" would
+be indefensible in a way the measurement above is not.
+
+## The finding worth keeping is about Elo, not the Champions League
+
+**Production's Elo should probably learn from every European result, not only
+the big-five ones.** That is a one-line change to what `add_elo` receives as
+`extra=`, and it is worth -0.00139 on cross-league ties.
+
+It is **not shipped here**, because it would change the `elo` feature for every
+*domestic* match too — Elo is a single zero-sum pool — and that needs a full
+walk-forward backtest, which this experiment did not run. The gain measured here
+is on 827 European ties; the risk is on 20,074 domestic ones. That is the next
+experiment, and it has a clear hypothesis and a clear way to be wrong.
+
+## Limitations
+
+1. **827 ties.** A fortieth of the backtest. The interval nearly touches zero.
+2. **The season record is 8 of 10 with p ≈ 0.055**, which is the honest summary:
+   consistent direction, not a settled result.
+3. **Elo-only is not the model.** Result 2 says Elo matches the full model *on
+   European ties*, not in general; the same comparison domestically would be
+   nothing like this.
+4. **The base rate is estimated in-sample** on each population it scores, which
+   flatters it — deliberately, so that beating it means something.
+5. **Nothing here touches the domestic backtest**, so no claim about the live
+   model's accuracy follows from any of it.
