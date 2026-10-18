@@ -157,6 +157,12 @@ hypotheses that were tested and rejected. It opens with the difference between
 sufficiency, attribution and necessity, because confusing those is how the first
 version of its own headline came out wrong.
 
+**[`docs/INTERVIEW.md`](docs/INTERVIEW.md)** is the three other files answering
+for themselves: the questions this project should expect and the answers it can
+defend, from "what is it" to "you are 0.0042 behind the bookmakers, is that a
+modelling failure". Every figure in it is reproducible from the repository, and
+the questions it answers worst are the ones it states plainly.
+
 ### Where to start
 
 **The docstrings are the documentation.**
