@@ -29,6 +29,7 @@ from footballml.experiments.ablation import (
     rung_columns,
 )
 from footballml.models.evaluate import (
+    OUTCOMES,
     paired_bootstrap,
     ranked_probability_score,
     rps_per_match,
@@ -332,3 +333,62 @@ def test_paired_bootstrap_demands_matched_fixtures() -> None:
         paired_bootstrap(np.zeros(10), np.zeros(9))
     with pytest.raises(ValueError, match="per-match"):
         paired_bootstrap(np.zeros((10, 3)), np.zeros((10, 3)))
+
+
+# --- the encoding that made RPS stop reading the result ----------------------
+
+def test_integer_encoded_outcomes_are_refused() -> None:
+    """`FTR.map({"H": 0, "D": 1, "A": 2})` is a reasonable thing to write.
+
+    It is also silently catastrophic: `_one_hot` compares against the strings,
+    so integers matched nothing, every indicator row came back zero, and RPS
+    reduced to `(p_H**2 + (p_H + p_D)**2) / 2` -- a function of the forecast
+    that never reads the outcome. A sweep ranked its arms by how little
+    probability they placed on a home win, and the tables stood for a day.
+    """
+    probs = np.array([[0.5, 0.3, 0.2], [0.2, 0.3, 0.5]])
+    with pytest.raises(ValueError, match="not one of"):
+        rps_per_match(np.array([0, 2]), probs)
+
+
+def test_an_unknown_label_is_refused_rather_than_scored_as_a_miss() -> None:
+    """A typo or a NaN must not quietly become "no outcome happened"."""
+    probs = np.array([[0.5, 0.3, 0.2]])
+    with pytest.raises(ValueError, match="not one of"):
+        rps_per_match(np.array(["home"]), probs)
+    with pytest.raises(ValueError, match="not one of"):
+        rps_per_match(np.array([None], dtype=object), probs)
+
+
+def test_the_score_actually_depends_on_the_outcome() -> None:
+    """The property the bug removed, pinned directly.
+
+    Under the broken encoding, shuffling every result left the mean score
+    identical to five decimal places. Any scoring rule worth the name must move
+    when the outcomes move.
+    """
+    rng = np.random.default_rng(0)
+    probs = rng.dirichlet(np.ones(3), size=400)
+    truth = np.array(["H", "D", "A"])[rng.integers(0, 3, size=400)]
+
+    scored = rps_per_match(truth, probs).mean()
+    shuffled = rps_per_match(rng.permutation(truth), probs).mean()
+    assert scored != pytest.approx(shuffled, abs=1e-6)
+
+    # And a perfect forecast must be the best attainable score.
+    perfect = np.zeros((len(truth), 3))
+    perfect[np.arange(len(truth)), [list(OUTCOMES).index(t) for t in truth]] = 1.0
+    assert rps_per_match(truth, perfect).mean() == pytest.approx(0.0)
+
+
+def test_rps_lands_on_the_scale_this_module_documents() -> None:
+    """A base rate near 0.22, per `ranked_probability_score`'s own docstring.
+
+    The broken metric returned about 0.36 on real predictions. That was visible
+    the whole time and read as "a different normalisation", so this asserts the
+    documented scale rather than leaving it to judgement.
+    """
+    rng = np.random.default_rng(7)
+    truth = np.array(["H", "D", "A"])[rng.choice(3, size=2000, p=[0.46, 0.22, 0.32])]
+    base = np.tile([0.46, 0.22, 0.32], (len(truth), 1))
+    assert 0.18 < rps_per_match(truth, base).mean() < 0.26

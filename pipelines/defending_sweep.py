@@ -203,9 +203,15 @@ def next_season_defence(
 
 
 def _score(preds: pd.DataFrame) -> tuple[np.ndarray, float]:
-    truth = preds["FTR"].map({"H": 0, "D": 1, "A": 2}).to_numpy()
+    # The raw H/D/A column, not an integer encoding of it: `_one_hot` compares
+    # against the strings, so integers silently one-hot to all zeros and RPS
+    # stops reading the result at all. It now raises instead, and this is the
+    # call that taught it to.
+    truth = preds["FTR"]
     probs = preds[["prob_H", "prob_D", "prob_A"]].to_numpy()
-    return rps_per_match(truth, probs), float((probs.argmax(axis=1) == truth).mean())
+    picked = probs.argmax(axis=1)
+    actual = truth.map({"H": 0, "D": 1, "A": 2}).to_numpy()
+    return rps_per_match(truth, probs), float((picked == actual).mean())
 
 
 def main() -> int:

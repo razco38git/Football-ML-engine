@@ -894,7 +894,7 @@ paid provider was declined.
 ## What was run
 
 `pipelines/defending_sweep.py`, two independent ways to fix it, over the same
-20,060 walk-forward fixtures (1516-2627):
+20,074 walk-forward fixtures (1516-2627):
 
 - **`share`** — cut the weight on a backwards signal. CB `defending` from 0.62
   down to 0, the freed weight redistributed across involvement, creation and
@@ -946,20 +946,22 @@ peak that respects a zero weight.
 
 | variant | CB defending | team_defence | RPS | delta | 95% CI | defence vs next GA |
 |---------|--------------|--------------|-----|-------|--------|--------------------|
-| baseline | 0.62 | 0.00 | 0.36515 | — | — | -0.442 |
-| share-0.62 | 0.62 | 0.00 | 0.36515 | 0.00000 | — | -0.442 |
-| share-0.45 | 0.45 | 0.00 | 0.36505 | -0.00010 | [-0.00027, +0.00006] | -0.455 |
-| share-0.30 | 0.30 | 0.00 | 0.36497 | -0.00018 | [-0.00036, 0.00000] | -0.470 |
-| share-0.15 | 0.15 | 0.00 | 0.36497 | -0.00018 | [-0.00036, 0.00000] | -0.478 |
-| share-0.00 | 0.00 | 0.00 | 0.36529 | +0.00014 | [-0.00005, +0.00033] | -0.485 |
-| outcome-0.15 | 0.47 | 0.15 | 0.36510 | -0.00005 | [-0.00023, +0.00013] | -0.488 |
-| **outcome-0.30** | 0.32 | 0.30 | 0.36505 | -0.00010 | [-0.00028, +0.00008] | **-0.523** |
-| outcome-0.45 | 0.17 | 0.45 | 0.36517 | +0.00002 | [-0.00016, +0.00020] | -0.544 |
+| share-0.62 *(the setting this replaced)* | 0.62 | 0.00 | 0.19911 | -0.00001 | [-0.00014, +0.00013] | -0.440 |
+| share-0.45 | 0.45 | 0.00 | 0.19917 | +0.00005 | [-0.00008, +0.00019] | -0.458 |
+| share-0.30 | 0.30 | 0.00 | 0.19906 | -0.00006 | [-0.00020, +0.00008] | -0.468 |
+| share-0.15 | 0.15 | 0.00 | 0.19918 | +0.00006 | [-0.00008, +0.00020] | -0.478 |
+| share-0.00 | 0.00 | 0.00 | 0.19914 | +0.00003 | [-0.00011, +0.00017] | -0.486 |
+| outcome-0.15 | 0.47 | 0.15 | 0.19913 | +0.00002 | [-0.00012, +0.00015] | -0.490 |
+| **outcome-0.30** *(shipped; the baseline here)* | 0.32 | 0.30 | 0.19912 | — | — | **-0.523** |
+| outcome-0.45 | 0.17 | 0.45 | 0.19908 | -0.00003 | [-0.00017, +0.00010] | -0.544 |
 
-**Not one variant is significant on RPS.** `share-0.62` is mathematically
-identical to baseline and is in the table as a determinism check; it came back
-bit-identical on all four metrics, as did `baseline` and `cb-0.30-only` when the
-second stage re-ran them in a separate process.
+**Not one variant is significant on RPS, and the whole table spans 0.00012.**
+The baseline here is the shipped setting, so `outcome-0.30` is the same
+configuration measured twice and returns a delta of exactly 0.00000 — the
+determinism check — as do `baseline` and `cb-0.30-only` when the second stage
+re-runs them in a separate process. `share-0.62` is the configuration this
+change replaced, which is the comparison that matters: +0.00001 on RPS,
+-0.440 to -0.523 on defensive validity.
 
 The defence correlation is monotone in both families, which is the one result
 that has held across all three runs and both defects.
@@ -984,47 +986,66 @@ Serie A -0.594 to -0.665, La Liga -0.531 to -0.621.
 That EA's independently scouted `fifa_overall` also moves closer, +0.778 to
 +0.833, is the part hardest to explain as fitting our own second metric.
 
-## The RPS result that did not replicate
+## The RPS numbers this section used to carry were not RPS
 
-The full-back extension looked like the clear winner. Paired on the same 20,060
-fixtures it beat everything, including the centre-back-only variant:
+Everything above was re-measured on 2026-10-18. Until then this section
+reported scores near **0.365**, against the figure `evaluate.py` documents for a
+naive base rate — **0.22**. That gap was noticed twice and explained away as "a
+different normalisation". It was not.
 
-| comparison | delta | 95% CI | |
-|---|---|---|---|
-| baseline to share-0.00 | +0.00014 | [-0.00005, +0.00033] | not significant |
-| baseline to outcome-0.30 | -0.00010 | [-0.00028, +0.00008] | not significant |
-| baseline to cb-0.30+fb-0.30 | -0.00046 | [-0.00065, -0.00028] | significant |
-| share-0.00 to outcome-0.30 | -0.00024 | [-0.00043, -0.00005] | significant |
-| outcome-0.30 to cb-0.30+fb-0.30 | -0.00037 | [-0.00056, -0.00018] | significant |
+`pipelines/defending_sweep.py` scored through `rps_per_match` with integer
+outcome labels:
 
-Broken down by season, it is not a general effect:
+```python
+truth = preds["FTR"].map({"H": 0, "D": 1, "A": 2}).to_numpy()
+```
 
-| season | n | outcome-0.30 | cb-0.30+fb-0.30 |
-|---|---|---|---|
-| 1516 | 1826 | +0.00000 | +0.00000 |
-| 1617 | 1826 | +0.00058 | -0.00086 |
-| 1718 | 1826 | -0.00043 | -0.00074 |
-| 1819 | 1826 | -0.00058 | +0.00080 |
-| 1920 | 1725 | -0.00027 | -0.00073 |
-| 2021 | 1826 | -0.00023 | -0.00065 |
-| 2122 | 1826 | -0.00018 | -0.00147 |
-| 2223 | 1826 | -0.00143 | -0.00156 |
-| 2324 | 1752 | +0.00051 | -0.00069 |
-| 2425 | 1752 | +0.00080 | +0.00060 |
-| 2526 | 1752 | +0.00012 | +0.00025 |
-| 2627 | 297 | +0.00065 | -0.00033 |
-| **improved in** | | **6/12** | **8/12** |
+`_one_hot` encodes outcomes by comparing against the strings `'H'`, `'D'`, `'A'`.
+Integers match none of them, so every indicator row came back zero and RPS
+reduced to
 
-By league, `cb-0.30+fb-0.30` improves in 4 of 5 and `outcome-0.30` in 2 of 5.
-1516 is exactly zero for both because the earliest fold trains with the strength
-features absent, so eleven seasons can move; 8 of 11 is p ≈ 0.11.
+    (p_H**2 + (p_H + p_D)**2) / 2
 
-The paired bootstrap resamples fixtures as if independent, but matches inside a
-season share a model fit, so the effective sample is nearer 12 than 20,060.
-**This pipeline cannot resolve RPS differences of 0.0005**, which the vintage
-drift says independently: rebuilding on a later day moved the baseline 0.36508
-to 0.36498 on a byte-identical config, because `_match_across_editions` couples
-seasons and re-fetching the season in progress re-resolves historical names.
+— a function of the forecast that never reads the result. Measured on the 827
+scored European ties: 0.36316 with integer labels, **0.36316 after randomly
+shuffling every outcome**, and 0.36316 from the closed form above. Correctly
+scored, the same forecasts give 0.21691, and 0.24877 when shuffled.
+
+So the sweep ranked its arms by how little probability they placed on a home
+win. Every RPS figure, delta, confidence interval and per-season breakdown this
+section previously carried measured that and nothing else, including a
+`cb-0.30+fb-0.30` result reported as significant at -0.00046.
+
+**What survived.** The decision did. It was taken on the defensive-validity
+correlations in the section above, which come from `pandas.corr` and never
+touched the broken metric — and it was taken *because* RPS could not separate
+the arms, which the corrected numbers confirm far more emphatically than the
+broken ones did. Nothing else in the repo was affected: `ablation_ladder`,
+`training_window_ab`, `shapley_families`, `league_adjust` and `evaluate.py`
+itself all pass the raw `FTR` column, so the site's published backtest figure,
+the cross-league holdout and the accuracy page were never wrong.
+
+**What changed on the corrected numbers.** Two claims this section made are
+withdrawn:
+
+- *"`outcome-0.45` predicts significantly worse."* It does not. It is -0.00003
+  against the shipped setting, nominally the best RPS in the table, and not
+  significant. It remains unshipped on the ceiling argument alone.
+- *"The full-back extension's gain fails to replicate season by season."* There
+  was no gain to replicate: fb-0.30 is +0.00001, not significant. The
+  per-season table that carried this argument has been deleted rather than
+  recomputed, because the argument no longer needs it.
+
+**What the corrected table says instead.** Nine arms spanning
+**0.19906 to 0.19918** — a total spread of 0.00012 — with not one interval
+excluding zero. Against the setting it replaced, the shipped change is
++0.00001. The measurement floor recorded elsewhere in this file was, if
+anything, generous: RPS cannot distinguish any of these configurations, which is
+why the choice rests entirely on defensive validity.
+
+`_one_hot` now raises on any label that is not one of `OUTCOMES`, naming the
+offenders, and `tests/test_ablation.py` pins both that and the property the bug
+removed — that shuffling the outcomes must change the score.
 
 ## Decision
 
@@ -1112,24 +1133,33 @@ defect. Measured on top of the chosen setting, via `--stage fb --cb-share 0.30`:
 
 | variant | CB team_defence | FB team_defence | RPS | delta | 95% CI | defence vs next GA |
 |---------|-----------------|-----------------|-----|-------|--------|--------------------|
-| baseline | 0.00 | 0.00 | 0.36515 | — | — | -0.442 |
-| **cb-0.30 only** | 0.30 | 0.00 | 0.36505 | -0.00010 | [-0.00028, +0.00008] | -0.523 |
-| cb-0.30 + fb-0.15 | 0.30 | 0.15 | 0.36501 | -0.00014 | [-0.00033, +0.00004] | -0.544 |
-| cb-0.30 + fb-0.30 | 0.30 | 0.30 | **0.36469** | **-0.00046** | [-0.00065, -0.00028] | **-0.555** |
+| **cb-0.30 only** *(shipped; the baseline here)* | 0.30 | 0.00 | 0.19912 | — | — | -0.523 |
+| cb-0.30 + fb-0.15 | 0.30 | 0.15 | 0.19915 | +0.00003 | [-0.00009, +0.00016] | -0.541 |
+| cb-0.30 + fb-0.30 | 0.30 | 0.30 | 0.19913 | +0.00001 | [-0.00012, +0.00014] | **-0.554** |
 
 Before the peak fix this table ran the other way: every step toward full backs
 improved the correlation and made RPS worse, monotonically. That was an artefact
 of the leak — FB `team_defence` was already reaching every variant including
 baseline, so adding weight was partly double-counting.
 
-With the leak closed, the full-back extension is the best variant on both
-columns, and its RPS advantage is the one that does not replicate across
-seasons. Note also that the combined line reaches **-0.555 to -0.559**, at or
-past what a team's *own* previous conceding scores. An earlier draft of this
-section argued that approaching that number was the signature of a rating
-decaying into "last season's goals conceded"; exceeding it is evidence against
-that reading, but the RPS result that would have settled it did not hold up, so
-the question is open rather than answered.
+With the leak closed and the metric fixed, the full-back extension is
+**RPS-neutral** — +0.00001 against the shipped setting, not significant — while
+the correlation climbs to **-0.554**, which is exactly the ceiling a team's own
+previous conceding reaches.
+
+That is the whole case against it, and it is stronger than the one this section
+used to make. An earlier draft rejected fb-0.30 because a *significant* RPS gain
+failed to replicate season by season; that gain was an artefact of the integer
+labels and never existed. Another draft argued that reaching the ceiling was
+evidence the rating was decaying into "last season's goals conceded", and
+treated the RPS gain as evidence against that reading. With the gain gone,
+nothing opposes it: the rating converges on the club's own record and buys
+no prediction for doing so.
+
+The honest cost is also unchanged and is the easier argument anyway. The
+full-back pool is 0.38, so taking 0.30 would leave a full back rated **8% on
+ball-winning and 30% on his club's clean sheets** — the variant in which a
+published number is least about the player it names.
 
 The weight is left at zero and the definition kept in the `FB` block, so the
 measurement can be repeated rather than re-derived.

@@ -20,9 +20,32 @@ OUTCOMES = ("H", "D", "A")
 
 
 def _one_hot(y: np.ndarray | pd.Series) -> np.ndarray:
-    """Encode H/D/A labels as ``(n, 3)`` indicators in outcome order."""
+    """Encode H/D/A labels as ``(n, 3)`` indicators in outcome order.
+
+    Raises on anything that is not one of :data:`OUTCOMES`, which is the whole
+    point of the check. Labels are compared by equality against the strings, so
+    an integer-encoded ``y`` -- ``FTR.map({"H": 0, "D": 1, "A": 2})``, an
+    entirely reasonable thing to write -- matched nothing and produced a row of
+    zeros. RPS then collapsed to ``(p_H**2 + (p_H + p_D)**2) / 2``, a function
+    of the forecast alone that never reads the result: shuffling every outcome
+    left the score unchanged to five decimal places, and a sweep ranked its
+    arms by how little probability they put on a home win.
+
+    It cost a full set of experiment tables before anyone noticed, and the only
+    visible symptom was a score around 0.36 where this module's own docstring
+    says a base rate lands near 0.22.
+    """
     y = np.asarray(y, dtype=object)
-    return np.column_stack([(y == o).astype("float64") for o in OUTCOMES])
+    obs = np.column_stack([(y == o).astype("float64") for o in OUTCOMES])
+    unmatched = obs.sum(axis=1) != 1.0
+    if unmatched.any():
+        offenders = sorted({repr(v) for v in np.asarray(y)[unmatched]})[:5]
+        raise ValueError(
+            f"{int(unmatched.sum())} of {len(obs)} outcome labels are not one of "
+            f"{OUTCOMES}: {', '.join(offenders)}. Pass the raw H/D/A column "
+            "(e.g. `preds['FTR']`), not an integer encoding of it."
+        )
+    return obs
 
 
 def rps_per_match(y_true: np.ndarray | pd.Series, probs: np.ndarray) -> np.ndarray:

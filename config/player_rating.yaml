@@ -339,9 +339,9 @@ positions:
       # on top of the chosen CB setting (`--stage fb --cb-share 0.30`):
       #
       #   FB team_defence  RPS       delta (95% CI)               defence vs next GA
-      #   0.00             0.36505   -0.00010 [-0.00028,+0.00008]  -0.523   <- this
-      #   0.15             0.36501   -0.00014 [-0.00033,+0.00004]  -0.544
-      #   0.30             0.36469   -0.00046 [-0.00065,-0.00028]  -0.555
+      #   0.00             0.19912   --                            -0.523   <- this
+      #   0.15             0.19915   +0.00003 [-0.00009,+0.00016]  -0.541
+      #   0.30             0.19913   +0.00001 [-0.00012,+0.00014]  -0.554
       #
       # On those aggregates 0.30 wins outright, and it is still not shipped.
       # Its RPS advantage -- the only significant result anywhere in this
@@ -451,22 +451,26 @@ positions:
       # zero weight:
       #
       #   variant        RPS       delta (95% CI)               defence vs next GA
-      #   baseline       0.36515   --                           -0.442
-      #   share-0.00     0.36529   +0.00014 [-0.00005,+0.00033]  -0.485
-      #   team_def 0.15  0.36510   -0.00005 [-0.00023,+0.00013]  -0.488
-      #   team_def 0.30  0.36505   -0.00010 [-0.00028,+0.00008]  -0.523   <- this
-      #   team_def 0.45  0.36517   +0.00002 [-0.00016,+0.00020]  -0.544
+      #   share-0.62     0.19911   -0.00001 [-0.00014,+0.00013]  -0.440   <- was shipped
+      #   share-0.00     0.19914   +0.00003 [-0.00011,+0.00017]  -0.486
+      #   team_def 0.15  0.19913   +0.00002 [-0.00012,+0.00015]  -0.490
+      #   team_def 0.30  0.19912   --                            -0.523   <- this
+      #   team_def 0.45  0.19908   -0.00003 [-0.00017,+0.00010]  -0.544
+      #
+      # Re-measured 2026-10-18 on 20,074 fixtures. The figures this block
+      # carried until then were scored through `rps_per_match` with integer
+      # outcome labels, which `_one_hot` matched against the strings 'H'/'D'/'A'
+      # -- so every indicator was zero and RPS reduced to a function of the
+      # forecast that never read the result. Shuffling every outcome left it
+      # unchanged. The tell was a score near 0.36 where `evaluate.py` says a
+      # base rate lands at 0.22; it now raises on a non-H/D/A label.
       #
       # **No predictive improvement is established, and none is claimed.** Not
-      # one variant is significant on RPS, the chosen one included. The one
-      # setting that did reach significance (extending this to full backs,
-      # -0.00046) improved in only 8 of 11 movable seasons, p ~ 0.11, so it was
-      # rejected: matches inside a season share a model fit, which makes the
-      # paired bootstrap's effective sample nearer 12 than 20,060. The
-      # measurement floor is close by independently -- rebuilding on a later
-      # day moved the baseline 0.36508 -> 0.36498 on a byte-identical config,
-      # because `_match_across_editions` couples seasons and re-fetching the
-      # season in progress re-resolves historical names.
+      # one variant is significant on RPS, the chosen one included, and the
+      # whole table spans 0.00012 -- from 0.19908 to 0.19918. Against the
+      # setting this replaced (`share-0.62`) the change is +0.00001, which is
+      # nil. RPS cannot separate any of these configurations, which is the
+      # entire reason the choice rests on the correlations below.
       #
       # It ships on defensive validity, which does replicate. Centre-back line
       # against the *next* season's conceding, with full-back weights held

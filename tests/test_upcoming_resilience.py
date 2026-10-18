@@ -34,10 +34,21 @@ def clean_cache(monkeypatch):
     monkeypatch.setattr(api.state, "_upcoming_at", None)
 
 
+#: A date that is always in the future, re-evaluated per call.
+#:
+#: `upcoming` drops any fixture whose date has passed -- it refuses to present
+#: played matches as upcoming, which is a bug it was written to prevent. A
+#: hard-coded date therefore works until that morning and then fails every run
+#: afterwards, which is what happened: these tests were green on 2026-10-17 and
+#: red on the 18th, for no reason connected to the code.
+def _soon(days: int = 2) -> str:
+    return (datetime.now(UTC) + timedelta(days=days)).date().isoformat()
+
+
 def _prediction(home: str = "Arsenal", away: str = "Chelsea"):
     """A minimal scored fixture, built the way the endpoint returns them."""
     return api.Prediction(
-        league="E0", date="2026-10-17", home_team=home, away_team=away,
+        league="E0", date=_soon(), home_team=home, away_team=away,
         expected_goals_home=1.6, expected_goals_away=1.1,
         prob_home_win=0.5, prob_draw=0.26, prob_away_win=0.24,
         predicted_outcome="H", competition="domestic",
@@ -51,7 +62,7 @@ def _prediction(home: str = "Arsenal", away: str = "Chelsea"):
 def test_failing_odds_still_returns_fixtures(monkeypatch) -> None:
     """A dead odds source costs the market row, not the board."""
     fixtures = pd.DataFrame({
-        "League": ["E0"], "Date": [pd.Timestamp("2026-10-17")],
+        "League": ["E0"], "Date": [pd.Timestamp(_soon())],
         "HomeTeam": ["Arsenal"], "AwayTeam": ["Chelsea"],
     })
     monkeypatch.setattr(schedule, "upcoming_fixtures", lambda *a, **k: fixtures)
@@ -73,7 +84,7 @@ def test_failing_odds_still_returns_fixtures(monkeypatch) -> None:
 def test_working_odds_are_still_merged(monkeypatch) -> None:
     """The guard must not have disabled the feature it protects."""
     fixtures = pd.DataFrame({
-        "League": ["E0"], "Date": [pd.Timestamp("2026-10-17")],
+        "League": ["E0"], "Date": [pd.Timestamp(_soon())],
         "HomeTeam": ["Arsenal"], "AwayTeam": ["Chelsea"],
     })
     odds = fixtures.assign(B365H=1.8, B365D=3.6, B365A=4.2)
