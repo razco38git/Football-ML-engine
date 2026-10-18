@@ -121,10 +121,35 @@ def select_eleven(
 MIN_RATED_PLAYERS = 11
 
 
+#: Players per club when ``method="best_n"``, which is what production runs.
+#:
+#: Swept 13-17 on 2026-10-18 (`pipelines/squad_size_sweep.py`). Nothing beat it,
+#: and the three validity correlations disagree about which way to move, so this
+#: is a defensible optimum rather than an arbitrary number -- which is more than
+#: could be said for it before, when it had never been measured at all:
+#:
+#:   best_n   RPS       atk>GF    def>GA    ovr>pts
+#:   13       0.19913   0.7325    -0.5196   0.7546
+#:   14       0.19922   0.7353    -0.5231   0.7563
+#:   15       0.19912   0.7408    -0.5232   0.7562   <- this
+#:   16       0.19904   0.7384    -0.5280   0.7543
+#:   17       0.19905   0.7331    -0.5316   0.7555
+#:
+#: Attack peaks here and falls away either side; defence keeps improving with
+#: squad size and had not levelled off at 17; overall is flat to within 0.002.
+#: No RPS difference is significant -- the column spans 0.00018.
+#:
+#: The defence trend is the open question: `best_n` takes the top N by rating
+#: with no positional quota, so a larger N dilutes a thin attacking line more
+#: than a defensive one. Testing a per-line minimum is the obvious next step and
+#: was deliberately left out of that sweep.
+DEFAULT_BEST_N = 15
+
+
 def team_strength(
     rated: pd.DataFrame,
     method: str = "eleven",
-    best_n: int = 14,
+    best_n: int = DEFAULT_BEST_N,
     formation: dict[str, int] | None = None,
     min_players: int = MIN_RATED_PLAYERS,
 ) -> pd.DataFrame:

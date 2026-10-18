@@ -1163,3 +1163,94 @@ published number is least about the player it names.
 
 The weight is left at zero and the definition kept in the `FB` block, so the
 measurement can be repeated rather than re-derived.
+
+---
+
+# How many players should a team rating be built from?
+
+## Why
+
+`team_strength(method="best_n")` aggregates each club's top 15 players by
+rating, and the twelve `squad` features the match model reads come out of it —
+as do the team ratings the site publishes. **That 15 had never been measured.**
+No table, no RPS figure, no correlation anywhere in this file or in
+`config/player_rating.yaml`, unlike `peak_weight`, `rho_`, the training window
+and the defending weight, which all carry their evidence beside them. The
+library default said `14` while production passed `15`: two unexplained numbers
+that disagreed, and nothing called the 14.
+
+## What was run
+
+`pipelines/squad_size_sweep.py`, over the same 20,074 walk-forward fixtures.
+`best_n ∈ {13, 14, 15, 16, 17}` — bracketing the shipped value rather than
+extending one way, because a monotone trend either side of it is believable
+where a single better neighbour is not. Players are ingested and **rated once**
+for every arm: `best_n` selects from the ratings and changes nothing upstream of
+them.
+
+A second arm at 15 runs as a determinism control and came back **bit-identical**
+to baseline on every metric, which is what makes the rest of the table readable.
+
+The gate was declared before the run, because two earlier sweeps here produced
+"significant" winners that did not survive: ship only on beating 15 across the
+next-season correlations, without regressing RPS beyond its interval, and
+improving in most of the eleven seasons that can move.
+
+## Results
+
+| best_n | RPS | delta | 95% CI | atk>GF | def>GA | ovr>pts |
+|--------|-----|-------|--------|--------|--------|---------|
+| 13 | 0.19913 | +0.00001 | [-0.00013, +0.00015] | 0.7325 | -0.5196 | 0.7546 |
+| 14 | 0.19922 | +0.00010 | [-0.00003, +0.00024] | 0.7353 | -0.5231 | **0.7563** |
+| **15** *(shipped)* | 0.19912 | — | — | **0.7408** | -0.5232 | 0.7562 |
+| 16 | 0.19904 | -0.00007 | [-0.00021, +0.00007] | 0.7384 | -0.5280 | 0.7543 |
+| 17 | 0.19905 | -0.00007 | [-0.00021, +0.00008] | 0.7331 | **-0.5316** | 0.7555 |
+
+Attack and overall are correlations against the next season's goals for and
+points, so higher is better; defence is against goals conceded, so lower is.
+
+## Decision: nothing ships, and that is the result
+
+No setting beats 15 on the correlations, so the gate is not met. RPS spans
+**0.00018** across the whole sweep with not one interval excluding zero, and the
+two arms with a nominal edge improve in 6 of the 11 seasons that can move — a
+coin flip.
+
+**But the number is better founded than "nobody measured it" suggested.** The
+three correlations disagree, and 15 sits at a real optimum on one of them:
+
+- **Attack peaks exactly at 15** and falls away in both directions, 0.7325 →
+  0.7353 → **0.7408** → 0.7384 → 0.7331.
+- **Defence improves monotonically with squad size**, -0.5196 at 13 through
+  -0.5316 at 17, and had not levelled off at the edge of the sweep.
+- **Overall is flat**, spanning 0.002, with 14 ahead of 15 by 0.0002.
+
+So adding players keeps helping the back line while starting to hurt the attack,
+and 15 is where the attacking line is sharpest.
+
+## What this opens
+
+The defence trend is the loose end, and it points at something the sweep was
+deliberately scoped to exclude. `best_n` takes the top N **by rating with no
+positional quota** — a club could in principle contribute fifteen attackers, and
+`strength_defence` would be computed from whoever was left. A larger N dilutes a
+thin attacking line more than a defensive one, which is exactly the shape of the
+two trends above.
+
+Testing a per-line minimum is therefore the next experiment, and it now has a
+reason rather than a hunch behind it.
+
+## Limitations
+
+1. **RPS decides nothing here**, as in the defending sweep: 0.00018 across nine
+   arms. The correlations carried the gate, and they declined to pick a winner.
+2. **Five points, chosen in advance.** A finer grid around 15 would be fitting
+   noise; the bracket exists to show a trend, not to find a maximum.
+3. **The correlations are not independent of each other** — all three are
+   computed from the same strength frame against the same club-seasons — so
+   "attack peaks at 15" and "defence keeps rising" are two views of one
+   selection rule, not two experiments.
+4. **`mean_players` tops out below the cap**: 16.95 at `best_n=17`, because some
+   clubs have fewer rated players than that. The largest arms are therefore
+   slightly weaker treatments than their label suggests.
+5. **Hyperparameters fixed to production**, as everywhere else in this file.
