@@ -1755,6 +1755,14 @@ def team_elo(name: str, seasons: int = Query(3, ge=1, le=12)) -> EloHistory:
     if features.empty:
         raise HTTPException(503, "Feature table not loaded")
 
+    # The caller is the team-strength panel, which spells clubs the way the
+    # ratings table does ("Paris Saint Germain"). The feature table is spelled
+    # the way football-data does ("Paris SG"), so 44 of the 168 rated clubs --
+    # Manchester City, Dortmund and Atletico among them -- never matched here
+    # and the chart silently vanished for a quarter of the site. Same mismatch
+    # `_canonical_team` was written for on `/predict`.
+    name = _canonical_team(name, set(features["HomeTeam"].dropna().unique()))
+
     home = features["HomeTeam"] == name
     away = features["AwayTeam"] == name
     if not (home | away).any():
