@@ -8,8 +8,10 @@ Ordered from "tell me about the project" to the questions designed to find out
 whether you understand your own work.
 
 **Related reading:** [`METHODOLOGY.md`](METHODOLOGY.md) is the derivation,
-[`../EXPERIMENTS.md`](../EXPERIMENTS.md) is the evidence, and
-[`ARCHITECTURE.md`](ARCHITECTURE.md) is the code map.
+[`../EXPERIMENTS.md`](../EXPERIMENTS.md) is the evidence,
+[`PROTOCOLS.md`](PROTOCOLS.md) holds the pre-registrations the two most recent
+experiments were run under, and [`ARCHITECTURE.md`](ARCHITECTURE.md) is the code
+map.
 
 ---
 
@@ -274,9 +276,42 @@ Fitted ρ = **−0.0566** by maximum likelihood **on training data only** — it
 model parameter like any other and fitting it on test data leaks. Negative ρ
 moves mass into 0-0 and 1-1 and out of 1-0 and 0-1.
 
-I have since measured that **one global ρ is probably wrong**: fitting it per
-league gives the Bundesliga −0.130, with a bootstrap interval that excludes the
-shipped value. That is an open, documented finding rather than a shipped change.
+### Q. One ρ for five leagues with different scoring profiles. Isn't that wrong?
+
+It looked wrong, I tested it, and it survived — which is a better answer than
+either the assumption or the objection.
+
+In sample the heterogeneity is real and large. Profiling the Dixon-Coles
+likelihood per league puts the Bundesliga at **−0.1297 [−0.1784, −0.0787]**, an
+interval that **excludes the shipped −0.0566**, against Spain's −0.0326. More
+than a factor of four apart. ρ also trends with scoring level, −0.038 in the
+lowest total-λ quartile to −0.070 in the highest.
+
+Out of sample it buys nothing. Walk-forward over 18,212 fixtures and 11 folds,
+every ρ fitted on strictly earlier folds:
+
+| arm | logLik/match Δ | 95% CI | leagues better |
+|---|---|---|---|
+| per-league | +0.000137 | [−0.000210, +0.000489] | **1 of 5** |
+| shrunk | +0.000084 | [−0.000057, +0.000225] | 3 of 5 |
+| per-lambda | −0.000163 | [−0.000484, +0.000154] | 1 of 5 |
+
+**The shape of the failure is the finding.** The gain is +0.001263 in the
+Bundesliga and a small loss in every other league — the one league whose
+heterogeneity motivated the experiment is the only one that gains, and it does
+not clear its own interval. That is what an in-sample artefact looks like when
+you finally take it out of sample.
+
+Two design points I'd defend. The margin on exact-score hit rate was set at
+**0.25 percentage points read off the CI upper bound**, not "must not fall" —
+and it earned that on the first arm it touched, where `per-league` declines
+0.0439pp with an interval of [−0.0933, +0.1757]. A zero-tolerance rule would
+have rejected an arm over noise. And **RPS was not assumed insensitive to ρ**:
+ρ moves mass between cells sitting on both sides of the draw/win boundary, so it
+was measured, and it does move — by +0.000012, two orders below the floor.
+
+No-ship, all three arms. Production keeps one global ρ, and now it keeps it for
+a measured reason rather than an unexamined one.
 
 ### Q. Your site says 1-1 is the most likely score in most matches, but also that the home team will probably win. Is that a bug?
 
@@ -521,6 +556,36 @@ The general lesson: **a summary that flatters the table it summarises is a bug
 until proven otherwise.** That is the same failure mode as the RPS bug — a number
 that disagreed with its own context and got explained away.
 
+### Q. Any others?
+
+One more, and it is the clearest instance of the same tell.
+
+The conditional-ρ experiment has a `shrunk` arm — per-league ρ pulled toward the
+pooled value. Its first run reported a delta against production of **exactly
+0.000000**, on all 18,212 fixtures and all five leagues. Not approximately.
+Identically.
+
+My shrinkage factor was `1 − (k − 2) / (k · spread)` with **no sampling variance
+in it**, which implicitly sets σ² = 1. ρ deviations are ~0.07, so `spread` is
+~0.001, the term is ~556, and the factor hit its floor of zero on every fold.
+**The arm was production in disguise, benchmarked against itself.**
+
+Caught because a delta of exactly zero across three metrics and five leagues is
+not a result, it is an identity — the same signature as the RPS bug, where a
+score that did not change under shuffled outcomes was not reading the outcome.
+Three bugs in this project, and all three announced themselves as a number that
+was *too clean for what it claimed to be measuring*.
+
+Replaced with empirical-Bayes shrinkage taking each league's variance from the
+curvature of its own likelihood. The variances are now a **required argument**:
+omitting them applies no shrinkage rather than shrinking by an assumed one.
+The whole experiment was re-executed end to end, and the two arms that do not
+route through the broken function are byte-identical across both runs — which is
+how I know the fault was confined to one arm rather than the harness.
+
+`EXPERIMENTS.md` keeps the invalid run and labels it, rather than quietly
+publishing the corrected numbers.
+
 ### Q. How do you decide whether a result is real?
 
 Paired bootstrap, 10,000 resamples, fixed seed, on identical fixtures — and the
@@ -625,26 +690,142 @@ establishing why it should not exist.
 
 ### Q. What is the single weakest part of the project?
 
-Defender rating validity, and I can put a number on it.
+Defender rating validity — and I tested the obvious explanation for it and was
+wrong, which is the more useful half of the answer.
 
 Our ratings correlate with EA's *next-edition* move at 0.15 for forwards and
 0.23 for goalkeepers, but **0.04–0.06 for centre-backs, full-backs and
-midfielders** — in every season. And a centre-back's rating correlates **+0.67**
-with his own team's defensive record, which raises the obvious worry that it is
-partly a team number wearing a player's name.
+midfielders** — in every season. A centre-back's rating also correlates **+0.67**
+with his own team's defensive record, and `config/player_rating.yaml` gives
+**CB `team_defence: 0.30`** against **FB `0.0`** — so by construction 30% of a
+centre-back's composite *is* his club's expected goals against, goals against
+and clean-sheet rate.
 
-There is a clean test for this that the existing data supports: **does a
-defender's rating travel with him?** Across 12 seasons there are 3,965
-consecutive-season transfers. The preliminary split is already suggestive —
-rating persistence from one season to the next is 0.804 for centre-backs who stay
-and 0.609 for those who move, the largest drop of any role, against 0.794 → 0.730
-for central midfielders.
+The obvious worry: the number is a team number wearing a player's name.
 
-That is not yet a result: movers differ from stayers in age, level, and the fact
-that a transfer is itself informative. The proper design validates against **EA's
-next-edition rating** — an outside judgement not computed from the new club's
-goals conceded — and matches movers to stayers on rating, age and minutes. It is
-fully feasible today with no new data.
+### Q. So how did you test that?
+
+A transfer separates the player from the club. If the rating is about him it
+should predict his next EA assessment equally well whether or not he moves; if
+it is about the side he just left, it should attenuate.
+
+**The sample design is the part worth asking about.** The obvious version —
+players with a *rated* season at `t+1` — conditions on the player clearing the
+450-minute gate at his new club. That is post-transfer information, and it
+selects for successful transfers, which is the thing under test. EA's raw
+exports are the whole worldwide database rather than the big five, so the
+outcome is recoverable without that condition: 88.9% recovered, 1,269 CB movers
+against 2,300 stayers, and the minutes gate out of the design entirely.
+
+Two further corrections. The predictor is **`performance_rating`, not
+`rating`** — `rating` is half `fifa_overall`, so scoring it against EA's next
+edition would be substantially EA predicting itself. And the outcome is a
+**within-edition z-score**, because EA's scale drifts 2.5 points across the
+window.
+
+### Q. And the answer?
+
+**No contamination, and the verdict is inconclusive.** Both of those, and they
+are not the same statement.
+
+| role | stayer | mover | δ | ratio |
+|---|---|---|---|---|
+| CB | **+0.1403** [+0.1275, +0.1529] | +0.1366 | −0.0037 [−0.0223, +0.0157] | 0.974 |
+| FB | **+0.0929** [+0.0795, +0.1056] | +0.0810 | −0.0119 [−0.0334, +0.0093] | 0.872 |
+
+The stayer slopes clearly exclude zero, so the power gate passes and the ratio
+is interpretable. Neither δ interval excludes zero, so nothing meets the
+contamination bar.
+
+It is reported **inconclusive** rather than as a clean null because two triggers
+I wrote down before running both fired. The **rank specification disagrees in
+sign** with the z-score one for both roles — two scales of the same outcome
+pointing opposite ways on an effect they both call indistinguishable from zero.
+And CB's equivalence verdict is **threshold-dependent**: equivalent at [0.85,
+1.18] and [0.80, 1.25], not at [0.90, 1.11].
+
+What I can say positively is narrower and still useful: no contamination was
+detected on any specification, and CB's attenuation is bounded within about 13%
+at 90% confidence.
+
+### Q. You keep saying "inconclusive". Isn't that just a failed experiment?
+
+No, and the distinction is the one I'd most want to be asked about.
+
+A failed experiment produces a number nobody can trust. This produced a bounded
+answer plus a specific, named reason it cannot be sharpened: two defensible
+scalings of the same outcome disagree on a sign. That is a fact about the
+instrument, and knowing it is worth more than a verdict that depends on which
+scaling I happened to pick first.
+
+The alternative was available and is what I'd have done a year ago — report the
+z-score result, call it practical equivalence at the bound that happens to pass,
+and not mention the rank version. The triggers exist precisely because that
+temptation is predictable, so the rule has to be written before the number.
+
+### Q. Did anything come out of it?
+
+The thing I did not go looking for.
+
+| | projection R² | stayer slope, raw | residualised |
+|---|---|---|---|
+| CB | **0.526** | +0.1403 | **+0.0337** |
+| FB | 0.095 | +0.0929 | +0.0555 |
+
+Projecting the three club aggregates out of the rating shows they explain
+**52.6% of a centre-back's performance rating** against 9.5% of a full-back's —
+exactly the asymmetry the 0.30 and 0.00 weights imply, and larger than I
+expected. Removing them costs CB **76%** of its power to predict EA's next move.
+
+**And it travels anyway.** The residualised δ was supposed to shrink toward zero
+for CB if contamination were the mechanism; instead CB's δ was already ~0 and
+the residual version is if anything positive.
+
+So a centre-back's rating is half his club's defensive record and predicts his
+next assessment just as well after he leaves. The economical reading is that
+club defensive quality is a **legitimate predictor** of how a defender will next
+be judged, not a contaminant that evaporates on transfer. That is
+mechanism-consistent evidence against my own hypothesis — the residual is
+orthogonal to three club numbers in one season, not to "the player", so it is
+not proof.
+
+The EA-free check agrees and is the strongest single number in the experiment: a
+centre-back one standard deviation better predicts **0.08 fewer goals conceded
+per match** at his new club, [−0.1218, −0.0464] over 259 single-arrival
+club-seasons — about three goals a season, with no EA data in it at all. It
+conditions on post-transfer minutes and attributes a team outcome to one
+arrival, so it is corroboration, not an instrument.
+
+### Q. How did you handle the players who vanish from the data?
+
+This is the sharpest question about the design and the honest answer is that it
+is a limitation, not a solved problem.
+
+11.1% of cases are unrecoverable, and they are not missing at random: older
+(standardised difference +0.37), played less (−0.32), rated lower (−0.17).
+Critically, an unrecovered player has **no `t+1` record at all**, so **both the
+outcome and the treatment are missing** — I do not know whether he moved.
+
+That matters for what inverse-probability weighting can do. IPW identifies the
+estimand only under recovery independent of treatment *and* outcome given the
+observed covariates, and mover status is unobservable exactly when recovery
+fails. **So IPW corrects selection on age, minutes and rating, and cannot touch
+selection on mover status.** I say that rather than presenting IPW as a fix,
+because the primary effect is **not point-identified without an assumption the
+data cannot check**.
+
+What replaces the fix is a bound. A pattern-mixture grid over the assumed mover
+share among the vanished, crossed with three imputations of their outcome, holds
+CB's ratio above the 0.85 bound across the entire plausible region — up to
+movers being twice over-represented among the vanished — and crosses it only
+where *every* vanished player is assumed to be a mover. The observed share among
+the recovered is 0.34.
+
+I also had to withdraw a claim. An earlier draft of the protocol asserted the
+bias ran toward zero, reasoning that a player who drops out of football leaves
+EA's database while a declining stayer does not. That is a conjecture about an
+unobservable quantity and the reverse is equally arguable, so it came out and
+the grid went in.
 
 ### Q. Why is there no "Barcelona without Yamal" feature? It's the obvious thing to build.
 
@@ -677,16 +858,57 @@ caught it the first time.
 the rule and it is enforced by tests, but it became the rule after an experiment
 whose surviving arm was the one the criteria happened not to cover.
 
+**Check what the sample conditions on before building the model on it.** The
+first design of the rating-travel experiment required a rated season after the
+transfer, which silently conditioned on the player succeeding at his new club —
+the exact thing under test. It came out in review, not from the code.
+
+### Q. Several of your experiments end in "no-ship" or "inconclusive". Does anything ever work?
+
+The model works — 0.1992 against a 0.2299 baseline, 88% of the way to the
+bookmakers. What mostly does not work is the *next* idea, and that is the
+expected shape once a system is near the ceiling of its data.
+
+The honest tally: of the six experiments run most recently, one shipped (the
+learning-budget retune, −0.00124 with every secondary metric moving with it) and
+five did not — squad size, positional quotas, extended Elo, conditional ρ, and
+rating travel. Each produced a number that now constrains what gets proposed
+next, which is why they are written up at the same length as the one that
+shipped.
+
+The pattern is informative in itself. **The recurring failure mode is a signal
+that is real on the measure that suggested it and absent on a held-out one:**
+
+- the Bundesliga's ρ excludes the shipped value in sample and gains nothing out
+  of sample;
+- `peak_weight = 0.30` improved all three rating correlations and **failed** the
+  walk-forward RPS gate, 0.2003 → 0.2008, which is why 0.15 ships;
+- the transfer gap that motivated the rating-travel experiment — persistence
+  0.804 for stayers against 0.609 for movers — **disappeared** once the
+  predictor was the unblended rating, the outcome was EA's own move, and the
+  sample stopped conditioning on post-transfer minutes.
+
+That last one is mine twice over: I produced the suggestive number and then
+designed the test that killed it. Having a framework that does that reliably is
+worth more to me than any individual result in the file.
+
 ### Q. What are you proudest of?
 
 That the negative results are written up at the same length as the positive ones,
-and that several of them killed features I wanted to build.
+and that several of them killed ideas I was attached to.
 
 Concretely: the project can say *why* it does not project the Champions League,
-*why* team strength has no positional quota, *why* the squad is 15 players, and
-*why* there is no player-level what-if — and each of those is a measurement with
-an interval, not an opinion. For a portfolio piece, being able to defend the
-things that are absent matters more than the length of the feature list.
+*why* team strength has no positional quota, *why* the squad is 15 players,
+*why* ρ is a single global scalar, *why* defender ratings are left as they are,
+and *why* there is no player-level what-if — and each is a measurement with an
+interval, not an opinion. For a portfolio piece, being able to defend the things
+that are absent matters more than the length of the feature list.
+
+The two most recent experiments are the ones I would actually show. One tested a
+hypothesis I was confident in and **found the opposite**: a centre-back's rating
+is half his club's defensive record and travels anyway. The other reported
+**inconclusive** on triggers I had written down in advance, when the convenient
+reading was available and would not have been questioned.
 
 ---
 
