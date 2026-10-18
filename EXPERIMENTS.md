@@ -1413,3 +1413,139 @@ experiment, and it has a clear hypothesis and a clear way to be wrong.
    flatters it — deliberately, so that beating it means something.
 5. **Nothing here touches the domestic backtest**, so no claim about the live
    model's accuracy follows from any of it.
+
+---
+
+# Should Elo learn from the European results the model cannot predict?
+
+## Hypothesis
+
+Elo is the only feature that crosses a league boundary: its updates are
+zero-sum, so without European ties the five leagues are five pools each anchored
+at 1500. Production feeds it `european_matches.csv` — **829 ties where both
+clubs are in the big five**. Another **3,178** sit on disk unused, involving 180
+clubs dropped by `big_five_only` because they have no squad rating, no form and
+no xG.
+
+Elo needs none of those. It needs results, and `european_dropped.csv` has kept
+`FTHG`/`FTAG` all along. Measured separately (previous section): feeding them in
+improves an Elo-only predictor on the ties where the full model can also be
+scored, **0.21760 to 0.21621, -0.00139 [-0.00274, -0.00008], better in 8 of 10
+seasons**.
+
+That is the upside. The risk is larger and entirely domestic: Elo is **one
+pool**, so changing what it learns from changes the `elo` feature on all 20,074
+walk-forward fixtures, not only the 827 European ones.
+
+**So this was framed as a non-inferiority test, not a search for a gain**, with
+the bar fixed in `pipelines/extended_elo_ab.py` before the run:
+
+> ship if the upper CI bound on the domestic RPS delta is **< +0.0005** *and*
+> the arm is neutral-or-better in **>= 6 of the 11 movable seasons**;
+> inconclusive counts as no-ship.
+
++0.0005 is the measurement floor established elsewhere in this file — the
+defending sweep spanned 0.00012 across nine arms and the squad-size sweep
+0.00018, neither significant on the same fixtures.
+
+## Arms
+
+The dropped ties are mostly **not** Champions League, which shaped the design:
+
+| | kept | dropped |
+|---|---|---|
+| UCL | 569 | 839 |
+| UEL | 236 | **1,616** |
+| UECL | 24 | 723 |
+
+| arm | Elo learns from |
+|---|---|
+| **production** | domestic + kept (829) — exactly what `add_elo(extra=...)` receives today |
+| **extended** | domestic + kept + all dropped (4,007) |
+| **extended-no-uecl** | domestic + kept + dropped UCL/UEL (3,284) |
+
+The third arm was declared in the source before the run, not sliced out
+afterwards: the Conference League is the newest and weakest competition and the
+likeliest source of noise.
+
+## Results: domestic walk-forward, 20,074 fixtures, retrained per fold
+
+| arm | European ties | RPS | delta | 95% CI | significant |
+|-----|---------------|-----|-------|--------|-------------|
+| production | 829 | 0.19925 | — | — | — |
+| extended | 4,007 | 0.19934 | **+0.00010** | [-0.00009, +0.00028] | no |
+| extended-no-uecl | 3,284 | 0.19930 | +0.00006 | [-0.00012, +0.00023] | no |
+
+Both arms are **nominally worse** domestically. Neither difference is
+significant, and both upper bounds sit inside the non-inferiority margin.
+
+By movable season — 1516 excluded because that fold trains with the strength
+features absent and no arm can move it:
+
+| arm | neutral-or-better seasons | neutral-or-better leagues |
+|---|---|---|
+| extended | **5 of 11** | 2 of 5 |
+| extended-no-uecl | 6 of 11 | 2 of 5 |
+
+The adverse leagues are Ligue 1 (+0.00039) and Serie A (+0.00020) for the full
+extension.
+
+## Verdict: no-ship, both arms
+
+**`extended` fails the bar outright** at 5 of 11 seasons.
+
+**`extended-no-uecl` meets the bar — and still should not ship**, for a reason
+the bar did not cover: **it is not the arm the European benefit was measured
+on.** The -0.00139 was measured for the all-dropped extension. The no-UECL
+variant's European upside is *unmeasured*. So the two arms each fail a different
+necessary condition:
+
+| arm | European upside | domestic bar |
+|---|---|---|
+| extended | measured, -0.00139 | **fails** |
+| extended-no-uecl | **unmeasured** | meets |
+
+Neither has both halves, so neither ships. That is a gap in how the criteria
+were written, not a licence to pick the survivor after the fact: the honest
+reading is that the experiment answered the question it asked and the question
+was one condition short.
+
+Independently of that technicality, the trade is poor on sample size. The
+possible gain is on 827 European ties; the possible cost is on 20,074 domestic
+ones, and the domestic direction is adverse in both arms and in three of five
+leagues.
+
+## What would change the answer
+
+Score `extended-no-uecl` on the European ties the way the all-dropped arm was
+scored. If it keeps most of the -0.00139 while holding 6 of 11 domestic seasons,
+it would satisfy both conditions and the decision would be live again. That is a
+~5 minute run and is the obvious follow-up; it is not done here because the
+result above does not justify continuing on its own momentum.
+
+## A production hazard this surfaced
+
+`validate_european` caches its feature frame keyed on `strength_fingerprint` —
+**squad strength only**. Elo is not in the key. So if the extended walk ever
+ships, every cached European feature would be silently stale until something
+unrelated changed the strength file. Shipping this would have to extend that
+fingerprint, and that is now written down rather than waiting to be discovered.
+
+## Limitations
+
+1. **Non-inferiority, not equivalence.** "No detectable harm" at a margin of
+   0.0005 is a statement about this harness's resolution, not about the change
+   being free.
+2. **The counting bug this run started with.** The first pass credited the
+   unmovable 1516 fold as neutral-or-better, which turned 5 of 11 into 6 of 11
+   and a failing arm into a passing one. Fixed, and pinned by
+   `test_a_group_no_arm_can_move_is_not_counted_as_a_pass`.
+3. **Same-day ordering.** `_walk` orders by date, not kickoff time, so a
+   same-day European result can inform a same-day domestic match. True in
+   production today; this change would widen the exposure. Not measured.
+4. **The European side was not re-scored with the full model.**
+   `validate_european` scores with the production model, so substituting
+   arm-specific Elo at inference would be a train/serve mismatch, and retraining
+   per arm for Europe costs ~60 minutes each. The Elo-only comparison from the
+   previous section is cited instead, with its own limitations.
+5. **Hyperparameters fixed to production**, as everywhere else here.
