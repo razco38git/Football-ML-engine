@@ -139,10 +139,16 @@ MIN_RATED_PLAYERS = 11
 #: squad size and had not levelled off at 17; overall is flat to within 0.002.
 #: No RPS difference is significant -- the column spans 0.00018.
 #:
-#: The defence trend is the open question: `best_n` takes the top N by rating
-#: with no positional quota, so a larger N dilutes a thin attacking line more
-#: than a defensive one. Testing a per-line minimum is the obvious next step and
-#: was deliberately left out of that sweep.
+#: The opposing trends are a real trade-off, not a dilution artefact, and that
+#: was measured rather than assumed. `pipelines/positional_quota_ab.py` imposed
+#: per-line floors of 1-4-3-3, 1-3-3-2 and 2-5-5-3 on the same fifteen places:
+#: every one moved `def>GA` in the predicted direction and every one paid for it
+#: in `atk>GF`, at roughly one to one or worse (the strongest bought +0.0094 of
+#: defence for -0.0142 of attack). `ovr>pts` was flat to declining throughout.
+#: So adding defensive representation -- by raising N or by imposing a floor --
+#: helps the back line and costs the attack either way, and 15 with no quota
+#: sits at a reasonable compromise. Do not re-propose a positional quota without
+#: new evidence.
 DEFAULT_BEST_N = 15
 
 

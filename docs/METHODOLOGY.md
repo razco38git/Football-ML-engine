@@ -539,10 +539,20 @@ outcomes:
 
 Attack peaks exactly at 15 and falls away either side; defence keeps improving
 with squad size and had not levelled off at 17; overall is flat to within 0.002.
-No RPS difference is significant — the column spans 0.00018. So 15 stays, and
-the opposing trends are the evidence for the paragraph above: a larger N dilutes
-a thin attacking line more than a defensive one. Testing a per-line minimum is
-the open follow-up.
+No RPS difference is significant — the column spans 0.00018. So 15 stays.
+
+**The opposing trends were then tested directly, and they are a trade-off
+rather than a fixable artefact.** Per-line floors of 1-4-3-3, 1-3-3-2 and
+2-5-5-3 were imposed on the same fifteen places
+(`pipelines/positional_quota_ab.py`). Every one improved `def>GA` as predicted,
+and every one paid for it in `atk>GF` at roughly one to one or worse — the
+strongest bought +0.0094 of defence for −0.0142 of attack, with `ovr>pts` flat
+to declining throughout. Raising N and imposing a floor are two ways of giving
+the back line more representation, and both help defence and cost attack.
+
+So the absence of a quota is not an oversight: 15 with no positional constraint
+sits at a reasonable compromise, and production's selection is already close to
+balanced at 5.3 defence, 4.9 attack, 3.1 midfield and 1.1 goalkeepers per club.
 
 `MIN_RATED_PLAYERS = 11` exists because five matchweeks into 2026/27 a fresh
 build produced 72 team ratings from a *median of two* rated players — numbers

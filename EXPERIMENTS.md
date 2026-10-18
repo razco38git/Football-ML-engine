@@ -1549,3 +1549,123 @@ fingerprint, and that is now written down rather than waiting to be discovered.
    per arm for Europe costs ~60 minutes each. The Elo-only comparison from the
    previous section is cited instead, with its own limitations.
 5. **Hyperparameters fixed to production**, as everywhere else here.
+
+---
+
+# Does picking fifteen players without a positional floor distort team strength?
+
+## Hypothesis
+
+`team_strength(method="best_n")` takes each club's top 15 by rating and nothing
+else. There is no formation and no per-line minimum, so in principle a club's
+fifteen could be attack-heavy and `strength_defence` computed from whoever
+remains.
+
+The squad-size sweep pointed here. Across 13-17 the three next-season
+correlations disagreed in a specific way — attack peaked at 15 and fell away
+either side, while defence improved monotonically and had not levelled off at
+17. The natural reading was **dilution**: a larger N adds marginal attackers to
+a line that has few real ones, while the back line keeps gaining useful players.
+
+If that were right, a per-line floor should buy the defensive gain *without*
+the attacking cost. **It is not right**, and the way it fails is more
+informative than the hypothesis would have been.
+
+## Arms
+
+Three quotas, declared in `pipelines/positional_quota_ab.py` before the run:
+
+| arm | floor | places left free |
+|-----|-------|------------------|
+| production | none | 15 |
+| formation | 1 GK, 4 def, 3 mid, 3 att | 4 |
+| balanced | 1 GK, 3 def, 3 mid, 2 att | 6 |
+| full | 2 GK, 5 def, 5 mid, 3 att | 0 |
+
+A quota is a **floor, never a cap**: each line takes its minimum of its own best
+first, then the remaining places go to the best players left regardless of line.
+A club whose six best players are defenders still fields them.
+
+## How the arms are kept comparable
+
+Selection happens *outside* `team_strength`, and the result is passed back as
+`method="squad"`, which aggregates whatever it is given. Every arm therefore
+runs production's exact line aggregation, weighting and `MIN_RATED_PLAYERS`
+gate, and the only thing that varies is which fifteen players go in. Nothing in
+`src/footballml/players/` was touched.
+
+The baseline arm selects the top fifteen by rating, which must reproduce
+`method="best_n"` exactly. **That equality is asserted at runtime** and held to
+within 1e-9 across all 1,172 team-seasons; if it had not, no arm would have been
+readable.
+
+## The bar, fixed before the run
+
+> ship if `def>GA` improves by **>= 0.010**, *and* neither `atk>GF` nor
+> `ovr>pts` degrades by more than **0.005**, *and* the domestic RPS upper CI
+> bound is **< +0.0005** with **>= 6 of 11** movable seasons neutral-or-better.
+
+0.010 is the entire 13-to-17 range of `def>GA` from the squad sweep, so it asks
+a quota to be worth as much as the whole squad-size axis.
+
+## Results
+
+| arm | atk>GF | def>GA | ovr>pts | RPS | delta | 95% CI | movable seasons |
+|-----|--------|--------|---------|-----|-------|--------|-----------------|
+| production | **0.74082** | -0.52319 | **0.75615** | 0.19912 | — | — | — |
+| formation | 0.73435 | -0.52919 | 0.75617 | 0.19913 | +0.00001 | [-0.00012, +0.00014] | 6/11 |
+| balanced | 0.73633 | -0.52524 | 0.75556 | 0.19915 | +0.00003 | [-0.00010, +0.00016] | 4/11 |
+| full | 0.72657 | **-0.53261** | 0.75505 | 0.19913 | +0.00001 | [-0.00013, +0.00016] | 5/11 |
+
+## Verdict: no-ship, all three
+
+Every arm fails, and the pattern is the finding:
+
+| arm | defence gain | attack cost | ratio |
+|-----|--------------|-------------|-------|
+| balanced | +0.0020 | -0.0045 | 1 : 2.3 |
+| formation | +0.0060 | -0.0065 | 1 : 1.1 |
+| full | +0.0094 | **-0.0142** | 1 : 1.5 |
+
+**The quotas work, and the trade is bad.** Each one moves `def>GA` in the
+predicted direction, so the dilution mechanism is real. None does it for free:
+the attacking cost rises with the defensive gain, and `full` — which comes
+closest to the defensive threshold at +0.0094 — pays about one and a half times
+that in attack. `ovr>pts`, the summary that matters most for the published
+rating, is flat to slightly declining throughout. RPS is unmoved and
+non-significant in every arm.
+
+## What this settles about squad size
+
+Raising `best_n` and imposing a per-line floor are two different ways of giving
+the back line more representation, and **both help defence and hurt attack at
+comparable ratios**. The opposing trends in the squad-size sweep are therefore
+not a dilution artefact that a floor can correct — they are a genuine trade-off
+in how many players stand for each line, and `best_n=15` with no quota sits at a
+reasonable compromise on it.
+
+That closes the open question the squad-size sweep left behind.
+
+## Why the mild quotas barely moved anything
+
+Production's selection is already close to balanced: per club-season it averages
+**5.31 defence, 4.86 attack, 3.14 midfield and 1.06 goalkeepers**. The starved
+-line pathology is easy to construct — a club with twelve rated forwards
+contributes twelve attackers, three defenders and *no goalkeeper*, which
+`tests/test_positional_quota_ab.py` pins — but it is rare in real squads, so a
+1-4-3-3 floor seldom binds and `balanced` is nearly a no-op.
+
+## Limitations
+
+1. **Three quotas, not a search.** They were chosen to span mild-to-total and
+   declared in the source first. A finer grid would be fitting noise: the whole
+   `ovr>pts` column spans 0.0011.
+2. **RPS decides nothing here**, as in every strength-shaped experiment in this
+   file: four arms spanning 0.00003, none significant.
+3. **The correlations are not independent.** All three come from one strength
+   frame against the same club-seasons, so "defence up, attack down" is two
+   views of one selection rule rather than two results.
+4. **Lines, not positions.** The quota operates on the four lines
+   `LINE_BY_ROLE` defines, so it cannot express "at least two centre-backs" as
+   distinct from "at least two full-backs".
+5. **Hyperparameters fixed to production**, as everywhere else here.
