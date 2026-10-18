@@ -573,8 +573,11 @@ in it**, which implicitly sets σ² = 1. ρ deviations are ~0.07, so `spread` is
 Caught because a delta of exactly zero across three metrics and five leagues is
 not a result, it is an identity — the same signature as the RPS bug, where a
 score that did not change under shuffled outcomes was not reading the outcome.
-Three bugs in this project, and all three announced themselves as a number that
-was *too clean for what it claimed to be measuring*.
+**Three of this project's four measurement bugs announced themselves the same
+way: a number too clean for what it claimed to be measuring.** A score unchanged
+by shuffled outcomes, a verdict kinder than the table above it, and an arm
+reporting exactly 0.000000 against itself. The fourth had no such tell and is
+the next question.
 
 Replaced with empirical-Bayes shrinkage taking each league's variance from the
 curvature of its own likelihood. The variances are now a **required argument**:
@@ -585,6 +588,33 @@ how I know the fault was confined to one arm rather than the harness.
 
 `EXPERIMENTS.md` keeps the invalid run and labels it, rather than quietly
 publishing the corrected numbers.
+
+### Q. And the third?
+
+Found by reading the documents against each other, which is the only reason it
+was found at all.
+
+The rating-travel experiment excludes 2025/26 as a **predictor** season, because
+its own following EA edition is still being populated. The lookup that asks "did
+the matcher already place this player in edition `t+1`?" was built from that same
+filtered frame — so 2025/26 was missing from it, and the **2024/25 → 2025/26
+pairs lost their entire first-tier recovery**. That fold recovered 36.2% where
+every other season recovered 94–97%.
+
+A season can be ineligible to be predicted *from* while remaining perfectly good
+to be predicted *to*. The damage was not only volume: what survived was whatever
+a raw name-and-age match happened to find, which favours distinctively-spelled
+names — a selected third of a season, entering a model whose season fixed effects
+absorb a level shift but not a composition shift.
+
+**The pre-registration caught it.** `docs/PROTOCOLS.md` recorded 92.7% recovery
+from the feasibility audit written before the experiment; the write-up said
+88.9%. Two documents that should have agreed did not, and the protocol was the
+one that was right. That is an argument for pre-registering the numbers you
+expect, not just the criteria.
+
+No conclusion changed — both deltas moved slightly *toward* zero and the
+missingness grid got more robust — which is luck, not vindication.
 
 ### Q. How do you decide whether a result is real?
 
@@ -714,8 +744,8 @@ players with a *rated* season at `t+1` — conditions on the player clearing the
 450-minute gate at his new club. That is post-transfer information, and it
 selects for successful transfers, which is the thing under test. EA's raw
 exports are the whole worldwide database rather than the big five, so the
-outcome is recoverable without that condition: 88.9% recovered, 1,269 CB movers
-against 2,300 stayers, and the minutes gate out of the design entirely.
+outcome is recoverable without that condition: 92.7% recovered, 1,347 CB movers
+against 2,379 stayers, and the minutes gate out of the design entirely.
 
 Two further corrections. The predictor is **`performance_rating`, not
 `rating`** — `rating` is half `fifa_overall`, so scoring it against EA's next
@@ -730,8 +760,8 @@ are not the same statement.
 
 | role | stayer | mover | δ | ratio |
 |---|---|---|---|---|
-| CB | **+0.1403** [+0.1275, +0.1529] | +0.1366 | −0.0037 [−0.0223, +0.0157] | 0.974 |
-| FB | **+0.0929** [+0.0795, +0.1056] | +0.0810 | −0.0119 [−0.0334, +0.0093] | 0.872 |
+| CB | **+0.1404** [+0.1277, +0.1531] | +0.1385 | −0.0019 [−0.0197, +0.0160] | 0.986 |
+| FB | **+0.0940** [+0.0810, +0.1067] | +0.0848 | −0.0092 [−0.0301, +0.0116] | 0.903 |
 
 The stayer slopes clearly exclude zero, so the power gate passes and the ratio
 is interpretable. Neither δ interval excludes zero, so nothing meets the
@@ -745,7 +775,7 @@ And CB's equivalence verdict is **threshold-dependent**: equivalent at [0.85,
 1.18] and [0.80, 1.25], not at [0.90, 1.11].
 
 What I can say positively is narrower and still useful: no contamination was
-detected on any specification, and CB's attenuation is bounded within about 13%
+detected on any specification, and CB's attenuation is bounded within about 12%
 at 90% confidence.
 
 ### Q. You keep saying "inconclusive". Isn't that just a failed experiment?
@@ -769,13 +799,13 @@ The thing I did not go looking for.
 
 | | projection R² | stayer slope, raw | residualised |
 |---|---|---|---|
-| CB | **0.526** | +0.1403 | **+0.0337** |
-| FB | 0.095 | +0.0929 | +0.0555 |
+| CB | **0.526** | +0.1404 | **+0.0347** |
+| FB | 0.095 | +0.0940 | +0.0568 |
 
 Projecting the three club aggregates out of the rating shows they explain
 **52.6% of a centre-back's performance rating** against 9.5% of a full-back's —
 exactly the asymmetry the 0.30 and 0.00 weights imply, and larger than I
-expected. Removing them costs CB **76%** of its power to predict EA's next move.
+expected. Removing them costs CB **75%** of its power to predict EA's next move.
 
 **And it travels anyway.** The residualised δ was supposed to shrink toward zero
 for CB if contamination were the mechanism; instead CB's δ was already ~0 and
@@ -801,8 +831,8 @@ arrival, so it is corroboration, not an instrument.
 This is the sharpest question about the design and the honest answer is that it
 is a limitation, not a solved problem.
 
-11.1% of cases are unrecoverable, and they are not missing at random: older
-(standardised difference +0.37), played less (−0.32), rated lower (−0.17).
+7.3% of cases are unrecoverable, and they are not missing at random: older
+(standardised difference +0.57), played less (−0.58), rated lower (−0.37).
 Critically, an unrecovered player has **no `t+1` record at all**, so **both the
 outcome and the treatment are missing** — I do not know whether he moved.
 
@@ -816,10 +846,9 @@ data cannot check**.
 
 What replaces the fix is a bound. A pattern-mixture grid over the assumed mover
 share among the vanished, crossed with three imputations of their outcome, holds
-CB's ratio above the 0.85 bound across the entire plausible region — up to
-movers being twice over-represented among the vanished — and crosses it only
-where *every* vanished player is assumed to be a mover. The observed share among
-the recovered is 0.34.
+CB's ratio above the 0.85 bound in **every cell** — including the extreme anchor
+where every vanished player is assumed to have moved, against an observed share
+of 0.34 among the recovered. There is no tipping point inside the grid.
 
 I also had to withdraw a claim. An earlier draft of the protocol asserted the
 bias ran toward zero, reasoning that a player who drops out of football leaves
@@ -862,6 +891,11 @@ whose surviving arm was the one the criteria happened not to cover.
 first design of the rating-travel experiment required a rated season after the
 transfer, which silently conditioned on the player succeeding at his new club —
 the exact thing under test. It came out in review, not from the code.
+
+**Write down the numbers you expect, not just the criteria.** The pre-registered
+feasibility audit said 92.7% recovery; the executed run said 88.9%. That
+disagreement was the only thing that surfaced a bug which had already destroyed a
+fold and would otherwise have shipped in a published table.
 
 ### Q. Several of your experiments end in "no-ship" or "inconclusive". Does anything ever work?
 
@@ -927,12 +961,12 @@ instead of a broken site.
 
 Predictions made before kickoff are stored and scored afterwards, so the accuracy
 page is a real track record rather than a backtest replay. That currently stands
-at **83 settled matches, RPS 0.1765** — better than the backtest's 0.1991, and
+at **83 settled matches, RPS 0.1765** — better than the backtest's 0.1992, and
 far too small a sample to claim as an improvement.
 
 ### Q. How is it tested?
 
-701 tests, ruff clean. The ones that matter are not unit tests of functions:
+748 tests, ruff clean. The ones that matter are not unit tests of functions:
 
 - `test_truncation_invariance` rebuilds the whole feature table from truncated
   data and demands identical rows — the leakage invariant.

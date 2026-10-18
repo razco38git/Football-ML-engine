@@ -298,3 +298,48 @@ def test_nothing_here_touches_the_rating_config() -> None:
     source = inspect.getsource(travel)
     for forbidden in ("yaml.dump", "yaml.safe_dump", "safe_dump", "dump("):
         assert forbidden not in source, f"the experiment must not call {forbidden}"
+
+
+# --- the lookup must outlive the eligibility filter ---------------------------
+
+
+def test_a_season_ineligible_as_predictor_still_serves_as_an_outcome() -> None:
+    """The bug that destroyed a fold.
+
+    2526 is dropped as a *predictor* season because its own t+1 edition is
+    still filling. When the tier-1 lookup was built from that same filtered
+    frame, the 2425 -> 2526 pairs lost tier 1 entirely: that fold recovered
+    36.2% against 94-96% everywhere else, and what survived was whatever the
+    raw name match happened to find -- a heavily selected sixth of a season.
+
+    A season can be ineligible to be predicted *from* while remaining perfectly
+    good to be predicted *to*.
+    """
+    rated = pd.DataFrame(
+        {
+            "Player": ["A", "A"],
+            "Season": ["2425", "2526"],
+            "role": ["CB", "CB"],
+            "fifa_name": ["A", "A"],
+            "fifa_age": [25.0, 26.0],
+            "fifa_overall": [80.0, 82.0],
+            "fifa_club": ["Club X", "Club Y"],
+        }
+    )
+    eligible = rated[rated["Season"] == "2425"]
+
+    # Lookup restricted to the eligible rows -- the bug.
+    broken = travel.recover_outcomes(eligible.copy())
+    assert not broken["recovered"].iloc[0], "fixture no longer reproduces the bug"
+
+    # Lookup built from every rated season -- the fix.
+    fixed = travel.recover_outcomes(eligible.copy(), lookup=rated)
+    assert fixed["recovered"].iloc[0]
+    assert fixed["next_overall"].iloc[0] == 82.0
+    assert bool(fixed["mover"].iloc[0]) is True
+
+
+def test_build_sample_passes_the_unfiltered_lookup() -> None:
+    source = inspect.getsource(travel.build_sample)
+    assert "lookup = rated" in source
+    assert "recover_outcomes(eligible, lookup)" in source

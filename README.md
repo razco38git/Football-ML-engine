@@ -152,10 +152,19 @@ they justify.
 
 **[`EXPERIMENTS.md`](EXPERIMENTS.md)** is what the model's predictive power
 actually rests on, measured rather than asserted: an ablation ladder over every
-feature family, a Shapley attribution over all sixteen coalitions, and two
-hypotheses that were tested and rejected. It opens with the difference between
-sufficiency, attribution and necessity, because confusing those is how the first
-version of its own headline came out wrong.
+feature family, a Shapley attribution over all sixteen coalitions, and **six
+hypotheses that were tested and not adopted** — squad size, positional quotas,
+extended Elo, a Champions League projection, conditional Dixon-Coles rho, and
+whether a defender's rating is really his club's. Negative results get the same
+room as positive ones, and three of the experiments record bugs in their own
+first run. It opens with the difference between sufficiency, attribution and
+necessity, because confusing those is how the first version of its own headline
+came out wrong.
+
+**[`docs/PROTOCOLS.md`](docs/PROTOCOLS.md)** holds the pre-registrations: the
+hypothesis, the arms and the acceptance criteria written down *before* the run,
+left unedited afterwards. The two most recent experiments were run under it, and
+one of its figures is what caught a bug in the other.
 
 **[`docs/INTERVIEW.md`](docs/INTERVIEW.md)** is the three other files answering
 for themselves: the questions this project should expect and the answers it can
@@ -221,7 +230,7 @@ it sits beside.
 ## Testing
 
 ```powershell
-python -m pytest -q          # 460 tests
+python -m pytest -q          # 748 tests
 python -m ruff check .
 cd web; npx tsc --noEmit
 ```

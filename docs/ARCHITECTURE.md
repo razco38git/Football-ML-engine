@@ -194,7 +194,7 @@ Where it currently stands, on 20,013 walk-forward matches:
 
 ```
   base rate (always predict the average)   0.2301
-  this model                               0.1991
+  this model                               0.1992
   the bookmakers                           0.1950
 ```
 

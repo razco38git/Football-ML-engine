@@ -302,7 +302,9 @@ def edition_stats(season: str) -> tuple[float, float, pd.Series]:
     return float(overall.mean()), float(overall.std()), overall.sort_values()
 
 
-def recover_outcomes(rated: pd.DataFrame) -> pd.DataFrame:
+def recover_outcomes(
+    rated: pd.DataFrame, lookup: pd.DataFrame | None = None
+) -> pd.DataFrame:
     """Attach each player's EA rating and club in edition ``t+1``.
 
     Two tiers, and the second is the one that matters. Requiring a *rated*
@@ -322,8 +324,17 @@ def recover_outcomes(rated: pd.DataFrame) -> pd.DataFrame:
     rated["next_label"] = rated["Season"].map(_next_season)
 
     # Tier 1: the production matcher already placed him in t+1.
+    #
+    # Built from `lookup` -- every rated player-season -- and *not* from the
+    # eligible rows. A season can be ineligible as a predictor while remaining
+    # perfectly good as an outcome, and conflating the two destroyed a whole
+    # fold: 2526 is dropped as a predictor because its own t+1 edition is still
+    # filling, and when the lookup was built from the filtered frame the
+    # 2425 -> 2526 pairs lost tier 1 entirely. That fold recovered 36.2%
+    # against 94-96% everywhere else.
+    source = rated if lookup is None else lookup
     keyed = (
-        rated.dropna(subset=["fifa_overall"])
+        source.dropna(subset=["fifa_overall"])
         .drop_duplicates(subset=["Player", "Season"])
         .set_index(["Player", "Season"])
     )
@@ -385,10 +396,10 @@ def build_sample() -> pd.DataFrame:
         & rated["fifa_age"].notna()
         & rated["fifa_club"].notna()
     ]
-    rated = rated[
-        ~rated["Season"].map(_next_season).isin(INCOMPLETE_EDITIONS)
-    ]
-    return recover_outcomes(rated)
+    # The lookup keeps every rated season; only the *eligible* rows are filtered.
+    lookup = rated
+    eligible = rated[~rated["Season"].map(_next_season).isin(INCOMPLETE_EDITIONS)]
+    return recover_outcomes(eligible, lookup)
 
 
 # --- estimation ---------------------------------------------------------------

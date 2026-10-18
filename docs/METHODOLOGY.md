@@ -198,6 +198,17 @@ rho moves mass into 0-0 and 1-1 and out of 1-0 and 0-1. Tau breaks the
 sum-to-one and truncation at 10 goals loses a sliver of tail, and renormalising
 fixes both at once.
 
+**One rho for five leagues is a measured choice, not an assumption.** In sample
+the heterogeneity is real and large: profiling the likelihood per league puts the
+Bundesliga at **-0.1297 [-0.1784, -0.0787]**, an interval excluding the shipped
+value, against Spain's -0.0326. Out of sample it buys nothing. Three alternatives
+-- per-league, empirical-Bayes shrunk, and rho linear in total lambda -- were run
+walk-forward over 18,212 fixtures with every rho fitted on strictly earlier
+folds, and all three failed: the best improves pooled scoreline log-likelihood by
++0.000084 on an interval spanning zero, and the per-league arm is better in **one
+of five leagues**. The gain is confined to the Bundesliga and does not clear its
+own interval. See `EXPERIMENTS.md`.
+
 Draw is the trace, home win the lower triangle, away win the upper. Over/under
 sums cells where `i + j > line`; BTTS is `matrix[1:, 1:]`.
 
@@ -680,6 +691,19 @@ strength → full). The walk-forward harness can produce it.
 - **The rating is better at attackers because the data is.** Correlated against
   EA's next-edition move: forwards 0.15, goalkeepers 0.23, centre-backs,
   full-backs and midfielders **0.04–0.06**, in every season.
+- **A centre back's rating is half his club's defensive record — and it still
+  travels.** `team_defence` is 30% of the CB composite by weight, and projecting
+  the three club aggregates out of the rating removes **52.6%** of its variance
+  against 9.5% for a full back, who carries that sub-rating at zero weight. The
+  obvious objection is that the number describes the side rather than the player.
+  Tested on 1,347 centre-back transfers against EA's next-edition move: the
+  mover–stayer difference is **-0.0019 [-0.0197, +0.0160]**, and an EA-free check
+  finds a centre back one standard deviation better predicts **0.08 fewer goals
+  conceded per match** at his *new* club [-0.1218, -0.0464]. The verdict is
+  formally inconclusive — two scalings of the outcome disagree in sign — but no
+  contamination was detected on any specification. Club defensive quality looks
+  like a legitimate predictor of a defender's next assessment rather than a
+  contaminant that evaporates on transfer. See `EXPERIMENTS.md`.
 - **The Champions League is not projected forward, and the draw is not why.**
   A draw is an ordinary Monte Carlo; the obstacle is that only **829 of 4,007**
   European results on disk have two rateable clubs. **180 clubs** appear that

@@ -1871,15 +1871,15 @@ outcome is recovered without that condition.
 | | n | share |
 |---|---|---|
 | eligible player-seasons | 20,474 | |
-| tier 1 -- production matcher placed him at `t+1` | 12,888 | 62.9% |
-| tier 2 -- raw edition, normalised name + age +/-1.5, unique | 5,316 | 26.0% |
-| **recovered** | **18,204** | **88.9%** |
-| unrecovered | 2,270 | 11.1% |
+| tier 1 -- production matcher placed him at `t+1` | 14,133 | 69.0% |
+| tier 2 -- raw edition, normalised name + age +/-1.5, unique | 4,851 | 23.7% |
+| **recovered** | **18,984** | **92.7%** |
+| unrecovered | 1,490 | 7.3% |
 
 | role | n | movers | stayers | players |
 |---|---|---|---|---|
-| CB | 3,569 | 1,269 | 2,300 | 1,109 |
-| FB | 3,046 | 1,072 | 1,974 | 1,010 |
+| CB | 3,726 | 1,347 | 2,379 | 1,137 |
+| FB | 3,182 | 1,144 | 2,038 | 1,033 |
 
 Predictor `performance_rating` (not `rating`, which is half `fifa_overall` and
 would have EA predicting itself); outcome the within-edition standardised move;
@@ -1893,8 +1893,8 @@ replicate flips their sign, so the ratio is interpretable.
 
 | role | stayer | mover | delta | ratio | 90% Fieller |
 |---|---|---|---|---|---|
-| CB | **+0.1403** [+0.1275, +0.1529] | +0.1366 [+0.1195, +0.1543] | -0.0037 [-0.0223, +0.0157] | 0.974 | [0.865, 1.091] |
-| FB | **+0.0929** [+0.0795, +0.1056] | +0.0810 [+0.0623, +0.0991] | -0.0119 [-0.0334, +0.0093] | 0.872 | [0.695, 1.071] |
+| CB | **+0.1404** [+0.1277, +0.1531] | +0.1385 [+0.1218, +0.1556] | -0.0019 [-0.0197, +0.0160] | 0.986 | [0.883, 1.096] |
+| FB | **+0.0940** [+0.0810, +0.1067] | +0.0848 [+0.0661, +0.1027] | -0.0092 [-0.0301, +0.0116] | 0.903 | [0.731, 1.095] |
 
 **No contamination.** Both delta intervals include zero; neither role meets the
 declared contamination condition.
@@ -1910,8 +1910,8 @@ declared contamination condition.
 
 | role | z-score delta | rank delta |
 |---|---|---|
-| CB | **-0.0037** | **+0.0037** [-0.0005, +0.0081] |
-| FB | **-0.0119** | **+0.0013** [-0.0038, +0.0063] |
+| CB | **-0.0019** | **+0.0037** [-0.0003, +0.0079] |
+| FB | **-0.0092** | **+0.0014** [-0.0036, +0.0061] |
 
 Both intervals include zero, but the point estimates point opposite ways.
 
@@ -1919,9 +1919,9 @@ Both intervals include zero, but the point estimates point opposite ways.
 
 | arm | CB delta | FB delta |
 |---|---|---|
-| headline | -0.0037 | -0.0119 |
-| age cap, 30 and under | -0.0086 | -0.0138 |
-| excluding `fifa_overall_t >= 88` | -0.0007 | -0.0119 |
+| headline | -0.0019 | -0.0092 |
+| age cap, 30 and under | -0.0051 | -0.0092 |
+| excluding `fifa_overall_t >= 88` | +0.0011 | -0.0092 |
 
 ## Verdict: inconclusive
 
@@ -1944,9 +1944,9 @@ the sign of an effect they both call indistinguishable from zero.
 ## Missingness: the treatment is missing too
 
 An unrecovered player has **no `t+1` record at all**, so both the outcome and
-mover status are unobserved for all 2,270. The unrecovered are older (std. diff
-+0.37), played less (-0.32) and were rated lower (-0.17); recovery is balanced
-across the two roles (CB 89.1%, FB 89.3%), which is what protects the contrast.
+mover status are unobserved for all 1,490. The unrecovered are older (std. diff
++0.57), played less (-0.58) and were rated lower (-0.37); recovery is balanced
+across the two roles (CB 93.0%, FB 93.3%), which is what protects the contrast.
 
 **IPW does not solve this, and is not presented as solving it.** It identifies
 the estimand only under recovery independent of treatment *and* outcome given
@@ -1955,8 +1955,8 @@ recovery fails. It moves the two roles in opposite directions:
 
 | role | unweighted delta | IPW delta |
 |---|---|---|
-| CB | -0.0037 | -0.0015 [-0.0211, +0.0183] |
-| FB | -0.0119 | -0.0172 [-0.0392, +0.0045] |
+| CB | -0.0019 | -0.0032 [-0.0219, +0.0150] |
+| FB | -0.0092 | -0.0114 [-0.0320, +0.0091] |
 
 ### Pattern-mixture grid, and the tipping point
 
@@ -1965,22 +1965,22 @@ the recovered is ~0.34. Cells are the travel ratio.
 
 | pi | CB, MAR | CB, decline | CB, adverse | FB, MAR | FB, decline | FB, adverse |
 |---|---|---|---|---|---|---|
-| 0.00 | 1.062 | 1.002 | 1.062 | 0.942 | 0.904 | 0.942 |
-| **0.33** | 0.986 | 0.958 | 1.014 | 0.943 | 0.887 | 0.928 |
-| 0.50 | 0.921 | 0.916 | 0.904 | 0.864 | 0.868 | 0.923 |
-| 0.67 | 0.903 | 0.902 | 0.925 | 0.849 | 0.903 | 0.869 |
-| 1.00 | **0.836** | 0.882 | 0.882 | 0.793 | 0.879 | 0.879 |
+| 0.00 | 1.039 | 0.960 | 1.039 | 0.937 | 0.882 | 0.937 |
+| **0.33** | 0.944 | 0.943 | 1.075 | 0.909 | 0.956 | 0.960 |
+| 0.50 | 0.970 | 0.966 | 1.026 | 0.892 | 0.948 | 0.982 |
+| 0.67 | 0.917 | 0.982 | 1.048 | 0.902 | 0.965 | 1.003 |
+| 1.00 | 0.900 | 1.017 | 1.017 | **0.849** | 0.993 | 0.993 |
 
-**Tipping point: CB's ratio stays above the 0.85 bound across the entire
-plausible region** -- every imputation at `pi` up to 0.67, i.e. movers twice
-over-represented among the vanished -- and crosses it only at `pi = 1.00` under
-MAR, the extreme anchor where *every* unrecovered player is assumed to be a
-mover. FB ranges 0.793 to 0.943 and is inconclusive throughout.
+**There is no tipping point inside the grid for CB.** Its ratio stays above the
+0.85 bound at **every** assumed mover share and every imputation, including the
+extreme anchor where *every* unrecovered player is assumed to have moved
+(0.900 under MAR, 1.017 under the decline imputation). FB ranges 0.849 to 1.003
+and touches the bound only in that same extreme cell; it is inconclusive
+throughout on its interval regardless.
 
-**Robust across scenarios:** no contamination detected, for either role.
-**Driven by assumptions:** nothing in the headline. The single cell that would
-change CB's equivalence verdict requires an assumption the data contradict --
-the observed mover share is 0.34, not 1.00.
+**Robust across scenarios:** no contamination detected, for either role, and
+CB's equivalence verdict survives the entire grid.
+**Driven by assumptions:** nothing in the headline.
 
 ## The finding that was not the hypothesis
 
@@ -1989,20 +1989,20 @@ The decomposition says the club content is **overwhelmingly present** and
 
 | | projection R^2 | stayer slope, raw | stayer slope, residualised |
 |---|---|---|---|
-| CB | **0.526** [0.434, 0.652] | +0.1403 | **+0.0337** |
-| FB | 0.095 [0.045, 0.137] | +0.0929 | +0.0555 |
+| CB | **0.526** [0.434, 0.652] | +0.1404 | **+0.0347** |
+| FB | 0.095 [0.045, 0.137] | +0.0940 | +0.0568 |
 
 The three club aggregates explain **52.6% of a centre back's performance
 rating** against **9.5%** of a full back's -- the asymmetry `team_defence: 0.30`
-against `0.0` predicts, and larger than expected. Removing them costs CB **76%**
+against `0.0` predicts, and larger than expected. Removing them costs CB **75%**
 of its power to predict EA's next move, against 40% for FB.
 
 And yet:
 
 | role | delta | delta residualised | difference |
 |---|---|---|---|
-| CB | -0.0037 | +0.0080 [-0.0121, +0.0290] | -0.0117 |
-| FB | -0.0119 | -0.0095 [-0.0310, +0.0117] | -0.0023 |
+| CB | -0.0019 | +0.0130 [-0.0068, +0.0325] | -0.0150 |
+| FB | -0.0092 | -0.0068 [-0.0280, +0.0142] | -0.0024 |
 
 **The predicted pattern does not appear.** `delta_res` was supposed to shrink
 toward zero for CB and move little for FB; instead CB's is already ~0 and the
@@ -2017,7 +2017,7 @@ club numbers in one season, not to "the player".
 
 ### CB versus FB
 
-`delta_CB - delta_FB = +0.0060 [-0.0223, +0.0349]` -- no difference detected.
+`delta_CB - delta_FB = +0.0040 [-0.0230, +0.0317]` -- no difference detected.
 As pre-declared this was corroboration rather than identification in any case:
 the roles also differ 0.32 to 0.07 on creation weight, in the same direction.
 
@@ -2045,6 +2045,53 @@ it estimates a conditional-on-playing effect; it attributes a team outcome to
 one arrival; and it cannot control managerial change, sub-threshold signings or
 departures.
 
+## The invalid first run: a filter that destroyed a fold
+
+**This experiment was executed twice.** Every figure above is from the second
+run. The first was invalidated by a sample-construction bug found during a
+consistency review of the documentation, not by any test.
+
+`build_sample` excludes 2025/26 as a **predictor** season, because its own `t+1`
+edition is still being populated. The tier-1 lookup -- "did the production
+matcher already place this player in edition `t+1`?" -- was built from that same
+filtered frame. So 2025/26 rows were absent from the lookup, and the
+**2024/25 -> 2025/26 pairs lost tier 1 entirely**.
+
+A season can be ineligible to be predicted *from* while remaining perfectly good
+to be predicted *to*. Conflating the two cost a fold:
+
+| predictor season | recovered, first run | recovered, corrected |
+|---|---|---|
+| 1415-2122 | 93.6-96.8% | unchanged |
+| 2223 | 78.8% | 78.8% |
+| 2324 | 94.2% | 94.2% |
+| **2425** | **36.2%** | **79.6%** |
+| **all** | **88.9%** | **92.7%** |
+
+The damage was not only in volume. What survived in that fold was whatever the
+raw name-and-age match happened to find, which favours distinctively-spelled
+names -- a heavily selected third of a season entering a model with season fixed
+effects that absorb a level shift but not a composition shift.
+
+**No conclusion changed, and two moved in the same direction.** CB's delta went
+-0.0037 to -0.0019 and FB's -0.0119 to -0.0092, both closer to zero; the
+equivalence verdicts, the scale disagreement and the decomposition were
+unaffected. The pattern-mixture grid became **more** robust: CB previously
+crossed the 0.85 bound in one extreme cell and now clears every cell.
+
+Found by reading the documents against each other. `docs/PROTOCOLS.md` recorded
+92.7% recovery from the pre-run feasibility audit and the write-up said 88.9%;
+the protocol was right and the executed code was wrong. Pinned now by
+`test_a_season_ineligible_as_predictor_still_serves_as_an_outcome`, which
+asserts both halves -- that the restricted lookup reproduces the failure, and
+that the unrestricted one fixes it.
+
+**The 2223 fold is a separate matter and is not a bug.** Its 78.8% is genuine
+coverage: of the 660 players needing a raw-edition lookup, 339 simply do not
+appear in EA's 2023/24 export under any spelling. That edition carries 15,845
+rows against 18,533 the year before. It is reported rather than repaired.
+
+
 ## Decision
 
 **Nothing ships. No production weight is changed.** The contamination hypothesis
@@ -2055,7 +2102,7 @@ guards, so they were not run.
 
 ## Limitations
 
-1. **Not point-identified.** Both treatment and outcome are missing for 11.1% of
+1. **Not point-identified.** Both treatment and outcome are missing for 7.3% of
    cases, and the recovery model cannot condition on mover status. The grid
    bounds the sensitivity; it does not remove the assumption.
 2. **Movers are not randomly assigned.** Clubs buy on information we do not
@@ -2068,4 +2115,8 @@ guards, so they were not run.
    correlated, so the projection removes real signal alongside any
    contamination.
 6. **The EA-free outcome conditions on post-treatment minutes.**
-7. **Production weights, hyperparameters and all configuration fixed.**
+7. **Recovery is uneven across folds** -- 93-97% in eight seasons, 78.8% in
+   2223 and 79.6% in 2425, driven by how completely EA's 2324 and 2526 exports
+   cover our players. Season fixed effects absorb a level shift, not a
+   composition one.
+8. **Production weights, hyperparameters and all configuration fixed.**

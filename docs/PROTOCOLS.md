@@ -8,7 +8,18 @@ Completed work lives in [`../EXPERIMENTS.md`](../EXPERIMENTS.md). A protocol
 leaves this file when it has been executed and written up there.
 
 **Status.** Both directions have been **executed**; results in
-[`../EXPERIMENTS.md`](../EXPERIMENTS.md). Direction 3: no-ship on all three
+[`../EXPERIMENTS.md`](../EXPERIMENTS.md).
+
+> **The figures in Direction 2 below are the pre-run feasibility audit's**, and
+> are deliberately left as they were written. The executed run's counts differ
+> slightly: it recovers through two tiers rather than one raw lookup, so it
+> finds **more** pairs (CB 1,347 movers / 2,379 stayers against the 1,168 /
+> 2,229 projected here) at the same overall recovery rate of 92.7%. Where the
+> two disagree, the write-up in `EXPERIMENTS.md` is the executed figure.
+>
+> That 92.7% is also what caught a bug: the first execution reported 88.9%, the
+> protocol said 92.7%, and the protocol was right. See *"The invalid first run:
+> a filter that destroyed a fold"*. Direction 3: no-ship on all three
 arms. Direction 2: **inconclusive** on two pre-declared triggers, with no
 contamination detected and nothing to ship. Both protocols are kept below as
 the pre-registrations they were, unedited after the fact. No production code,
