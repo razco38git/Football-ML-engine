@@ -1263,16 +1263,13 @@ is larger than most of the gaps between adjacent sizes. **The per-size ordering
 is inside the run-to-run noise and should not be read.** The claim this table
 supports is "nothing beats 15", not "15 is a local optimum on attack".
 
-**The drift is not attributable to any input that can be checked.** The match
-history, the player caches, the EA editions and `config/player_rating.yaml` are
-all byte-identical between the two runs, and `team_strength.py` differs only in
-comments. The pipeline is provably deterministic *within* a process -- the
-`control-15` arm is bit-identical to `baseline` in both runs, which is what that
-arm exists to show -- so whatever varies does so **across** processes. Float
-reduction order under the booster's threading is the obvious candidate and is
-not confirmed. At ~0.00005 on RPS it sits an order of magnitude inside the
-0.0005 measurement floor and changes nothing; on the correlations it is large
-enough to reorder the table, which is the finding.
+**The cause was found, and it is not what this paragraph originally said.** It
+guessed at float reduction order under the booster's threading. That is now
+**withdrawn**: a stage-by-stage bisection shows the pipeline is bit-identical
+across separate processes through the entire backtest, and the divergence is at
+**stage 1, the ingest** -- the season in progress is re-fetched live on every
+run and grows during the day. See *"Why the squad-size sweep did not replicate"*
+at the end of this file.
 
 **This weakens the stated motivation for the positional-quota experiment**,
 which cited the two trends as its reason to exist. That experiment's own
@@ -2176,3 +2173,138 @@ guards, so they were not run.
    cover our players. Season fixed effects absorb a level shift, not a
    composition one.
 8. **Production weights, hyperparameters and all configuration fixed.**
+
+---
+
+# Why the squad-size sweep did not replicate
+
+A diagnostic, not an experiment. No production code, configuration or artifact
+was changed; nothing was re-run until the cause was found.
+
+## The claim under investigation
+
+The sweep's re-run produced a different ordering, and the first write-up
+attributed the drift to "between-process variation", naming float reduction
+order under the booster's threading as the likely candidate. **That attribution
+was wrong**, and the diagnostic below is what it takes to say so.
+
+## Stage-by-stage bisection
+
+The pipeline was hashed at every stage and run in two separate processes on the
+same pinned inputs.
+
+| stage | content |
+|---|---|
+| 1 | `fetch_player_seasons` |
+| 2 | `rate_players` |
+| 3 | `team_strength(best_n=15)` |
+| 4 | `load_team_match_history` |
+| 5 | `build_match_features` |
+| 6 | one isolated `MatchPredictor` fit, goal rates and `rho_` |
+| 7 | the full 20,074-fixture walk-forward |
+
+**Every stage was bit-identical across processes**, through the goal rates
+(`sum=2707.067700576960`), `rho_` (`-0.057776969593556`), the scoreline
+probabilities and RPS to nine decimals (`0.199159864`).
+
+> **Confirmed: given fixed inputs, the pipeline is deterministic end to end,
+> including the two gradient-boosted fits per fold.** Seeds, thread counts and
+> numerical reductions are exonerated. The floating-point attribution in the
+> previous write-up is withdrawn -- it was a hypothesis stated as a cause.
+
+## Where the runs actually diverge: stage 1
+
+Running the same hash script again twenty-five minutes later:
+
+| | first | later |
+|---|---|---|
+| player-seasons | 34,769 | **34,773** |
+| of which 2026/27 | 2,195 | **2,199** |
+| team-seasons | 1,172 | **1,173** |
+| `atk>GF` at `best_n=15` | 0.73817 | **0.73947** |
+
+`fetch_player_seasons` caches **finished seasons only** -- `data/cache/players`
+holds 1415 through 2526 and nothing for 2627. The season in progress is fetched
+live from Understat on every run, and Understat rewrote its 2026 league files
+at 20:03 while this diagnostic was running.
+
+> **Confirmed: the experiment's inputs are not pinned. The harness is
+> reproducible; its inputs are not.**
+
+## The part that makes it worth fixing
+
+The in-progress season should be inert here. It supplies **3 of 1,173**
+team-seasons, and `_season_outcomes` excludes it outright -- its clubs have a
+median of 6 matches played against a 20-match floor, so **0** of them get an
+outcome row. Dropping its strength rows from the correlation changes the result
+by **0.00000**, which was verified directly.
+
+It is not inert. Rating the frame with it, against rating only finished seasons:
+
+| | `atk>GF` | `def>GA` | `ovr>pts` |
+|---|---|---|---|
+| with the in-progress season | 0.73947 | -0.52705 | 0.75556 |
+| without it | 0.73844 | -0.52394 | 0.75501 |
+| **difference** | **+0.00103** | **-0.00311** | **+0.00054** |
+
+**0.0031 is the same order as the gaps the sweep was trying to resolve between
+adjacent squad sizes.** That is why the ordering moved while the decision did
+not.
+
+### What is not established
+
+Comparing the two rated frames row by row, **`rating`, `performance_rating`,
+`fifa_overall` and `measured_share` are identical for every one of the 32,574
+finished-season players**, and EA match coverage is identical to four decimals
+(91.3459%). Yet the selected squads differ. Some column other than those four
+carries the in-progress season into the finished ones, and this diagnostic did
+not identify it.
+
+The effect is measured and reproducible; **the propagation path is not**. It is
+recorded as open rather than guessed at -- which is the mistake the first
+write-up made.
+
+## Run-to-run variance, quantified
+
+| condition | runs | result |
+|---|---|---|
+| same process, two arms (`baseline` vs `control-15`) | every sweep | bit-identical |
+| separate processes, same input vintage | 2 | bit-identical through RPS, 9 d.p. |
+| separate processes, same vintage, correlations only | 3 | identical to 5 d.p. |
+| separate processes, **vintage changed underneath** | 2 | `atk` moved 0.00130 |
+| separate processes, **pinned** | 3 | identical, input hash `b0143f0d45ca` |
+
+**Within a vintage the variance is exactly zero.** All of the observed drift is
+between vintages.
+
+## The fix
+
+`pipelines/vintage.py` -- research-harness only, 4 functions, no import from
+`src/footballml` (asserted by a test).
+
+- `pin_finished_seasons` drops the season in progress, so a run depends only on
+  files that are not moving. It is a no-op out of season and idempotent.
+- `fingerprint` and `describe_inputs` print each input frame's row count and
+  content hash beside the results, so the next discrepancy is a one-line diff
+  rather than an evening of bisection.
+
+Verified: three further processes, pinned, produce an identical input hash
+(`b0143f0d45ca`), identical strength hashes per arm and identical correlations
+to five decimals.
+
+Pinning costs the experiment nothing it was measuring -- the dropped season
+feeds no outcome pair -- and it removes the only input that moves.
+
+## Recommendations
+
+1. **Harnesses print their input fingerprint**, and a published table carries
+   it. Two tables that disagree should be diagnosable from their headers.
+2. **Pin the in-progress season out of any experiment whose outputs are
+   correlations over finished seasons.** It cannot contribute and demonstrably
+   perturbs.
+3. **Differences below ~0.003 on these correlations are not findings** unless
+   both runs are pinned to the same vintage. The existing RPS floor of 0.0005
+   has no counterpart on the correlation side, and this is the first measurement
+   of what that floor should be.
+4. **Treat an unreplicated ordering as noise.** The squad-size decision ("nothing
+   beats 15") replicated across every vintage tested; only the ordering moved.

@@ -556,9 +556,13 @@ same inputs reproduced the decision and *not* the shape: attack peaked at 16
 rather than 15, and defence was best at 16 with 17 worse, where the first run
 had it climbing monotonically to 17. The largest single-cell move between runs
 was 0.0030 on attack, larger than most gaps between adjacent sizes, so the
-per-size ordering is inside the run-to-run noise. The drift is not attributable
-to any input that can be checked, and within a single process the pipeline is
-bit-identical. See `EXPERIMENTS.md`.
+per-size ordering is inside the run-to-run noise.
+
+The cause was then diagnosed: the pipeline is bit-identical across separate
+processes end to end, and the divergence is in the **inputs** -- the season in
+progress is fetched live on every run, and although it supplies 3 of 1,173
+team-seasons and no outcome pair at all, including it moves the finished-season
+correlations by up to 0.0031. See `EXPERIMENTS.md`.
 
 **The opposing trends were then tested directly** — before the re-run showed
 they do not replicate — **and they are a trade-off rather than a fixable

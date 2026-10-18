@@ -396,11 +396,10 @@ end on identical inputs reproduced the *decision* and not the *ordering*: attack
 peaked at 16 rather than 15, and defence was best at 16 with 17 worse. The
 largest single-cell move between runs was 0.0030, larger than most gaps between
 adjacent sizes. So the per-size pattern is inside the run-to-run noise and the
-table supports "nothing beats 15", not "15 is a local optimum". I could not
-attribute the drift to any input I can check, and within a single process the
-pipeline is bit-identical — the determinism control arm exists to prove that.
+table supports "nothing beats 15", not "15 is a local optimum".
 
-I only know this because I re-ran something I had no reason to doubt.
+I only know this because I re-ran something I had no reason to doubt — and the
+diagnostic that followed is the next question.
 
 **The chase itself**, run while the trends still looked real:
 
@@ -426,6 +425,97 @@ reasonable compromise. **No-ship, all three.**
 
 The harness asserts at runtime that its baseline arm reproduces production's
 `best_n=15` to within 1e-9. If it had not, no arm would have been readable.
+
+### Q. You said "I could not attribute the drift". Did you find it?
+
+Yes, and the first explanation I offered was wrong, which is the useful part.
+
+I had written that the drift was "between-process variation", with float
+reduction order under the booster's threading as the likely candidate. That was
+a hypothesis stated in the register of a cause, and it was wrong.
+
+**The bisection.** I hashed every stage of the pipeline — ingest, ratings, team
+strength, match history, feature build, a single isolated model fit, and the
+full 20,074-fixture walk-forward — and ran it in two separate processes.
+
+**Every stage was bit-identical**, including the two gradient-boosted fits per
+fold, the fitted ρ to fifteen decimals, and RPS to nine (`0.199159864`). So
+seeds, thread counts and numerical reductions were all exonerated, and the
+floating-point story had to be withdrawn.
+
+**The divergence is at stage 1.** `fetch_player_seasons` caches *finished*
+seasons only — there is a cache file for every season from 2014/15 to 2025/26
+and none for 2026/27. The season in progress is fetched live from Understat on
+every run. Twenty-five minutes apart, the same script saw 34,769 player-seasons
+and then 34,773; the current season had grown by four. The harness was
+reproducible and its inputs were not.
+
+### Q. Four player-seasons in a season you don't even score. How did that move anything?
+
+That is exactly the question I had, and the answer is the part worth keeping.
+
+The in-progress season *should* be inert. It supplies 3 of 1,173 team-seasons,
+and the outcome builder excludes it outright — its clubs have a median of six
+matches played against a twenty-match floor, so none of them gets an outcome
+row. I verified the obvious channel directly: dropping its team-strength rows
+from the correlation changes the result by **0.00000**.
+
+It is not inert. Rating the frame with the current season against rating only
+the finished ones moves the finished-season correlations:
+
+| | atk>GF | def>GA | ovr>pts |
+|---|---|---|---|
+| with the in-progress season | 0.73947 | −0.52705 | 0.75556 |
+| without it | 0.73844 | −0.52394 | 0.75501 |
+
+**0.0031 is the same order as the gaps between adjacent squad sizes**, which is
+precisely why the ordering moved while the decision didn't.
+
+**And I could not establish how.** Row by row, `rating`, `performance_rating`,
+`fifa_overall` and `measured_share` are *identical* for all 32,574
+finished-season players, and EA match coverage agrees to four decimals. Yet the
+selected squads differ. Something other than those four columns carries it, and
+I stopped at "measured and reproducible, mechanism unknown" rather than guessing
+a second time.
+
+### Q. What did you change?
+
+`pipelines/vintage.py` — four functions, research-harness only, with a test
+asserting nothing in `src/footballml` imports it. Production is untouched.
+
+`pin_finished_seasons` drops the season in progress, so a run depends only on
+files that are not moving. It is idempotent and a no-op out of season, so it is
+not something to remember to switch off. `fingerprint` and `describe_inputs`
+print each input's row count and content hash beside the results.
+
+Verified: three further processes, pinned, produce an identical input hash and
+identical correlations to five decimals, where unpinned runs twenty-five minutes
+apart differed by 0.0013.
+
+The fingerprint is the part I would argue for hardest. The original discrepancy
+took a stage-by-stage bisection to locate. With the input hash in the run log it
+would have been a one-line diff — and a published table would carry the vintage
+it was computed from, which is the thing that made two documents disagree in the
+first place.
+
+### Q. What does this change about how you read your own results?
+
+Three things, and they are now written into the experiment docs.
+
+**Within a vintage the variance is exactly zero** — same process, separate
+processes, repeated runs, all bit-identical. So any disagreement between two
+runs is a data question, never a numerical one. That is a useful thing to know
+about a pipeline, and I only know it because I measured it.
+
+**The correlations had no measurement floor.** RPS has one, 0.0005, established
+by sweeps that moved nothing. The next-season correlations never got the same
+treatment, and this diagnostic is the first measurement of it: **0.003**.
+Several of the differences I had been reading off those tables sit under that.
+
+**An unreplicated ordering is noise.** The squad-size *decision* reproduced on
+every vintage tested; only the ordering moved. I had let the ordering carry a
+narrative — "attack peaks exactly at 15" — and build the motivation for a
+follow-up experiment. The decision was always the result.
 
 ### Q. Van Dijk rates in the 3rd–11th percentile for tackles. Is your rating broken?
 
