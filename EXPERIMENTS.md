@@ -1216,19 +1216,75 @@ No setting beats 15 on the correlations, so the gate is not met. RPS spans
 two arms with a nominal edge improve in 6 of the 11 seasons that can move — a
 coin flip.
 
-**But the number is better founded than "nobody measured it" suggested.** The
-three correlations disagree, and 15 sits at a real optimum on one of them:
+> **Superseded in part — read the replication section below before quoting the
+> shape of this table.** The three bullets that follow described the *ordering*
+> across sizes. A full re-run reproduces the decision and not the ordering: the
+> per-size differences turn out to be inside the run-to-run noise.
 
-- **Attack peaks exactly at 15** and falls away in both directions, 0.7325 →
+**The three correlations disagree, and on the first run 15 sat at an optimum on
+one of them:**
+
+- **Attack peaked exactly at 15** and fell away in both directions, 0.7325 →
   0.7353 → **0.7408** → 0.7384 → 0.7331.
-- **Defence improves monotonically with squad size**, -0.5196 at 13 through
-  -0.5316 at 17, and had not levelled off at the edge of the sweep.
+- **Defence improved monotonically with squad size**, -0.5196 at 13 through
+  -0.5316 at 17, apparently not levelled off at the edge of the sweep.
 - **Overall is flat**, spanning 0.002, with 14 ahead of 15 by 0.0002.
 
-So adding players keeps helping the back line while starting to hurt the attack,
-and 15 is where the attacking line is sharpest.
+That read as: adding players keeps helping the back line while starting to hurt
+the attack. **Neither of the first two reproduced.**
+
+## Replication: the decision holds, the ordering does not
+
+The sweep was re-run end to end on 2026-10-18 evening. **The decision
+reproduces and the shape of the table does not.**
+
+| best_n | RPS first | RPS re-run | atk first | atk re-run | def first | def re-run |
+|---|---|---|---|---|---|---|
+| 13 | 0.19913 | 0.19912 | 0.7325 | 0.73119 | -0.5196 | -0.52137 |
+| 14 | 0.19922 | 0.19916 | 0.7353 | 0.73225 | -0.5231 | -0.52572 |
+| **15** | 0.19912 | 0.19916 | **0.7408** | 0.73817 | -0.5232 | -0.52646 |
+| 16 | 0.19904 | 0.19914 | 0.7384 | **0.73882** | -0.5280 | **-0.53303** |
+| 17 | 0.19905 | 0.19906 | 0.7331 | 0.73241 | **-0.5316** | -0.53045 |
+
+**What holds.** No arm beats 15 on the correlations; no RPS interval excludes
+zero; the RPS column still spans under 0.0002; nothing ships. Every conclusion
+in this section's Decision survives.
+
+**What does not.** Both trends this section built a narrative on:
+
+- *"Attack peaks exactly at 15 and falls away either side"* -- in the re-run it
+  peaks at **16** (0.73882 against 15's 0.73817).
+- *"Defence improves monotonically with squad size and had not levelled off at
+  17"* -- in the re-run the best is **16** (-0.53303) and 17 is **worse**
+  (-0.53045), so it is neither monotonic nor still climbing.
+
+The largest single-cell move between the two runs is **0.0030** on attack, which
+is larger than most of the gaps between adjacent sizes. **The per-size ordering
+is inside the run-to-run noise and should not be read.** The claim this table
+supports is "nothing beats 15", not "15 is a local optimum on attack".
+
+**The drift is not attributable to any input that can be checked.** The match
+history, the player caches, the EA editions and `config/player_rating.yaml` are
+all byte-identical between the two runs, and `team_strength.py` differs only in
+comments. The pipeline is provably deterministic *within* a process -- the
+`control-15` arm is bit-identical to `baseline` in both runs, which is what that
+arm exists to show -- so whatever varies does so **across** processes. Float
+reduction order under the booster's threading is the obvious candidate and is
+not confirmed. At ~0.00005 on RPS it sits an order of magnitude inside the
+0.0005 measurement floor and changes nothing; on the correlations it is large
+enough to reorder the table, which is the finding.
+
+**This weakens the stated motivation for the positional-quota experiment**,
+which cited the two trends as its reason to exist. That experiment's own
+conclusion is unaffected -- it ran its own arms and rejected all of them -- but
+its premise was a pattern that does not replicate. Recorded here rather than
+quietly left in place.
 
 ## What this opens
+
+> The reasoning below was written after the first run and is left as it stood,
+> because it is what sent the positional-quota experiment to be built. Its
+> premise — the two trends — does not replicate.
 
 The defence trend is the loose end, and it points at something the sweep was
 deliberately scoped to exclude. `best_n` takes the top N **by rating with no

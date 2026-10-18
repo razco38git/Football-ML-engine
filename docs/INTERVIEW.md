@@ -388,7 +388,21 @@ nothing used.
 
 ### Q. Defence improved all the way to 17 and attack peaked at 15. Did you chase that?
 
-Yes, and it failed, which is the more interesting outcome.
+Yes — and then a replication run pulled the rug out from under the premise,
+which is the more interesting outcome.
+
+**First, the honest caveat on the question itself.** Re-running the sweep end to
+end on identical inputs reproduced the *decision* and not the *ordering*: attack
+peaked at 16 rather than 15, and defence was best at 16 with 17 worse. The
+largest single-cell move between runs was 0.0030, larger than most gaps between
+adjacent sizes. So the per-size pattern is inside the run-to-run noise and the
+table supports "nothing beats 15", not "15 is a local optimum". I could not
+attribute the drift to any input I can check, and within a single process the
+pipeline is bit-identical — the determinism control arm exists to prove that.
+
+I only know this because I re-ran something I had no reason to doubt.
+
+**The chase itself**, run while the trends still looked real:
 
 The natural reading was **dilution**: a larger N adds marginal attackers to a
 line that has few real ones, while the back line keeps gaining useful players. If

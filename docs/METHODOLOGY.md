@@ -548,12 +548,21 @@ outcomes:
 | 16 | 0.19904 | 0.7384 | -0.5280 | 0.7543 |
 | 17 | 0.19905 | 0.7331 | **-0.5316** | 0.7555 |
 
-Attack peaks exactly at 15 and falls away either side; defence keeps improving
-with squad size and had not levelled off at 17; overall is flat to within 0.002.
-No RPS difference is significant — the column spans 0.00018. So 15 stays.
+No RPS difference is significant — the column spans 0.00018 — and no setting
+beats 15 on the correlations. So 15 stays.
 
-**The opposing trends were then tested directly, and they are a trade-off
-rather than a fixable artefact.** Per-line floors of 1-4-3-3, 1-3-3-2 and
+**Read the table for the decision, not for the ordering.** A full re-run on the
+same inputs reproduced the decision and *not* the shape: attack peaked at 16
+rather than 15, and defence was best at 16 with 17 worse, where the first run
+had it climbing monotonically to 17. The largest single-cell move between runs
+was 0.0030 on attack, larger than most gaps between adjacent sizes, so the
+per-size ordering is inside the run-to-run noise. The drift is not attributable
+to any input that can be checked, and within a single process the pipeline is
+bit-identical. See `EXPERIMENTS.md`.
+
+**The opposing trends were then tested directly** — before the re-run showed
+they do not replicate — **and they are a trade-off rather than a fixable
+artefact.** The quota result below stands on its own arms regardless. Per-line floors of 1-4-3-3, 1-3-3-2 and
 2-5-5-3 were imposed on the same fifteen places
 (`pipelines/positional_quota_ab.py`). Every one improved `def>GA` as predicted,
 and every one paid for it in `atk>GF` at roughly one to one or worse — the
