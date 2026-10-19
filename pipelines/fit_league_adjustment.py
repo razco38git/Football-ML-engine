@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from footballml import registry  # noqa: E402
 from footballml.data import PROCESSED_DIR  # noqa: E402
 from footballml.league_adjust import REFERENCE, fit, save  # noqa: E402
+from pipelines.validate_european import MODEL_VERSION_COLUMN  # noqa: E402
 
 PREDICTIONS = PROCESSED_DIR / "european_predictions.csv"
 
@@ -49,11 +50,11 @@ def main() -> int:
         )
         return 1
 
-    fitted = fit(pd.read_csv(PREDICTIONS), reference=args.reference)
+    predictions = pd.read_csv(PREDICTIONS)
     # Stamped with the model it was fitted against: these offsets describe that
     # model's residual error, so a retrain makes them stale and the API says so.
     try:
-        fitted["model_version"] = registry.load()[1].version
+        serving = registry.load()[1].version
     except Exception as exc:  # noqa: BLE001 - reported, not guessed at
         # Not survivable any more, and `save` enforces it. An unstamped file
         # reads as "no version claimed" to the API, which used to skip the
@@ -65,6 +66,31 @@ def main() -> int:
             "the previous correction is unchanged.", exc,
         )
         return 1
+
+    # `validate_european` is optional in the weekly, so when it fails the job
+    # continues to here with the *previous* model's predictions still on disk.
+    # Refitting those and stamping them `serving` is the one outcome the stamp
+    # exists to prevent: the API would compare equal, report the correction
+    # current, and apply offsets measured against a model that no longer exists.
+    #
+    # A missing column is refused too, not waved through. A file written before
+    # the column existed cannot be told apart from one written by another model,
+    # and "cannot be told apart" has to mean no rather than yes here -- the cost
+    # of refusing is one week without a refreshed correction, which `load`
+    # already degrades to safely.
+    scored_by = set(predictions.get(MODEL_VERSION_COLUMN, pd.Series(dtype=str)).dropna())
+    if scored_by != {serving}:
+        logger.error(
+            "%s was scored by %s, but the model being served is %s. Refusing to "
+            "fit a correction on another model's residuals and stamp it as this "
+            "one's; the previous correction is unchanged. Re-run "
+            "`python -m pipelines.validate_european` first.",
+            PREDICTIONS.name, sorted(scored_by) or "no recorded model", serving,
+        )
+        return 1
+
+    fitted = fit(predictions, reference=args.reference)
+    fitted["model_version"] = serving
     offsets = fitted["offsets"]
     holdout = fitted["holdout"]
 

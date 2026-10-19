@@ -1,8 +1,10 @@
 # Proposal: decouple European validation from the weekly critical path
 
-**Status: investigation only. Nothing implemented, nothing changed.** No
-production code, data, config, model, artifact or task registration was
-modified, and the run in flight was left alone.
+**Status: superseded in part.** §1-6 are the original investigation, written
+while a run was in flight and nothing had been changed. §7 re-measures them
+against the now-complete feature cache and **withdraws the recommendation**.
+Three of the findings have since shipped; the restructuring has not, and should
+not.
 
 Written 2026-10-19, while a weekly refresh was 229 minutes into a job whose
 lock file claims it should never exceed an hour.
@@ -348,3 +350,115 @@ format does not change at any stage.
 **The lock.** It is a live correctness hazard today, it is unrelated to the
 restructuring, and the fix is small. Everything else here is an improvement;
 that one is a bug.
+
+---
+
+# 7. Reassessment, 2026-10-19 evening: the cache is now complete
+
+The proposal above was written mid-run, with the cache 130/441 rows warm and a
+weekly 229 minutes in. That run finished. Re-measured against the completed
+cache, the central runtime argument for design C no longer holds.
+
+## 7.1 What the cache looks like now
+
+| | |
+|---|---|
+| rows cached | **829 of 829** |
+| matchdays cached | **441 of 441** |
+| fingerprint | `f9c69fc5d450…`, equal to the current `team_strength.csv` |
+| matchdays a warm run would build | **0** |
+
+The last line is the one that matters, and it is measured rather than inferred:
+taking the `(Date, HomeTeam, AwayTeam)` keys `european_matches.csv` wants and
+subtracting the keys the cache holds leaves **zero** pending rows. §3.5
+predicted this ("once a run completes all 441, a normal week should return to
+the 30 seconds observed on 5 Oct") and it is now confirmed.
+
+## 7.2 So what does `validate_european` actually cost per week?
+
+Three regimes, from the 161 European weeks in the archive:
+
+| week | matchdays to build | cost at the measured 38s |
+|---|---|---|
+| no UEFA fixtures (**69% of Mondays**) | 0 | ~0 |
+| a UEFA matchweek (31% of Mondays) | 3 median, 7 worst | **114s**, 4m26s worst |
+| cache invalidated | 441 | **4.7 hours** |
+
+The first two are unobjectionable on a 25-minute critical path. The whole
+problem is the third row.
+
+## 7.3 When the third row fires
+
+Invalidation is a change to `team_strength.csv` for a **completed** season
+(§3.5). Two causes, and they are different in kind:
+
+1. **Season rollover.** When 2025/26 ends, it enters the hash for the first
+   time. Annual, certain, and predictable to the week.
+2. **A ratings change** — a config edit, a new EA edition, a new source. This
+   project does that routinely; several arms were run this month.
+
+So the 4.7-hour weekly is not a freak event, it is a scheduled one. But it is
+roughly *annual plus occasional*, not weekly — and that is the number design C
+was implicitly costed against.
+
+## 7.4 Verdict: design C is no longer the right recommendation
+
+Design C buys a bounded critical path by moving the build to its own task every
+2-3 weeks. Against the measured numbers that is the wrong trade:
+
+- It would run an hours-capable scheduled task every 2-3 weeks to forestall an
+  event that fires about once a year.
+- It introduces a failure mode that does not exist today — **coverage lag**.
+  The weekly would fit the correction on whatever subset the last cache run
+  reached, and §4 already conceded that must be "reported, not hidden". Today
+  coverage is 829/829 and nothing lags.
+- It costs a new entry point, a new scheduled task, a new registration script
+  and a schedule change, i.e. the largest surface area of the three designs,
+  to solve the problem that is now the smallest.
+
+**Revised recommendation: do not restructure.** Keep `fetch_european`,
+`validate_european` and `fit_league_adjustment` in the weekly, in that order.
+The three findings worth acting on were never the restructuring:
+
+| finding | status |
+|---|---|
+| §3.1/§3.2 lock staleness tests age, not liveness | **shipped** — `_lock.py` now checks pid liveness and creation time |
+| §3.3 non-atomic publication | **shipped** — `footballml.atomic`, commit `71aef93` |
+| §3.7 an unstamped adjustment passes the version check in silence | **shipped** — `save` refuses it; `/health` carries `league_adjustment_stale` |
+| §7.5 below | **shipped** in this reassessment |
+
+If the annual rollover rebuild does become intolerable, the proportionate change
+is *not* design C but a build budget on the weekly path: build at most N
+matchdays, report the shortfall, and let successive runs converge — which the
+existing checkpoint already makes safe, since it is resumable and atomic
+(§3.4). That is deliberately **not** implemented here, because it trades
+coverage for runtime and would need a minimum-coverage floor on the fit to be
+honest about it. Building it before the problem is real would be speculative.
+
+## 7.5 A new finding this reassessment turned up: the stamp can lie
+
+Looking for what the warm cache changed, I found a worse bug than the runtime
+it was supposed to fix.
+
+`validate_european` is `required=False` in `STEPS`, and `weekly._run` logs the
+failure and **continues**. It writes `european_predictions.csv` only on success.
+So when it fails — as on 12 October, 148 minutes in and absent from that run's
+completed-step list — the *previous* model's predictions stay on disk, and
+`fit_league_adjustment` runs next, refits those residuals, and stamps them with
+`registry.load()`'s **new** version.
+
+The API then compares the stamp against the serving model, finds them equal,
+and reports the correction current. The offsets describe a model that no longer
+exists, and every check designed to catch that passes. Commit `71aef93` made
+this sharper rather than safer: `/health` now asserts `league_adjustment_stale:
+false` positively, so the false stamp produces false reassurance.
+
+Reproduced by removing the guard and running the tests: the unguarded fit
+printed *"treat the offsets as unverified"* and then *"Wrote …"*.
+
+**Fix.** `validate_european` stamps a `model_version` column into
+`european_predictions.csv`; `fit_league_adjustment` refuses unless every row
+carries exactly the version it is about to stamp. A missing column is refused
+too — a file written before the column existed cannot be told apart from one
+written by another model, and here that has to mean no. The cost of refusing is
+one week on the previous correction, which `load` already degrades to safely.

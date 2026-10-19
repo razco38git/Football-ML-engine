@@ -89,6 +89,13 @@ FEATURES_CACHE = PROCESSED_DIR / "european_features.pkl"
 #: Recorded as a hash of the file it came from.
 FINGERPRINT_COLUMN = "_strength_fingerprint"
 
+#: Which model produced the scores in ``european_predictions.csv``.
+#:
+#: Written here and required by ``fit_league_adjustment``. Not decoration: the
+#: offsets are fitted on *these* residuals, so a file left behind by an earlier
+#: model must not be refitted and stamped as the current one's.
+MODEL_VERSION_COLUMN = "model_version"
+
 KEY = ["Date", "HomeTeam", "AwayTeam"]
 
 logger = logging.getLogger("validate_european")
@@ -387,6 +394,13 @@ def main() -> int:
         raw.assign(**{FINGERPRINT_COLUMN: fingerprint}).to_pickle(FEATURES_CACHE)
 
     scored = predict_with(features, model, "home")
+    # Stamped with the model that scored them, because the next step fits the
+    # cross-league correction on these residuals and stamps *its* own idea of
+    # the serving model. Those two can disagree: this step is optional in the
+    # weekly, so when it fails the previous model's predictions stay on disk
+    # and `fit_league_adjustment` would refit them under the new model's name.
+    # The stamp lets it refuse instead.
+    scored[MODEL_VERSION_COLUMN] = metadata.version
     write_csv(scored, PREDICTIONS_OUT)
 
     actual = scored["FTR"].to_numpy()

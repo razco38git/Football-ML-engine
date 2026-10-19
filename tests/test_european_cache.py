@@ -15,6 +15,7 @@ week and would put the 92 minutes straight back.
 from __future__ import annotations
 
 import importlib
+import sys
 
 import pandas as pd
 import pytest
@@ -308,3 +309,137 @@ def test_no_cache_writes_nothing(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(validate, "FEATURES_CACHE", tmp_path / "features.pkl")
     validate._checkpoint([pd.DataFrame([{"Date": pd.Timestamp("2024-09-17")}])], None)
     assert not (tmp_path / "features.pkl").exists()
+
+
+# --- the stamp that keeps the correction honest ------------------------------
+#
+# `validate_european` is optional in the weekly, so when it fails the job
+# continues to `fit_league_adjustment` with the *previous* model's predictions
+# still on disk. Refitting those and stamping them as the serving model's
+# defeats the whole point of the version check: the API compares equal and
+# reports a current correction while applying offsets measured against a model
+# that no longer exists. These pin the refusal.
+
+
+def _predictions(version: str | None, n: int = 4) -> pd.DataFrame:
+    frame = pd.DataFrame({
+        "home_league": ["E0"] * n, "away_league": ["SP1"] * n,
+        "expected_goals_home": [1.4] * n, "expected_goals_away": [1.2] * n,
+        "FTHG": [1] * n, "FTAG": [0] * n, "FTR": ["H"] * n,
+        "Season": ["2425"] * n,
+        "prob_home_win": [0.4] * n, "prob_draw": [0.3] * n, "prob_away_win": [0.3] * n,
+    })
+    if version is not None:
+        frame[validate.MODEL_VERSION_COLUMN] = version
+    return frame
+
+
+def _fit_module(monkeypatch, tmp_path, predictions: pd.DataFrame, serving: str):
+    """`fit_league_adjustment.main` wired to a throwaway predictions file."""
+    fit_mod = importlib.import_module("pipelines.fit_league_adjustment")
+    path = tmp_path / "european_predictions.csv"
+    predictions.to_csv(path, index=False)
+    monkeypatch.setattr(fit_mod, "PREDICTIONS", path)
+
+    class _Meta:
+        version = serving
+
+    monkeypatch.setattr(fit_mod.registry, "load", lambda *a, **k: (object(), _Meta()))
+    monkeypatch.setattr(sys, "argv", ["fit_league_adjustment"])
+    return fit_mod
+
+
+def test_predictions_from_another_model_are_refused(monkeypatch, tmp_path, capsys):
+    """The 12 October failure path: a killed `validate_european` leaves last
+    week's scores behind, and this must not stamp them as this week's."""
+    fit_mod = _fit_module(monkeypatch, tmp_path, _predictions("old-model"), "new-model")
+    written: list = []
+    monkeypatch.setattr(fit_mod, "save", lambda *a, **k: written.append(a))
+
+    assert fit_mod.main() == 1
+    assert not written, "a correction was fitted on another model's residuals"
+
+
+def test_predictions_with_no_recorded_model_are_refused(monkeypatch, tmp_path):
+    """A file written before the column existed is indistinguishable from one
+    written by another model, and that has to mean no rather than yes."""
+    fit_mod = _fit_module(monkeypatch, tmp_path, _predictions(None), "new-model")
+    written: list = []
+    monkeypatch.setattr(fit_mod, "save", lambda *a, **k: written.append(a))
+
+    assert fit_mod.main() == 1
+    assert not written
+
+
+def test_a_mixture_of_model_versions_is_refused(monkeypatch, tmp_path):
+    """Half-overwritten: some rows rescored, some not. Equality against a set
+    catches this where `in` would have passed it."""
+    frame = _predictions("new-model")
+    frame.loc[0, validate.MODEL_VERSION_COLUMN] = "old-model"
+    fit_mod = _fit_module(monkeypatch, tmp_path, frame, "new-model")
+    written: list = []
+    monkeypatch.setattr(fit_mod, "save", lambda *a, **k: written.append(a))
+
+    assert fit_mod.main() == 1
+    assert not written
+
+
+def test_predictions_from_the_serving_model_are_accepted(monkeypatch, tmp_path):
+    """The guard must not block the normal week, or it is just an outage."""
+    fit_mod = _fit_module(monkeypatch, tmp_path, _predictions("new-model", n=200), "new-model")
+    saved: list = []
+    monkeypatch.setattr(fit_mod, "save", lambda fitted, *a: saved.append(fitted) or tmp_path)
+    monkeypatch.setattr(
+        fit_mod, "fit", lambda *a, **k: {"offsets": {"E0": 0.0}, "n_matches": 200, "holdout": {}}
+    )
+
+    assert fit_mod.main() == 0
+    assert saved and saved[0]["model_version"] == "new-model"
+
+
+def test_the_scored_file_records_the_model_that_scored_it(monkeypatch, tmp_path):
+    """The producing half of the contract, and the half that is easy to forget:
+    without this column the consumer above refuses every week, so the round trip
+    is what is worth testing rather than either side alone."""
+    scored = _predictions("ignored", n=6).drop(columns=[validate.MODEL_VERSION_COLUMN])
+    scored["competition"] = "UCL"
+    scored["Date"] = pd.to_datetime("2025-02-11")
+    scored["HomeTeam"], scored["AwayTeam"] = "Arsenal", "Real Madrid"
+
+    matches = tmp_path / "european_matches.csv"
+    scored.assign(League="UCL").to_csv(matches, index=False)
+    out = tmp_path / "european_predictions.csv"
+
+    class _Meta:
+        version = "the-model-that-scored-it"
+        trained_through = "2026-10-18"
+
+    monkeypatch.setattr(validate, "MATCHES_IN", matches)
+    monkeypatch.setattr(validate, "PREDICTIONS_OUT", out)
+    monkeypatch.setattr(validate, "BACKTEST", tmp_path / "absent.csv")
+    monkeypatch.setattr(validate, "FEATURES_CACHE", tmp_path / "features.pkl")
+    monkeypatch.setattr(validate, "load_team_match_history", lambda *a: pd.DataFrame())
+    monkeypatch.setattr(validate, "load_team_strength", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(validate.registry, "load", lambda *a, **k: (object(), _Meta()))
+    monkeypatch.setattr(validate, "strength_fingerprint", lambda *a, **k: "fp")
+    monkeypatch.setattr(validate, "load_cache", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(validate, "build_features", lambda *a, **k: (scored, scored))
+    monkeypatch.setattr(validate, "predict_with", lambda frame, *a: frame)
+    monkeypatch.setattr(
+        sys, "argv", ["validate_european", "--no-domestic-reference"]
+    )
+
+    assert validate.main() == 0
+
+    written = pd.read_csv(out)
+    assert list(written[validate.MODEL_VERSION_COLUMN].unique()) == [
+        "the-model-that-scored-it"
+    ]
+
+    # And the consumer accepts exactly what the producer wrote.
+    fit_mod = _fit_module(monkeypatch, tmp_path, written, "the-model-that-scored-it")
+    monkeypatch.setattr(fit_mod, "save", lambda *a, **k: tmp_path / "adj.json")
+    monkeypatch.setattr(
+        fit_mod, "fit", lambda *a, **k: {"offsets": {"E0": 0.0}, "n_matches": 6, "holdout": {}}
+    )
+    assert fit_mod.main() == 0
