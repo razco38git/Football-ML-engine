@@ -55,6 +55,16 @@ BREAK_STALE_AFTER_SECONDS = 30.0
 #: non-atomic files concurrently.
 STALE_AFTER_SECONDS = 3600.0
 
+#: When a lock held by a *live* owner starts getting reported as suspicious.
+#:
+#: Not a staleness bound and deliberately not one: nothing is broken at this
+#: age. Deciding by liveness removed the risk of killing a long run, and left
+#: the opposite problem -- a genuinely hung job holds the lock until somebody
+#: notices, and nothing was telling anybody. Eight hours is comfortably past
+#: the longest run on record (5h 56m on 2026-10-19) and short enough that one
+#: missed weekly surfaces before the next.
+REPORT_AFTER_SECONDS = 8 * 3600.0
+
 _STILL_ACTIVE = 259
 _ERROR_INVALID_PARAMETER = 87
 _ERROR_ACCESS_DENIED = 5
@@ -156,7 +166,7 @@ def _is_stale(path: Path) -> bool:
     no parseable ``pid=``           age (the only age-based case)
     pid confirmed exited            abandoned
     pid running, started *after*    abandoned -- the id was reused
-    pid running, started *before*   **held, at any age**
+    pid running, started *before*   **held, at any age** (reported past 8h)
     liveness or start time unknown  **held**, and logged
     =============================== ==========================================
 
@@ -194,20 +204,59 @@ def _is_stale(path: Path) -> bool:
             "as abandoned.", pid,
         )
         return True
+
+    # Held, legitimately. But "held by a live pid" is also what a *hung* job
+    # looks like, and since the age test was removed nothing breaks that lock
+    # -- correctly, because breaking it is the dangerous move. The failure mode
+    # it leaves is silence: every later run declines, forever, and the only
+    # symptom is a site that stops updating. So say so.
+    if age > REPORT_AFTER_SECONDS:
+        logger.warning(
+            "The refresh lock has been held by %s for %.1f hours, which is "
+            "past any run on record (the longest is 5h 56m, 2026-10-19). The "
+            "owner is still alive, so it is being left alone. If that process "
+            "is wedged, stop pid %d and delete %s.",
+            _describe(LOCK_PATH), age / 3600.0, pid, path,
+        )
     return False
 
 
 def _break_is_stale(path: Path) -> bool:
-    """The recovery lock is held for microseconds, so age alone is enough.
+    """True if the recovery lock was abandoned mid-recovery.
 
-    It is never held across anything slow, which is what lets this stay simple
-    -- and it must have *some* bound, or a process dying inside the critical
-    section would wedge recovery permanently.
+    Age alone used to decide this, on the reasoning that nothing legitimate
+    holds the recovery lock for more than microseconds. That is true and still
+    is, but it made the rule probabilistic: a process suspended inside the
+    critical section for 30 seconds -- a stop-the-world GC pause, a laptop
+    sleeping, a VM migrating -- would have its lock taken from under it, and
+    then two processes could both break the main lock, which is the one thing
+    this module exists to prevent.
+
+    `_recover` writes its pid, so the same liveness test the main lock uses
+    applies here. Age is kept only as the backstop for a file with no parseable
+    pid, which includes the microsecond window between `O_EXCL` creating it and
+    the write landing.
     """
     try:
-        return time.time() - path.stat().st_mtime > BREAK_STALE_AFTER_SECONDS
+        age = time.time() - path.stat().st_mtime
     except OSError:
         return True
+
+    pid, _ = _recorded(_describe(path))
+    if pid is None:
+        # Either written before this rule existed, or created-but-not-yet
+        # written. Both resolve in well under the bound.
+        return age > BREAK_STALE_AFTER_SECONDS
+
+    running, _ = _process(pid)
+    if running is False:
+        return True
+    if running is None:
+        # Indeterminate. Age is the only evidence left, and the asymmetry is
+        # the same as the main lock's: waiting costs a skipped run that the
+        # next trigger retries.
+        return age > BREAK_STALE_AFTER_SECONDS
+    return False
 
 
 def _describe(path: Path) -> str:

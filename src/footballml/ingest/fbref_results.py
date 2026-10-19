@@ -339,11 +339,17 @@ def fetch_fbref_results(
     # degradation this is supposed to avoid, and it would be invisible once
     # written.
     #
-    # It is not hypothetical. soccerdata drives FBref through a headless
-    # browser, and on 2026-10-12 that browser died partway through: England,
-    # France and most of Spain came back with shots, Germany and Italy came
-    # back with none, and 36 of 88 rows went in with NaN. A league that fails
-    # this check simply waits for a run where the scrape worked.
+    # It is not hypothetical. On 2026-10-12 England, France and most of Spain
+    # came back with shots while Germany and Italy came back with none, and 36
+    # of 88 rows arrived with NaN. This guard is what kept them out.
+    #
+    # The cause was *not* the headless browser dying partway through, which is
+    # what a comment here claimed until the fixtures were traced one by one. It
+    # was soccerdata's league naming: FBref's match logs say "Bundesliga" and
+    # "Serie A" where its league table says "GER-Bundesliga" and "ITA-Serie A",
+    # so `_translate_league` set those two to NaN and the shot columns never
+    # joined. Fixed in `db98e26`; a league that still fails this check waits for
+    # a run where the scrape worked.
     complete = out[FEATURE_COLUMNS].notna().all(axis=1)
     if not complete.all():
         dropped = out[~complete]

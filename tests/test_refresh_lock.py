@@ -17,6 +17,7 @@ not be skipped.
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
@@ -247,16 +248,59 @@ def test_recovery_removes_a_genuinely_abandoned_lock(lock_in_tmp, monkeypatch) -
 
 
 def test_a_recovery_lock_owned_by_someone_else_is_not_stolen(lock_in_tmp, monkeypatch) -> None:
+    """A *live* owner, not merely a recent one.
+
+    This used to write `pid=1` and rely on the file being young, which made the
+    guarantee probabilistic: a process suspended past the 30-second bound inside
+    the critical section would have had its lock taken, and two processes could
+    then both break the main lock. The recovery lock is now decided by its
+    owner's liveness, so the fixture has to supply a real one.
+    """
     monkeypatch.setattr(_lock, "BREAK_PATH", lock_in_tmp.with_name(".refresh.break"))
     done = subprocess.Popen([sys.executable, "-c", "pass"])
     done.wait()
     lock_in_tmp.write_text(_lock_text(done.pid, datetime.now(UTC)), encoding="utf-8")
-    _lock.BREAK_PATH.write_text("pid=1", encoding="utf-8")
+
+    owner = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        _lock.BREAK_PATH.write_text(f"pid={owner.pid}", encoding="utf-8")
+        # Old enough that the age rule alone would have cleared it.
+        _age(_lock.BREAK_PATH, _lock.BREAK_STALE_AFTER_SECONDS + 60)
+
+        _lock._recover()
+
+        assert lock_in_tmp.exists(), "broke the lock while another run held recovery"
+        assert _lock.BREAK_PATH.exists(), "stole a recovery lock somebody else owned"
+    finally:
+        owner.kill()
+        owner.wait()
+
+
+def test_a_recovery_lock_whose_owner_exited_is_cleared(lock_in_tmp, monkeypatch) -> None:
+    """The other half: liveness must not wedge recovery when the owner is gone,
+    and it must not wait out the age bound to notice."""
+    monkeypatch.setattr(_lock, "BREAK_PATH", lock_in_tmp.with_name(".refresh.break"))
+    done = subprocess.Popen([sys.executable, "-c", "pass"])
+    done.wait()
+    lock_in_tmp.write_text(_lock_text(done.pid, datetime.now(UTC)), encoding="utf-8")
+
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait()
+    _lock.BREAK_PATH.write_text(f"pid={gone.pid}", encoding="utf-8")
 
     _lock._recover()
+    assert not _lock.BREAK_PATH.exists(), "a dead owner's recovery lock survived"
 
-    assert lock_in_tmp.exists(), "broke the lock while another run held recovery"
-    assert _lock.BREAK_PATH.exists(), "stole a recovery lock somebody else owned"
+
+def test_a_recovery_lock_with_no_pid_yet_falls_back_to_age(lock_in_tmp, monkeypatch) -> None:
+    """`_recover` creates the file with O_EXCL and writes the pid after, so an
+    empty one is a real state -- and it must read as held, not as abandoned."""
+    monkeypatch.setattr(_lock, "BREAK_PATH", lock_in_tmp.with_name(".refresh.break"))
+    _lock.BREAK_PATH.write_text("", encoding="utf-8")
+    assert not _lock._break_is_stale(_lock.BREAK_PATH)
+
+    _age(_lock.BREAK_PATH, _lock.BREAK_STALE_AFTER_SECONDS + 60)
+    assert _lock._break_is_stale(_lock.BREAK_PATH)
 
 
 def test_an_abandoned_recovery_lock_cannot_wedge_recovery(lock_in_tmp, monkeypatch) -> None:
@@ -299,3 +343,52 @@ def test_the_probe_never_terminates_what_it_inspects() -> None:
     finally:
         child.kill()
         child.wait()
+
+
+# --- a hung owner is kept, but not kept quietly ------------------------------
+#
+# Deciding staleness by liveness removed the risk of killing a long run and
+# left the opposite one: a wedged job holds the lock for as long as its process
+# survives, every later run declines, and the only symptom is a site that stops
+# updating. Nothing is broken at this age -- breaking it is the dangerous move
+# -- so the whole fix is that it says something.
+
+
+def test_a_live_owner_past_every_recorded_runtime_is_reported(lock_in_tmp, caplog) -> None:
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        lock_in_tmp.write_text(_lock_text(child.pid, datetime.now(UTC)), encoding="utf-8")
+        _age(lock_in_tmp, _lock.REPORT_AFTER_SECONDS + 60)
+
+        with caplog.at_level(logging.WARNING, logger="pipelines._lock"):
+            stale = _lock._is_stale(lock_in_tmp)
+
+        assert stale is False, "a live owner's lock was broken on age"
+        assert "wedged" in caplog.text
+        assert str(child.pid) in caplog.text
+    finally:
+        child.kill()
+        child.wait()
+
+
+def test_a_live_owner_inside_the_window_is_not_reported(lock_in_tmp, caplog) -> None:
+    """A 229-minute weekly is a real run, not a fault. Warning about it would
+    train whoever reads these logs to ignore them."""
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        lock_in_tmp.write_text(_lock_text(child.pid, datetime.now(UTC)), encoding="utf-8")
+        _age(lock_in_tmp, 229 * 60)
+
+        with caplog.at_level(logging.WARNING, logger="pipelines._lock"):
+            assert _lock._is_stale(lock_in_tmp) is False
+
+        assert caplog.text == ""
+    finally:
+        child.kill()
+        child.wait()
+
+
+def test_the_report_threshold_is_past_the_longest_run_on_record() -> None:
+    """The constant and its justification cannot drift apart: 5h 56m on
+    2026-10-19 is the longest weekly recorded, and it must not warn."""
+    assert _lock.REPORT_AFTER_SECONDS > 356 * 60
