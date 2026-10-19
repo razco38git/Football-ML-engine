@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import pandas as pd
 import pytest
+import requests
 
+from footballml.ingest import matchhistory
 from footballml.ingest.matchhistory import (
     current_season_label,
     read_csv_bytes,
@@ -188,3 +190,101 @@ def test_rows_come_back_in_date_order(matches: pd.DataFrame) -> None:
     window see a later match."""
     dates = to_team_match_history(matches)["Date"]
     assert dates.is_monotonic_increasing
+
+
+# --- retrying a source that resets under load ---------------------------------
+#
+# On 2026-10-19 football-data.co.uk reset every connection for over an hour --
+# not a block and not a TLS problem, since the same client succeeded minutes
+# later unchanged. A single `requests.get` with no retry meant one reset killed
+# the weekly refresh at its first step, and the site went a weekend stale.
+
+
+class _Response:
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+        self.content = b"Div,Date\nE0,01/01/2026\n"
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise requests.HTTPError(str(self.status_code), response=self)
+
+
+def test_a_reset_is_retried_and_the_retry_is_returned(monkeypatch) -> None:
+    calls = []
+
+    def flaky(url, **kwargs):
+        calls.append(url)
+        if len(calls) < 3:
+            raise requests.ConnectionError("Connection aborted.")
+        return _Response(200)
+
+    monkeypatch.setattr(matchhistory.requests, "get", flaky)
+    monkeypatch.setattr(matchhistory.time, "sleep", lambda _: None)
+
+    assert matchhistory._get("https://example.test/E0.csv").status_code == 200
+    assert len(calls) == 3
+
+
+def test_the_last_error_is_raised_once_the_attempts_are_spent(monkeypatch) -> None:
+    """It must fail loudly. The weekly stops on a failed fetch by design --
+    "a partial refresh looks like a complete one"."""
+
+    def always_reset(url, **kwargs):
+        raise requests.ConnectionError("Connection aborted.")
+
+    monkeypatch.setattr(matchhistory.requests, "get", always_reset)
+    monkeypatch.setattr(matchhistory.time, "sleep", lambda _: None)
+
+    with pytest.raises(requests.ConnectionError):
+        matchhistory._get("https://example.test/E0.csv")
+
+
+def test_a_404_is_an_answer_and_is_not_retried(monkeypatch) -> None:
+    """The source simply has not published that file. Retrying it would turn a
+    known absence into five pointless requests and a minute of backoff."""
+    calls = []
+
+    def missing(url, **kwargs):
+        calls.append(url)
+        return _Response(404)
+
+    monkeypatch.setattr(matchhistory.requests, "get", missing)
+    monkeypatch.setattr(matchhistory.time, "sleep", lambda _: None)
+
+    assert matchhistory._get("https://example.test/E0.csv").status_code == 404
+    assert len(calls) == 1
+
+
+def test_a_server_error_is_retried(monkeypatch) -> None:
+    calls = []
+
+    def flaky(url, **kwargs):
+        calls.append(url)
+        return _Response(503 if len(calls) < 2 else 200)
+
+    monkeypatch.setattr(matchhistory.requests, "get", flaky)
+    monkeypatch.setattr(matchhistory.time, "sleep", lambda _: None)
+
+    assert matchhistory._get("https://example.test/E0.csv").status_code == 200
+    assert len(calls) == 2
+
+
+def test_the_backoff_grows_and_is_bounded(monkeypatch) -> None:
+    """Five waits of 2, 4, 8, 16, 32 seconds -- about a minute per file at
+    worst, against a 70-minute job."""
+    waits = []
+
+    monkeypatch.setattr(
+        matchhistory.requests, "get",
+        lambda url, **kw: (_ for _ in ()).throw(requests.ConnectionError("reset")),
+    )
+    monkeypatch.setattr(matchhistory.time, "sleep", waits.append)
+
+    with pytest.raises(requests.ConnectionError):
+        matchhistory._get("https://example.test/E0.csv")
+
+    assert len(waits) == matchhistory.DOWNLOAD_ATTEMPTS - 1
+    assert waits == sorted(waits), "backoff must not shrink"
+    assert waits[0] == matchhistory.BACKOFF_BASE_SECONDS
+    assert sum(waits) < 120, "a flaky file must not stall the job for minutes"

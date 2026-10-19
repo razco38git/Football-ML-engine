@@ -42,6 +42,59 @@ FIXTURES_URL = "https://www.football-data.co.uk/fixtures.csv"
 #: is no reason to hammer a free public resource.
 REQUEST_DELAY_SECONDS = 0.5
 
+#: Attempts per file before giving up, and the base for exponential backoff.
+#:
+#: The source resets connections when it is under load -- not a block and not a
+#: TLS problem, since the same client succeeds minutes later with no change.
+#: On 2026-10-19 it reset every attempt for over an hour, and because a single
+#: `requests.get` had no retry, one reset killed the whole weekly refresh at its
+#: first step and the site went a weekend stale.
+#:
+#: A normal run downloads **five** files -- completed seasons are cached on disk
+#: forever and only the in-progress one is refetched -- so patience is cheap and
+#: almost always sufficient. Waits are 2s, 4s, 8s, 16s, 32s: about a minute of
+#: total delay per file in the worst case, against a 70-minute job.
+DOWNLOAD_ATTEMPTS = 6
+BACKOFF_BASE_SECONDS = 2.0
+
+
+def _get(url: str, *, attempts: int = DOWNLOAD_ATTEMPTS) -> requests.Response:
+    """GET ``url``, retrying the failures that are worth retrying.
+
+    Connection resets, timeouts and 5xx are transient and get a backoff. A 404
+    is an answer -- the source has not published that file -- and is returned
+    for the caller to handle rather than retried.
+
+    Raises:
+        requests.RequestException: The last error, once the attempts are spent.
+    """
+    last: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            response = requests.get(
+                url, timeout=60, headers={"User-Agent": "footballml"}
+            )
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            last = exc
+        else:
+            if response.status_code == 404 or response.status_code < 500:
+                return response
+            last = requests.HTTPError(
+                f"{response.status_code} from {url}", response=response
+            )
+
+        if attempt == attempts:
+            break
+        wait = BACKOFF_BASE_SECONDS * 2 ** (attempt - 1)
+        logger.warning(
+            "Attempt %d/%d for %s failed (%s); retrying in %.0fs",
+            attempt, attempts, url, type(last).__name__, wait,
+        )
+        time.sleep(wait)
+
+    assert last is not None  # noqa: S101 - the loop cannot exit without one
+    raise last
+
 
 def current_season_label(today: pd.Timestamp | None = None) -> str:
     """The season label covering ``today``, e.g. ``"2627"`` in September 2026.
@@ -130,7 +183,7 @@ def fetch_match_history(
             if refresh or season >= live_season or not path.exists():
                 url = f"{BASE_URL}/{season}/{code}.csv"
                 logger.info("Downloading %s", url)
-                response = requests.get(url, timeout=60, headers={"User-Agent": "footballml"})
+                response = _get(url)
                 if response.status_code == 404:
                     logger.warning("No data published for %s %s", code, season)
                     continue
@@ -168,7 +221,7 @@ def fetch_fixtures(leagues: list[str] | None = None) -> pd.DataFrame:
     """
     codes = set(leagues or LEAGUES)
     logger.info("Fetching fixtures from %s", FIXTURES_URL)
-    response = requests.get(FIXTURES_URL, timeout=60, headers={"User-Agent": "footballml"})
+    response = _get(FIXTURES_URL)
     response.raise_for_status()
 
     raw = read_csv_bytes(response.content)
