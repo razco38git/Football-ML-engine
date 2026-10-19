@@ -367,3 +367,73 @@ def test_only_what_the_run_was_trying_to_add_is_parked(tmp_path, monkeypatch) ->
     fb._park_what_failed(wide, eligible, fb._load_deferred(path),
                          pd.Timestamp("2026-10-14"))
     assert list(fb._load_deferred(path)["HomeTeam"]) == ["Vallecano"]
+
+
+# --- FBref names a competition two different ways ----------------------------
+#
+# soccerdata's league table knows only the spelling FBref uses on its
+# competition index. `read_team_match_stats` takes each row's league from the
+# match log's `Comp` column, which spells two of them differently, and
+# `_translate_league` maps anything it does not recognise to NaN before a final
+# `.loc[self.leagues]` drops it. Every German and Italian row was discarded
+# inside soccerdata, for as long as the top-up has existed: measured on the
+# live table, `fbref` had supplied 18 rows each for E0, F1 and SP1 and zero for
+# D1 and I1, ever.
+
+
+def _translated(values: list[str]) -> list:
+    reader = fb._matchlog_reader(
+        ["GER-Bundesliga", "ITA-Serie A", "ENG-Premier League"], ["2627"]
+    )
+    frame = pd.DataFrame({"league": values})
+    return list(type(reader)._translate_league(frame)["league"])
+
+
+def test_the_matchlog_names_are_declared() -> None:
+    """Readable in the source, not discovered from a failure again."""
+    assert fb.MATCHLOG_LEAGUE_ALIASES == {
+        "Bundesliga": "GER-Bundesliga",
+        "Serie A": "ITA-Serie A",
+    }
+
+
+def test_the_two_matchlog_spellings_translate() -> None:
+    assert _translated(["Bundesliga", "Serie A"]) == ["GER-Bundesliga", "ITA-Serie A"]
+
+
+def test_the_other_three_leagues_are_untouched() -> None:
+    """They are spelled identically in both places, which is why they worked."""
+    assert _translated(["Premier League", "Ligue 1", "La Liga"]) == [
+        "ENG-Premier League", "FRA-Ligue 1", "ESP-La Liga",
+    ]
+
+
+def test_the_index_spellings_still_translate() -> None:
+    """The alias is an addition, not a replacement: league *discovery* reads
+    the index spelling, and overriding it finds no German teams at all."""
+    assert _translated(["Fußball-Bundesliga", "Serie A (M)"]) == [
+        "GER-Bundesliga", "ITA-Serie A",
+    ]
+
+
+def test_a_competition_we_do_not_follow_is_still_dropped() -> None:
+    """A cup tie in the same match log must not be mistaken for league play."""
+    out = _translated(["DFL-Supercup", "Coppa Italia", "FA Community Shield"])
+    assert all(pd.isna(v) for v in out), out
+
+
+def test_the_source_names_soccerdata_uses_for_discovery_are_unchanged() -> None:
+    """The fix must not reach the league table every other reader shares."""
+    import soccerdata as sd
+
+    assert sd.FBref._all_leagues()["GER-Bundesliga"] == "Fußball-Bundesliga"
+    assert sd.FBref._all_leagues()["ITA-Serie A"] == "Serie A (M)"
+
+
+def test_the_subclass_can_still_see_its_leagues() -> None:
+    """soccerdata keys its league table on `cls.__name__`, so a subclass of its
+    own finds nothing and every league is rejected as invalid."""
+    reader = fb._matchlog_reader(["GER-Bundesliga"], ["2627"])
+    leagues = type(reader)._all_leagues()
+    assert "GER-Bundesliga" in leagues
+    assert len(leagues) > 5

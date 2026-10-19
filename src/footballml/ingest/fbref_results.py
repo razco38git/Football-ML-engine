@@ -109,6 +109,58 @@ def _flatten(frame: pd.DataFrame) -> pd.DataFrame:
     return frame.loc[:, ~frame.columns.duplicated()]
 
 
+#: Competition names FBref uses in a club's **match logs**, which are not the
+#: ones it uses on its competition index.
+#:
+#: soccerdata's league table knows only the index spelling, and
+#: `read_team_match_stats` takes each row's league from the match log's `Comp`
+#: column. `_translate_league` then maps anything it does not recognise to NaN
+#: and the final `.loc[self.leagues]` drops it, so every German and Italian row
+#: was discarded inside soccerdata before this module ever saw it. England,
+#: France and Spain are spelled identically in both places and were unaffected,
+#: which is why the loss looked like a scraper fault for a week.
+#:
+#: Measured on the cached pages for 2026/27: with this correction
+#: `read_team_match_stats` returns 108 Bundesliga and 136 Serie A rows where it
+#: previously returned none, and the other three leagues are unchanged.
+#:
+#: Overriding the *index* spelling instead does not work and is worse than
+#: doing nothing: setting ``GER-Bundesliga`` to ``Bundesliga`` makes
+#: `read_team_season_stats` find no German teams at all, so the match logs are
+#: never requested either.
+MATCHLOG_LEAGUE_ALIASES = {
+    "Bundesliga": "GER-Bundesliga",
+    "Serie A": "ITA-Serie A",
+}
+
+
+def _matchlog_reader(leagues: list[str], seasons: list[str]):
+    """An FBref reader that understands match-log competition names.
+
+    Subclassed rather than patched globally: nothing else in the project reads
+    match logs, and mutating soccerdata's module-level league table would reach
+    every other reader in the process.
+    """
+    import soccerdata as sd
+
+    class _FBrefWithMatchlogLeagues(sd.FBref):
+        @classmethod
+        def _all_leagues(cls) -> dict[str, str]:
+            # soccerdata keys its league table on `cls.__name__`, so a subclass
+            # of its own finds nothing and every league looks invalid. Defer.
+            return sd.FBref._all_leagues()
+
+        @classmethod
+        def _translate_league(cls, df: pd.DataFrame, col: str = "league") -> pd.DataFrame:
+            known = {v: k for k, v in cls._all_leagues().items()}
+            known.update(MATCHLOG_LEAGUE_ALIASES)
+            df.loc[~df[col].isin(known), col] = np.nan
+            df[col] = df[col].replace(known)
+            return df
+
+    return _FBrefWithMatchlogLeagues(leagues=leagues, seasons=seasons)
+
+
 def _shooting(leagues: list[str], seasons: list[str]) -> pd.DataFrame:
     """Shots and shots on target, keyed by date, venue and *opponent*.
 
@@ -119,9 +171,9 @@ def _shooting(leagues: list[str], seasons: list[str]) -> pd.DataFrame:
     enough -- a row is then "whoever played *against* Y, at home or away", and
     the schedule says who that was.
     """
-    import soccerdata as sd
-
-    reader = sd.FBref(leagues=[UNDERSTAT_LEAGUES[c] for c in leagues], seasons=list(seasons))
+    reader = _matchlog_reader(
+        [UNDERSTAT_LEAGUES[c] for c in leagues], list(seasons)
+    )
     raw = _flatten(reader.read_team_match_stats(stat_type="shooting").reset_index())
 
     needed = {"league", "season", "date", "venue", "opponent", "Sh", "SoT"}
