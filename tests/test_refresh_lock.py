@@ -18,7 +18,10 @@ not be skipped.
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -86,8 +89,13 @@ def test_a_stale_lock_is_broken(lock_in_tmp, monkeypatch) -> None:
 
 
 def test_a_fresh_lock_is_not_broken(lock_in_tmp) -> None:
-    """The stale check must not fire on a run that is merely slow."""
-    lock_in_tmp.write_text("weekly pid=1 since=now", encoding="utf-8")
+    """The stale check must not fire on a run that is merely slow.
+
+    The holder is this process because "held" now means *a live owner*, not a
+    recent timestamp: a lock naming a dead pid is released at once rather than
+    an hour later, which is the point of the change.
+    """
+    lock_in_tmp.write_text(f"weekly pid={os.getpid()} since=now", encoding="utf-8")
     with _lock.refresh_lock("daily") as got:
         assert got is False
     # Untouched.
@@ -96,7 +104,7 @@ def test_a_fresh_lock_is_not_broken(lock_in_tmp) -> None:
 
 def test_waiting_gives_up_at_the_deadline(lock_in_tmp) -> None:
     """The weekly run waits, but not forever."""
-    lock_in_tmp.write_text("daily pid=1 since=now", encoding="utf-8")
+    lock_in_tmp.write_text(f"daily pid={os.getpid()} since=now", encoding="utf-8")
     started = time.monotonic()
     with _lock.refresh_lock("weekly", wait_seconds=0.1) as got:
         assert got is False
@@ -125,3 +133,169 @@ def test_the_two_jobs_disagree_on_purpose() -> None:
     weekly_src = inspect.getsource(weekly.main)
     assert 'refresh_lock("weekly"' in weekly_src
     assert "wait_seconds=LOCK_WAIT_SECONDS" in weekly_src
+
+
+# --- a lock is abandoned when its owner is gone, not when it is old ----------
+#
+# The original rule was age alone, on the stated assumption that "the weekly
+# job's longest run on record is 19m 37s". Three of the four runs before
+# 2026-10-19 exceeded the hour; that day's run took 356 minutes, and for most
+# of it a live lock looked abandoned to any daily run that fired.
+
+
+def _lock_text(pid: int, since: datetime, owner: str = "weekly") -> str:
+    return f"{owner} pid={pid} since={since.isoformat()}"
+
+
+def _age(path: Path, seconds: float) -> None:
+    old = time.time() - seconds
+    os.utime(path, (old, old))
+
+
+def test_a_live_owner_holds_the_lock_however_old_it_is(lock_in_tmp) -> None:
+    """The bug, in one test. A four-hour run is now ordinary."""
+    lock_in_tmp.write_text(_lock_text(os.getpid(), datetime.now(UTC)), encoding="utf-8")
+    _age(lock_in_tmp, 4 * 3600)
+    assert not _lock._is_stale(lock_in_tmp)
+
+
+def test_a_dead_owner_releases_the_lock_however_fresh_it_is(lock_in_tmp) -> None:
+    done = subprocess.Popen([sys.executable, "-c", "pass"])
+    done.wait()
+    time.sleep(0.5)
+    lock_in_tmp.write_text(_lock_text(done.pid, datetime.now(UTC)), encoding="utf-8")
+    assert _lock._is_stale(lock_in_tmp)
+
+
+def test_a_reused_pid_is_not_the_owner(lock_in_tmp) -> None:
+    """Liveness alone does not prove ownership: the id can be recycled.
+
+    This process is alive and holds the recorded pid, but it started long after
+    a lock claiming to be two days old, so it cannot be that lock's owner.
+    """
+    taken = datetime.now(UTC) - timedelta(days=2)
+    lock_in_tmp.write_text(_lock_text(os.getpid(), taken), encoding="utf-8")
+    assert _lock._is_stale(lock_in_tmp)
+
+
+def test_unknown_liveness_keeps_the_lock_and_never_ages_out(
+    lock_in_tmp, monkeypatch, caplog
+) -> None:
+    """The asymmetry that decides every ambiguous case.
+
+    Wrongly breaking a lock lets two jobs write the same non-atomic files;
+    wrongly keeping one skips a run the next trigger retries.
+    """
+    monkeypatch.setattr(_lock, "_process", lambda pid: (None, None))
+    lock_in_tmp.write_text(_lock_text(4242, datetime.now(UTC)), encoding="utf-8")
+    _age(lock_in_tmp, 10 * 3600)
+    with caplog.at_level("WARNING"):
+        assert not _lock._is_stale(lock_in_tmp)
+    assert any("Cannot determine" in r.message for r in caplog.records)
+
+
+def test_access_denied_counts_as_running(lock_in_tmp, monkeypatch) -> None:
+    """A process we may not query is still a process."""
+    monkeypatch.setattr(_lock, "_process", lambda pid: (True, None))
+    lock_in_tmp.write_text(_lock_text(4, datetime.now(UTC)), encoding="utf-8")
+    _age(lock_in_tmp, 6 * 3600)
+    assert not _lock._is_stale(lock_in_tmp)
+
+
+def test_an_unidentifiable_lock_is_the_only_age_based_case(lock_in_tmp) -> None:
+    lock_in_tmp.write_text("weekly since=whenever", encoding="utf-8")
+    _age(lock_in_tmp, 2 * 3600)
+    assert _lock._is_stale(lock_in_tmp)
+    lock_in_tmp.write_text("weekly", encoding="utf-8")
+    assert not _lock._is_stale(lock_in_tmp)
+
+
+def test_a_naive_since_is_not_trusted_as_identity(lock_in_tmp) -> None:
+    """It would be read as local time and compared against a UTC creation
+    time -- the silently-wrong comparison this check exists to avoid."""
+    text = f"weekly pid={os.getpid()} since={datetime.now().isoformat()}"
+    lock_in_tmp.write_text(text, encoding="utf-8")
+    assert _lock._recorded(text)[1] is None
+    assert not _lock._is_stale(lock_in_tmp)
+
+
+# --- breaking a lock has to be exclusive -------------------------------------
+
+
+def test_recovery_does_not_unlink_a_live_lock(lock_in_tmp, monkeypatch) -> None:
+    """The race the recovery lock exists for.
+
+    Two runs could both judge a lock abandoned, the first unlink it and
+    acquire, and the second then unlink *the first's live lock* and acquire as
+    well -- both writing `data/processed` at once.
+    """
+    monkeypatch.setattr(_lock, "BREAK_PATH", lock_in_tmp.with_name(".refresh.break"))
+    lock_in_tmp.write_text(_lock_text(os.getpid(), datetime.now(UTC)), encoding="utf-8")
+    _lock._recover()
+    assert lock_in_tmp.exists(), "recovery removed a lock whose owner is alive"
+    assert not _lock.BREAK_PATH.exists(), "recovery lock was not released"
+
+
+def test_recovery_removes_a_genuinely_abandoned_lock(lock_in_tmp, monkeypatch) -> None:
+    monkeypatch.setattr(_lock, "BREAK_PATH", lock_in_tmp.with_name(".refresh.break"))
+    done = subprocess.Popen([sys.executable, "-c", "pass"])
+    done.wait()
+    time.sleep(0.5)
+    lock_in_tmp.write_text(_lock_text(done.pid, datetime.now(UTC)), encoding="utf-8")
+    _lock._recover()
+    assert not lock_in_tmp.exists()
+
+
+def test_a_recovery_lock_owned_by_someone_else_is_not_stolen(lock_in_tmp, monkeypatch) -> None:
+    monkeypatch.setattr(_lock, "BREAK_PATH", lock_in_tmp.with_name(".refresh.break"))
+    done = subprocess.Popen([sys.executable, "-c", "pass"])
+    done.wait()
+    lock_in_tmp.write_text(_lock_text(done.pid, datetime.now(UTC)), encoding="utf-8")
+    _lock.BREAK_PATH.write_text("pid=1", encoding="utf-8")
+
+    _lock._recover()
+
+    assert lock_in_tmp.exists(), "broke the lock while another run held recovery"
+    assert _lock.BREAK_PATH.exists(), "stole a recovery lock somebody else owned"
+
+
+def test_an_abandoned_recovery_lock_cannot_wedge_recovery(lock_in_tmp, monkeypatch) -> None:
+    """A process dying inside the critical section must not block it forever."""
+    monkeypatch.setattr(_lock, "BREAK_PATH", lock_in_tmp.with_name(".refresh.break"))
+    _lock.BREAK_PATH.write_text("pid=1", encoding="utf-8")
+    _age(_lock.BREAK_PATH, _lock.BREAK_STALE_AFTER_SECONDS + 60)
+    _lock._recover()
+    assert not _lock.BREAK_PATH.exists()
+
+
+def test_a_run_recovers_an_abandoned_lock_and_acquires(lock_in_tmp, monkeypatch) -> None:
+    """Recovery after an unexpected exit, end to end."""
+    monkeypatch.setattr(_lock, "BREAK_PATH", lock_in_tmp.with_name(".refresh.break"))
+    done = subprocess.Popen([sys.executable, "-c", "pass"])
+    done.wait()
+    time.sleep(0.5)
+    lock_in_tmp.write_text(_lock_text(done.pid, datetime.now(UTC)), encoding="utf-8")
+
+    with _lock.refresh_lock("weekly") as got:
+        assert got
+        assert f"pid={os.getpid()}" in lock_in_tmp.read_text(encoding="utf-8")
+    assert not lock_in_tmp.exists()
+
+
+def test_the_probe_never_terminates_what_it_inspects() -> None:
+    """`os.kill(pid, 0)` is not used, and must not be reintroduced.
+
+    CPython routes any Windows signal other than CTRL_C_EVENT/CTRL_BREAK_EVENT
+    to TerminateProcess, so the obvious liveness check could kill the very job
+    it is asked about.
+    """
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(10)"])
+    try:
+        time.sleep(1.0)
+        running, _ = _lock._process(child.pid)
+        assert running is True
+        time.sleep(1.0)
+        assert child.poll() is None, "the liveness probe killed the process"
+    finally:
+        child.kill()
+        child.wait()
