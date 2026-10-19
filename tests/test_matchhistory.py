@@ -348,3 +348,99 @@ def test_a_successful_download_overwrites_the_cache(tmp_path, monkeypatch) -> No
     out = matchhistory.fetch_match_history(["E0"], ["2627"], cache_dir=tmp_path)
     assert len(out) == 2
     assert cached.read_bytes() == fresh
+
+
+# --- a 200 is not proof of a CSV ---------------------------------------------
+#
+# The source redirects, and a redirect landing on an error page answers 200
+# with HTML. A watcher written against the outage checked only the first
+# status and so never noticed the source recover; the same blind spot in the
+# fetcher is worse, because the HTML would be written into the cache and every
+# later run -- including the outage fallback -- would read it back.
+
+_CSV = b"Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\nE0,01/01/2026,A,B,1,0,H\n"
+_HTML = b"<!doctype html><html><body>404 Not Found</body></html>"
+
+
+class _Served:
+    def __init__(self, body: bytes, status_code: int = 200) -> None:
+        self.content = body
+        self.status_code = status_code
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise requests.HTTPError(str(self.status_code), response=self)
+
+
+def test_an_html_error_page_does_not_overwrite_the_cache(tmp_path, monkeypatch, caplog) -> None:
+    cached = tmp_path / "E0_2627.csv"
+    cached.write_bytes(_CSV)
+
+    monkeypatch.setattr(matchhistory.requests, "get", lambda url, **kw: _Served(_HTML))
+    monkeypatch.setattr(matchhistory.time, "sleep", lambda _: None)
+
+    with caplog.at_level("WARNING"):
+        out = matchhistory.fetch_match_history(["E0"], ["2627"], cache_dir=tmp_path)
+
+    assert cached.read_bytes() == _CSV, "the cache was overwritten with an error page"
+    assert len(out) == 1, "the cached season should still have been read"
+    assert any("not a football-data CSV" in r.message for r in caplog.records)
+
+
+def test_an_empty_body_does_not_overwrite_the_cache(tmp_path, monkeypatch) -> None:
+    cached = tmp_path / "E0_2627.csv"
+    cached.write_bytes(_CSV)
+    monkeypatch.setattr(matchhistory.requests, "get", lambda url, **kw: _Served(b""))
+    monkeypatch.setattr(matchhistory.time, "sleep", lambda _: None)
+
+    matchhistory.fetch_match_history(["E0"], ["2627"], cache_dir=tmp_path)
+    assert cached.read_bytes() == _CSV
+
+
+def test_rubbish_with_no_cache_to_fall_back_on_still_raises(tmp_path, monkeypatch) -> None:
+    """Inventing an empty season is the silent approximation this refuses."""
+    monkeypatch.setattr(matchhistory.requests, "get", lambda url, **kw: _Served(_HTML))
+    monkeypatch.setattr(matchhistory.time, "sleep", lambda _: None)
+
+    with pytest.raises(ValueError):
+        matchhistory.fetch_match_history(["E0"], ["2627"], cache_dir=tmp_path)
+
+
+def test_a_real_csv_still_overwrites_the_cache(tmp_path, monkeypatch) -> None:
+    """The guard must not make the fetcher refuse good data."""
+    cached = tmp_path / "E0_2627.csv"
+    cached.write_bytes(_CSV)
+    fresh = _CSV + b"E0,02/01/2026,C,D,2,2,D\n"
+    monkeypatch.setattr(matchhistory.requests, "get", lambda url, **kw: _Served(fresh))
+    monkeypatch.setattr(matchhistory.time, "sleep", lambda _: None)
+
+    out = matchhistory.fetch_match_history(["E0"], ["2627"], cache_dir=tmp_path)
+    assert cached.read_bytes() == fresh
+    assert len(out) == 2
+
+
+def test_requests_follows_redirects_by_default() -> None:
+    """What the watcher got wrong, pinned where it matters.
+
+    `curl` without `-L` reports the 302 and stops; `requests` follows it. If a
+    future change passes `allow_redirects=False`, this source stops working
+    entirely and the failure would look like an outage.
+    """
+    captured: dict = {}
+
+    def capture(url, **kwargs):
+        captured.update(kwargs)
+        return _Served(_CSV)
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        from pathlib import Path as _P
+
+        matchhistory.requests.get, real = capture, matchhistory.requests.get
+        try:
+            matchhistory.fetch_match_history(["E0"], ["2627"], cache_dir=_P(tmp))
+        finally:
+            matchhistory.requests.get = real
+
+    assert captured.get("allow_redirects", True) is True

@@ -217,8 +217,30 @@ def fetch_match_history(
                         logger.warning("No data published for %s %s", code, season)
                         continue
                     response.raise_for_status()
-                    path.write_bytes(response.content)
-                    time.sleep(REQUEST_DELAY_SECONDS)
+                    # A 200 is not proof of a CSV. This source redirects, and a
+                    # redirect landing on an error page answers 200 with HTML.
+                    # Writing that into the cache would poison it: every later
+                    # run reads the cached file, and the outage fallback that
+                    # exists to rescue a download failure would be handing back
+                    # the error page instead of yesterday's data.
+                    #
+                    # `read_csv_bytes` already knows what a real one looks like
+                    # -- it requires a `Div` column -- so ask it before storing.
+                    try:
+                        read_csv_bytes(response.content)
+                    except ValueError as exc:
+                        if not path.exists():
+                            raise
+                        logger.warning(
+                            "%s %s came back as %d bytes that are not a "
+                            "football-data CSV (%s); keeping the cached copy "
+                            "from %s rather than overwriting it.",
+                            code, season, len(response.content), exc,
+                            _modified(path),
+                        )
+                    else:
+                        path.write_bytes(response.content)
+                        time.sleep(REQUEST_DELAY_SECONDS)
 
             try:
                 frames.append(read_csv_bytes(path.read_bytes()).assign(_season=season))
