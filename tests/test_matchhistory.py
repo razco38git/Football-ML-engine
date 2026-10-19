@@ -288,3 +288,63 @@ def test_the_backoff_grows_and_is_bounded(monkeypatch) -> None:
     assert waits == sorted(waits), "backoff must not shrink"
     assert waits[0] == matchhistory.BACKOFF_BASE_SECONDS
     assert sum(waits) < 120, "a flaky file must not stall the job for minutes"
+
+
+# --- surviving an outage when yesterday's copy is on disk ---------------------
+
+
+def test_a_failed_download_falls_back_to_the_cached_season(tmp_path, monkeypatch, caplog) -> None:
+    """The whole point of 2026-10-19: the file was on disk and the run died anyway."""
+    cached = tmp_path / "E0_2627.csv"
+    cached.write_bytes(b"Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\nE0,01/01/2026,A,B,1,0,H\n")
+
+    def always_reset(url, **kwargs):
+        raise requests.ConnectionError("Connection aborted.")
+
+    monkeypatch.setattr(matchhistory.requests, "get", always_reset)
+    monkeypatch.setattr(matchhistory.time, "sleep", lambda _: None)
+
+    with caplog.at_level("WARNING"):
+        out = matchhistory.fetch_match_history(["E0"], ["2627"], cache_dir=tmp_path)
+
+    assert len(out) == 1, "the cached season should still have been read"
+    assert any("falling back to the cached copy" in r.message for r in caplog.records)
+
+
+def test_an_outage_with_no_cache_still_raises(tmp_path, monkeypatch) -> None:
+    """There is nothing to fall back *to*, and inventing an empty season would
+    be the silent-approximation failure this project refuses."""
+
+    def always_reset(url, **kwargs):
+        raise requests.ConnectionError("Connection aborted.")
+
+    monkeypatch.setattr(matchhistory.requests, "get", always_reset)
+    monkeypatch.setattr(matchhistory.time, "sleep", lambda _: None)
+
+    with pytest.raises(requests.ConnectionError):
+        matchhistory.fetch_match_history(["E0"], ["2627"], cache_dir=tmp_path)
+
+
+def test_a_successful_download_overwrites_the_cache(tmp_path, monkeypatch) -> None:
+    """The fallback must not become sticky: when the source is healthy the run
+    is exactly what it always was."""
+    cached = tmp_path / "E0_2627.csv"
+    cached.write_bytes(b"Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\nE0,01/01/2026,A,B,1,0,H\n")
+    fresh = (
+        b"Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\n"
+        b"E0,01/01/2026,A,B,1,0,H\nE0,02/01/2026,C,D,2,2,D\n"
+    )
+
+    class _Ok:
+        status_code = 200
+        content = fresh
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(matchhistory.requests, "get", lambda url, **kw: _Ok())
+    monkeypatch.setattr(matchhistory.time, "sleep", lambda _: None)
+
+    out = matchhistory.fetch_match_history(["E0"], ["2627"], cache_dir=tmp_path)
+    assert len(out) == 2
+    assert cached.read_bytes() == fresh

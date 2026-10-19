@@ -58,6 +58,11 @@ DOWNLOAD_ATTEMPTS = 6
 BACKOFF_BASE_SECONDS = 2.0
 
 
+def _modified(path: Path) -> str:
+    """The cache file's modification date, for a warning a reader can act on."""
+    return pd.Timestamp(path.stat().st_mtime, unit="s").strftime("%Y-%m-%d %H:%M")
+
+
 def _get(url: str, *, attempts: int = DOWNLOAD_ATTEMPTS) -> requests.Response:
     """GET ``url``, retrying the failures that are worth retrying.
 
@@ -183,13 +188,37 @@ def fetch_match_history(
             if refresh or season >= live_season or not path.exists():
                 url = f"{BASE_URL}/{season}/{code}.csv"
                 logger.info("Downloading %s", url)
-                response = _get(url)
-                if response.status_code == 404:
-                    logger.warning("No data published for %s %s", code, season)
-                    continue
-                response.raise_for_status()
-                path.write_bytes(response.content)
-                time.sleep(REQUEST_DELAY_SECONDS)
+                try:
+                    response = _get(url)
+                except requests.RequestException as exc:
+                    # The source goes down. On 2026-10-19 it reset every
+                    # connection for hours, and because this raised, the weekly
+                    # died at its first step and the site went a weekend stale
+                    # -- even though yesterday's copy of this very file was on
+                    # disk and FBref could supply the matches since.
+                    #
+                    # A stale cached season is not a silent approximation: the
+                    # FBref top-up in `build_dataset` fills the gap in every
+                    # column that becomes a feature, and `source` records which
+                    # rows came from where. So fall back, loudly, and let the
+                    # run continue. With no cache at all there is nothing to
+                    # fall back *to*, and raising is still right.
+                    if not path.exists():
+                        raise
+                    logger.warning(
+                        "Download failed for %s %s (%s); falling back to the "
+                        "cached copy from %s. Rows after that date come from "
+                        "the FBref top-up, not football-data.",
+                        code, season, type(exc).__name__,
+                        _modified(path),
+                    )
+                else:
+                    if response.status_code == 404:
+                        logger.warning("No data published for %s %s", code, season)
+                        continue
+                    response.raise_for_status()
+                    path.write_bytes(response.content)
+                    time.sleep(REQUEST_DELAY_SECONDS)
 
             try:
                 frames.append(read_csv_bytes(path.read_bytes()).assign(_season=season))
