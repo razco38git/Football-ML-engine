@@ -83,9 +83,25 @@ from pipelines.weekly import (  # noqa: E402
 )
 
 ROOT = Path(__file__).resolve().parents[1]
+#: Where football-data's own results land. Kept for the record and because it
+#: is what `build_dataset` writes, but **nothing in this job reads it** any
+#: more -- see :data:`HISTORY` for why the gate stopped.
 MATCHES = ROOT / "data" / "processed" / "matches_all.csv"
 EUROPEAN = ROOT / "data" / "processed" / "european_matches.csv"
 PREDICTIONS = ROOT / "data" / "processed" / "predictions.csv"
+
+#: What the gated steps actually read, and therefore what "did anything move?"
+#: has to ask about.
+#:
+#: The gate used to fingerprint `matches_all.csv`, which football-data writes
+#: and **nothing downstream reads**: `score_upcoming` and `project_season` both
+#: load this file. The two normally move together, so the mistake was invisible
+#: until they did not. On 2026-10-19 football-data was unreachable all day,
+#: `build_dataset` fell back to its cached copies, and the FBref top-up brought
+#: 27 played matches into the history -- `matches_all.csv` stayed at 12 October
+#: while this file reached the 18th. The gate would have reported "nothing new"
+#: and skipped the projection over 27 matches it had.
+HISTORY = ROOT / "data" / "processed" / "team_match_history_all.csv"
 
 #: A European prediction older than this with no result is reported.
 #:
@@ -140,8 +156,11 @@ def _fingerprint(path: Path | None = None) -> tuple[int, str]:
     correction to an old match changes the count and not the date, and a
     rescheduled fixture arriving late changes neither in a way a count alone
     would catch.
+
+    Defaults to :data:`HISTORY` -- the file the gated steps read -- rather than
+    the one football-data happens to write. See :data:`HISTORY`.
     """
-    path = path or MATCHES
+    path = path or HISTORY
     if not path.exists():
         return (0, "")
     frame = pd.read_csv(path, usecols=["Date"])
@@ -323,8 +342,9 @@ def _run(args: argparse.Namespace, started: float) -> int:
         )
     else:
         logger.info(
-            "football-data published nothing new (%d rows, latest %s); the "
-            "tables would be rebuilt identically, so they are left alone",
+            "The match history did not move (%d rows, latest %s) -- neither "
+            "football-data nor the FBref top-up brought anything; the tables "
+            "would be rebuilt identically, so they are left alone",
             after[0], after[1] or "n/a",
         )
 

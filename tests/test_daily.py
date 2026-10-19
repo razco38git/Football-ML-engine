@@ -80,7 +80,7 @@ def _args(monkeypatch, **over) -> None:
 def test_fingerprint_is_rows_and_latest_date(tmp_path, monkeypatch) -> None:
     path = tmp_path / "matches_all.csv"
     pd.DataFrame({"Date": ["2026-09-19", "2026-09-20"]}).to_csv(path, index=False)
-    monkeypatch.setattr(daily, "MATCHES", path)
+    monkeypatch.setattr(daily, "HISTORY", path)
     assert daily._fingerprint() == (2, "2026-09-20")
 
 
@@ -91,7 +91,7 @@ def test_fingerprint_notices_a_correction_that_adds_no_date(tmp_path, monkeypatc
     correction unpublished until the next Monday.
     """
     path = tmp_path / "matches_all.csv"
-    monkeypatch.setattr(daily, "MATCHES", path)
+    monkeypatch.setattr(daily, "HISTORY", path)
     pd.DataFrame({"Date": ["2026-09-20"]}).to_csv(path, index=False)
     before = daily._fingerprint()
     pd.DataFrame({"Date": ["2026-09-19", "2026-09-20"]}).to_csv(path, index=False)
@@ -101,12 +101,12 @@ def test_fingerprint_notices_a_correction_that_adds_no_date(tmp_path, monkeypatc
 def test_fingerprint_survives_a_missing_or_empty_file(tmp_path, monkeypatch) -> None:
     """First ever run, or a wiped data directory: not a crash."""
     missing = tmp_path / "nope.csv"
-    monkeypatch.setattr(daily, "MATCHES", missing)
+    monkeypatch.setattr(daily, "HISTORY", missing)
     assert daily._fingerprint() == (0, "")
 
     empty = tmp_path / "empty.csv"
     pd.DataFrame({"Date": []}).to_csv(empty, index=False)
-    monkeypatch.setattr(daily, "MATCHES", empty)
+    monkeypatch.setattr(daily, "HISTORY", empty)
     assert daily._fingerprint() == (0, "")
 
 
@@ -504,3 +504,92 @@ def test_the_european_fetch_is_in_the_daily_chain_and_the_rebuilds_are_not() -> 
     # does not produce.
     assert "validate_european" not in names
     assert "fit_league_adjustment" not in names
+
+
+# --- the gate watches what the gated steps read -------------------------------
+#
+# It used to fingerprint `matches_all.csv`, which football-data writes and
+# nothing downstream reads. The two normally move together, so the mistake was
+# invisible until 2026-10-19: football-data was unreachable, `build_dataset`
+# fell back to its cached copies, and the FBref top-up brought 27 played
+# matches into the history. `matches_all.csv` stayed at 12 October while the
+# history reached the 18th.
+
+
+def test_the_gate_reads_the_history_not_the_file_football_data_writes(
+    tmp_path, monkeypatch
+) -> None:
+    """The regression itself: with the two files disagreeing, the gate must
+    answer for the one `score_upcoming` and `project_season` actually load.
+
+    Both files are present and different, so a default pointing at either one
+    gives a different answer -- which is what makes this a real test rather
+    than an assertion about a name.
+    """
+    history = tmp_path / "team_match_history_all.csv"
+    history.write_text(
+        "Date\n2026-10-17\n2026-10-18\n2026-10-18\n", encoding="utf-8"
+    )
+    matches = tmp_path / "matches_all.csv"
+    matches.write_text("Date\n2026-10-12\n", encoding="utf-8")
+
+    monkeypatch.setattr(daily, "HISTORY", history)
+    monkeypatch.setattr(daily, "MATCHES", matches)
+
+    assert daily._fingerprint() == (3, "2026-10-18"), (
+        "the gate is reading matches_all.csv, which nothing downstream reads"
+    )
+
+
+def test_projection_runs_when_the_history_advances_without_football_data(
+    monkeypatch, runs
+) -> None:
+    """The case that prompted this: the top-up moved the history, the fetch
+    brought nothing, and the projection must still run."""
+    _args(monkeypatch)
+    _fingerprints(monkeypatch, [(58380, "2026-10-12"), (58434, "2026-10-18")])
+    daily.main()
+    assert "project_season" in runs
+
+
+def test_settling_runs_even_when_nothing_moved(monkeypatch, runs) -> None:
+    """Settling is not behind the gate at all, and must not be put there.
+
+    It reads the schedule pages, which carry a score days before football-data
+    publishes one, so it has work to do on a morning when the fetch brought
+    nothing.
+    """
+    _args(monkeypatch)
+    _fingerprints(monkeypatch, (58434, "2026-10-18"))
+    daily.main()
+    assert "score_upcoming" in runs, "settling must not depend on the gate"
+
+
+def test_projection_is_skipped_when_the_history_did_not_move(monkeypatch, runs) -> None:
+    _args(monkeypatch)
+    _fingerprints(monkeypatch, (58434, "2026-10-18"))
+    daily.main()
+    assert "project_season" not in runs
+
+
+def test_force_still_projects_with_no_new_results(monkeypatch, runs) -> None:
+    _args(monkeypatch, force=True)
+    _fingerprints(monkeypatch, (58434, "2026-10-18"))
+    daily.main()
+    assert "project_season" in runs
+
+
+def test_a_correction_that_adds_no_date_still_opens_the_gate(monkeypatch, runs) -> None:
+    """A re-scored match changes the row count and not the latest date."""
+    _args(monkeypatch)
+    _fingerprints(monkeypatch, [(58434, "2026-10-18"), (58436, "2026-10-18")])
+    daily.main()
+    assert "project_season" in runs
+
+
+def test_the_european_fingerprint_is_unaffected(tmp_path, monkeypatch) -> None:
+    """Passing a path explicitly still answers for that file, so the European
+    check keeps reading `european_matches.csv`."""
+    path = tmp_path / "european_matches.csv"
+    path.write_text("Date\n2026-10-01\n2026-10-02\n", encoding="utf-8")
+    assert daily._fingerprint(path) == (2, "2026-10-02")
