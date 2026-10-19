@@ -149,7 +149,41 @@ MIN_RATED_PLAYERS = 11
 #: helps the back line and costs the attack either way, and 15 with no quota
 #: sits at a reasonable compromise. Do not re-propose a positional quota without
 #: new evidence.
+#:
+#: The correlation columns above were measured **before** `_BEST_N_ORDER` fixed
+#: the tie-break, so they carry a vintage sensitivity of about 0.003 -- which is
+#: wider than the spread between adjacent rows. The *decision* replicated across
+#: every vintage tested and the RPS column spans 0.00018 either way, so 15
+#: stands; the ordering of the three correlations between neighbours does not.
+#: A re-sweep now would be reproducible, which it was not then.
 DEFAULT_BEST_N = 15
+
+
+#: How `best_n` ranks players, as a **total** order rather than rating alone.
+#:
+#: Ratings are integers on the 0-99 scale -- 47 distinct values across 34,778
+#: player-seasons -- so the cut at N almost always falls inside a tie. Nimes
+#: 2018/19 has 18 rated players and two tied on 53 at the fifteenth place.
+#:
+#: `sort_values` defaults to quicksort, which is not stable, so which of those
+#: two made the squad depended on the input array's layout. That is not an
+#: abstract hazard: the season in progress is fetched live and grows every run,
+#: and adding **four** of its rows re-selected squads in **260 of 1,173
+#: finished team-seasons**, moving a line rating by up to 6.18 points. Those
+#: seasons are over; nothing about them had changed.
+#:
+#: This was the propagation path `EXPERIMENTS.md` recorded as open after the
+#: squad-size sweep drifted between processes -- `rating`,
+#: `performance_rating`, `fifa_overall` and `measured_share` were identical for
+#: every finished-season player, and the tie-break is what carried the moving
+#: season into the settled ones.
+#:
+#: Minutes second is not an arbitrary tiebreak; it is `select_eleven`'s rule
+#: ("the question is who *will* play, and a manager's team selection is better
+#: evidence of that than our opinion of who deserves to"). The player name last
+#: only guarantees a total order, so the result cannot depend on row order at
+#: all.
+_BEST_N_ORDER: dict[str, bool] = {"rating": False, "minutes": False, "Player": True}
 
 
 def team_strength(
@@ -190,8 +224,11 @@ def team_strength(
         picks = [select_eleven(g, formation) for _, g in players.groupby(keys, observed=True)]
         selected = pd.concat(picks) if picks else players.head(0)
     elif method == "best_n":
+        by = [c for c in _BEST_N_ORDER if c in players.columns]
         selected = (
-            players.sort_values("rating", ascending=False)
+            players.sort_values(
+                by, ascending=[_BEST_N_ORDER[c] for c in by], kind="stable"
+            )
             .groupby(keys, observed=True)
             .head(best_n)
         )

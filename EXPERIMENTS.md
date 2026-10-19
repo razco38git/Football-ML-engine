@@ -2251,18 +2251,64 @@ It is not inert. Rating the frame with it, against rating only finished seasons:
 adjacent squad sizes.** That is why the ordering moved while the decision did
 not.
 
-### What is not established
+### The propagation path, found 2026-10-19 evening
 
-Comparing the two rated frames row by row, **`rating`, `performance_rating`,
-`fifa_overall` and `measured_share` are identical for every one of the 32,574
-finished-season players**, and EA match coverage is identical to four decimals
-(91.3459%). Yet the selected squads differ. Some column other than those four
-carries the in-progress season into the finished ones, and this diagnostic did
-not identify it.
+This was left open. Comparing the two rated frames row by row, **`rating`,
+`performance_rating`, `fifa_overall` and `measured_share` are identical for
+every one of the 32,574 finished-season players**, and EA match coverage is
+identical to four decimals (91.3459%). Yet the selected squads differed, and the
+first write-up recorded the path as unidentified rather than guessing at it.
 
-The effect is measured and reproducible; **the propagation path is not**. It is
-recorded as open rather than guessed at -- which is the mistake the first
-write-up made.
+It is the **tie-break**, and no column at all.
+
+`rating` is an integer on the 0-99 scale -- **47 distinct values across 34,778
+player-seasons** -- so the cut at `best_n` almost always falls inside a tie.
+Nimes 2018/19 has 18 rated players and two tied on 53 at the fifteenth place, a
+midfielder with 1,767 minutes and a winger with 2,134. `team_strength` ranked
+them with `sort_values("rating", ascending=False)`, whose **default quicksort is
+not stable**, so which of the two made the squad was decided by the input
+array's layout. Adding the in-progress season's rows changes that layout, the
+partitioning differs, and settled squads are re-selected. `_weighted_mean`
+weights by minutes, so swapping two equally-rated players with very different
+minutes moves the line.
+
+Measured on the saved ratings, dropping in-progress rows from the frame:
+
+| rows dropped | finished team-seasons moved | largest line change |
+|---|---|---|
+| 1 | 0 of 1,174 | 0 |
+| **4** | **260 of 1,173** | **5.57** |
+| 20 | 253 of 1,173 | 6.18 |
+| 100 | 268 of 1,171 | 4.68 |
+
+Four rows is precisely the growth observed above (34,769 -> 34,773). The
+`strength_overall` change reaches 1.26 points for a single club; the correlation
+drift of 0.0031 is what survives averaging over 1,170 team-seasons.
+
+> **Confirmed: the path is the unstable sort at the `best_n` cut, not a leaking
+> column. This is the production path** -- `build_players --team-method` defaults
+> to `best_n` -- **not only the research harness.**
+
+**Fixed** by ranking on a total order, `rating` then `minutes` then `Player`,
+with `kind="stable"`. Minutes second is `select_eleven`'s existing rule rather
+than an arbitrary tiebreak. Finished-season strength is then bit-identical under
+dropping 1, 4, 20, 100 or 500 in-progress rows, and under a full shuffle of the
+input rows. It moves 291 of 1,174 team-seasons against the values production
+holds today, mean 0.099 and max 6.36 -- but those values were whichever side of
+a coin toss quicksort landed on, so this replaces an arbitrary choice with a
+justified one rather than a correct one with a different one.
+
+### What this does *not* establish
+
+The three long weeklies (190, 71 and 229 minutes) are **not** attributed to it.
+The European feature cache is keyed on a hash of completed-season
+`team_strength.csv`, so this mechanism does move that key -- but 12 October's
+full 438-matchday rebuild is independently explained by two EA name-matching
+commits (`237c749`, `feeac40`) landing between the 5 October weekly, which
+scored in **40 seconds** on a warm cache, and the 12 October one. That is a
+legitimate ratings change and exactly what the fingerprint exists to catch. How
+often the tie-break alone would have invalidated it was not observed, only shown
+to be possible.
 
 ## Run-to-run variance, quantified
 

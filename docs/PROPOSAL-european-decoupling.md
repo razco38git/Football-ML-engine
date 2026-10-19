@@ -401,6 +401,15 @@ So the 4.7-hour weekly is not a freak event, it is a scheduled one. But it is
 roughly *annual plus occasional*, not weekly — and that is the number design C
 was implicitly costed against.
 
+**That sentence is only true as of this evening.** A third cause was found while
+investigating the vintage drift: `team_strength(method="best_n")` broke ties at
+the squad cut with an unstable sort, so finished-season strength shifted
+whenever the live in-progress season grew -- four rows moved 260 of 1,173
+settled team-seasons. The invalidation key would have been sensitive to that
+every week. It is fixed (`EXPERIMENTS.md`, "The propagation path"), and the
+~annual figure above assumes the fix. Without it, decoupling would have been
+arguing about the wrong cause.
+
 ## 7.4 Verdict: design C is no longer the right recommendation
 
 Design C buys a bounded critical path by moving the build to its own task every
