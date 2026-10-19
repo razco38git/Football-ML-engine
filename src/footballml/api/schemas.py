@@ -18,6 +18,12 @@ class Health(BaseModel):
     trained_through: date
     n_train: int
 
+    #: True when the cross-league correction cannot be trusted for this model:
+    #: fitted against a different version, or carrying no version at all. It is
+    #: still applied -- a stale correction beats none -- but a caller that only
+    #: ever reads `/health` should not have to find this in the logs.
+    league_adjustment_stale: bool = False
+
 
 class ModelInfo(BaseModel):
     version: str

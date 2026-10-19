@@ -19,6 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from footballml.atomic import write_csv
 from footballml.data import PROCESSED_DIR  # noqa: E402
 from footballml.ingest.fbref_results import (  # noqa: E402
     fetch_fbref_results,
@@ -107,8 +108,8 @@ def main() -> None:
     log.info("xG coverage %d/%d (%.1f%%)", covered, len(merged), covered / len(merged) * 100)
 
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
-    matches.to_csv(MATCHES_OUT, index=False)
-    merged.to_csv(TMH_OUT, index=False)
+    write_csv(matches, MATCHES_OUT)
+    write_csv(merged, TMH_OUT)
     log.info("Wrote %s and %s", MATCHES_OUT.name, TMH_OUT.name)
 
     print("\n=== Coverage by league ===")

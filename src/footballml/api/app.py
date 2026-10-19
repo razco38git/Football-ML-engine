@@ -150,6 +150,12 @@ class State:
     #: `pipelines.fit_league_adjustment` runs, and empty means every gap is
     #: zero, i.e. the correction is the identity.
     league_offsets: dict[str, float] = field(default_factory=dict)
+
+    #: True when the loaded correction cannot be trusted for the serving model
+    #: -- fitted against a different one, or carrying no stamp at all. Surfaced
+    #: by `/health` rather than only logged, because a log line nobody reads is
+    #: how the European results went four weeks stale unnoticed.
+    league_offsets_stale: bool = False
     # Scored predictions, not raw fixtures. Rebuilding features over the full
     # history costs ~6.5s, which is far too slow to repeat per request when the
     # answer only changes when the fixture list does.
@@ -279,6 +285,9 @@ def _load_state(startup: bool = False) -> dict[str, int]:
         logger.info("Loaded %d scored European ties", len(state.european))
 
     offsets = load_league_adjustment()
+    # Cleared before every check, so a reload that fixes the mismatch also
+    # clears the flag rather than leaving the first bad verdict in place.
+    state.league_offsets_stale = False
     if offsets:
         state.league_offsets = offsets
         logger.info(
@@ -286,10 +295,24 @@ def _load_state(startup: bool = False) -> dict[str, int]:
             len(offsets), ", ".join(f"{k} {v:+.3f}" for k, v in sorted(offsets.items())),
         )
         fitted_against = fitted_model_version()
-        if metadata is not None and fitted_against not in (None, metadata.version):
+        if metadata is not None and fitted_against is None:
+            # An unstamped file used to pass this check in silence, because it
+            # read `not in (None, version)`. `league_adjust.save` now refuses
+            # to write one, so reaching here means a file written before that
+            # or edited by hand -- and it cannot be judged, which is worse than
+            # being stale rather than better.
+            state.league_offsets_stale = True
+            logger.warning(
+                "Cross-league correction records no model version, so it cannot "
+                "be checked against the model being served (%s). Re-run "
+                "`pipelines.fit_league_adjustment` to stamp it.",
+                metadata.version,
+            )
+        elif metadata is not None and fitted_against != metadata.version:
             # Not fatal: a stale correction is still closer to right than none,
             # and refusing to serve would be worse. But it is measuring a model
             # that no longer exists, so it should not pass unremarked.
+            state.league_offsets_stale = True
             logger.warning(
                 "Cross-league correction was fitted against model %s, serving %s. "
                 "Re-run `pipelines.validate_european` then "
@@ -663,6 +686,7 @@ def health() -> Health:
         model_version=meta.version,
         trained_through=pd.Timestamp(meta.trained_through).date(),
         n_train=meta.n_train,
+        league_adjustment_stale=state.league_offsets_stale,
     )
 
 

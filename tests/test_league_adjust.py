@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from footballml.league_adjust import adjust, fit, load, save
+from footballml.league_adjust import adjust, fit, fitted_model_version, load, save
 
 OFFSETS = {"E0": 0.0, "SP1": -0.18, "F1": -0.35}
 
@@ -150,9 +150,17 @@ def test_a_missing_file_loads_as_no_correction(tmp_path) -> None:
     assert load(tmp_path / "nope.json") == {}
 
 
+def _payload(**over) -> dict:
+    """A saveable adjustment. `model_version` is required, not decoration."""
+    return {
+        "offsets": OFFSETS, "reference": "E0", "n_matches": 10,
+        "holdout": {}, "model_version": "20261018-abc", **over,
+    }
+
+
 def test_what_is_saved_is_what_loads(tmp_path) -> None:
     path = tmp_path / "adj.json"
-    save({"offsets": OFFSETS, "reference": "E0", "n_matches": 10, "holdout": {}}, path)
+    save(_payload(), path)
     assert load(path) == OFFSETS
 
 
@@ -164,3 +172,72 @@ def test_a_corrupt_file_loads_as_no_correction(tmp_path) -> None:
 
     path.write_text(json.dumps({"unexpected": "shape"}), encoding="utf-8")
     assert load(path) == {}
+
+
+# --- an adjustment that cannot be checked must not be written -----------------
+#
+# The offsets describe one model's residual error, so the API checks them
+# against the model it is serving. That check read
+# `fitted_model_version() not in (None, serving)`, which an unstamped file
+# passes -- so it would be applied to every later model in silence. Refusing
+# to write one is cheaper than detecting it afterwards.
+
+
+def test_saving_without_a_model_version_is_refused(tmp_path) -> None:
+    path = tmp_path / "adj.json"
+    with pytest.raises(ValueError, match="model_version"):
+        save({"offsets": OFFSETS, "reference": "E0"}, path)
+    assert not path.exists(), "an unstamped adjustment was written"
+
+
+def test_an_empty_model_version_is_refused(tmp_path) -> None:
+    with pytest.raises(ValueError, match="model_version"):
+        save(_payload(model_version=""), tmp_path / "adj.json")
+
+
+def test_saving_without_offsets_is_refused(tmp_path) -> None:
+    with pytest.raises(ValueError, match="offsets"):
+        save({"model_version": "v1"}, tmp_path / "adj.json")
+
+
+def test_offsets_must_be_a_mapping(tmp_path) -> None:
+    with pytest.raises(ValueError, match="mapping"):
+        save(_payload(offsets=[("E0", 0.1)]), tmp_path / "adj.json")
+
+
+def test_a_refused_save_leaves_the_previous_adjustment_intact(tmp_path) -> None:
+    """The failure path: a bad refit must not cost the good correction."""
+    path = tmp_path / "adj.json"
+    save(_payload(), path)
+    before = path.read_bytes()
+
+    with pytest.raises(ValueError):
+        save({"offsets": OFFSETS}, path)
+
+    assert path.read_bytes() == before
+    assert load(path) == OFFSETS
+
+
+def test_the_save_is_atomic(tmp_path, monkeypatch) -> None:
+    """A write that dies part-way leaves the previous file whole."""
+    from footballml import atomic
+
+    path = tmp_path / "adj.json"
+    save(_payload(), path)
+    before = path.read_bytes()
+
+    def explode(*_a, **_k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(atomic.json, "dump", explode)
+    with pytest.raises(OSError):
+        save(_payload(model_version="v2"), path)
+
+    assert path.read_bytes() == before
+    assert not [p for p in tmp_path.iterdir() if p.name != "adj.json"]
+
+
+def test_the_version_stamp_round_trips(tmp_path) -> None:
+    path = tmp_path / "adj.json"
+    save(_payload(model_version="20261018-xyz"), path)
+    assert fitted_model_version(path) == "20261018-xyz"

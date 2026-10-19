@@ -29,6 +29,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from footballml.atomic import write_csv
 from footballml.data import PROCESSED_DIR, load_team_match_history  # noqa: E402
 from footballml.ingest.european import (  # noqa: E402
     EUROPEAN_LEAGUES,
@@ -157,8 +158,8 @@ def main() -> int:
     # Merge, never replace. See `merge_seasons`.
     kept = merge_seasons(_read(MATCHES_OUT), kept, seasons)
     dropped = merge_seasons(_read(DROPPED_OUT), dropped, seasons)
-    kept.to_csv(MATCHES_OUT, index=False)
-    dropped.to_csv(DROPPED_OUT, index=False)
+    write_csv(kept, MATCHES_OUT)
+    write_csv(dropped, DROPPED_OUT)
 
     print(f"\n=== Kept: {len(kept)} big-five vs big-five matches ===")
     if not kept.empty:

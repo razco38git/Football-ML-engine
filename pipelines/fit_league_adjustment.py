@@ -54,8 +54,17 @@ def main() -> int:
     # model's residual error, so a retrain makes them stale and the API says so.
     try:
         fitted["model_version"] = registry.load()[1].version
-    except Exception as exc:  # noqa: BLE001 - no artifact yet is survivable
-        logger.warning("Could not record the model version (%s)", exc)
+    except Exception as exc:  # noqa: BLE001 - reported, not guessed at
+        # Not survivable any more, and `save` enforces it. An unstamped file
+        # reads as "no version claimed" to the API, which used to skip the
+        # compatibility check entirely -- so it would be applied to every later
+        # model in silence. Better to leave the previous correction in place.
+        logger.error(
+            "Could not record the model version (%s). Refusing to save an "
+            "adjustment that cannot be checked against the model serving it; "
+            "the previous correction is unchanged.", exc,
+        )
+        return 1
     offsets = fitted["offsets"]
     holdout = fitted["holdout"]
 

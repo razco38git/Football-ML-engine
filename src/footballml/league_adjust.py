@@ -37,6 +37,7 @@ import numpy as np
 import pandas as pd
 from scipy import optimize
 
+from footballml.atomic import write_json
 from footballml.data import PROCESSED_DIR
 
 logger = logging.getLogger(__name__)
@@ -202,10 +203,40 @@ def adjust(
     )
 
 
+#: Keys a saved adjustment must carry to be usable.
+#:
+#: `model_version` is not optional and refusing to write without it is the
+#: point. The offsets describe one model's *residual* error, so the API checks
+#: them against the model it is serving -- and that check reads
+#: `fitted_model_version() not in (None, serving)`, which a missing stamp
+#: passes. An unstamped file would be applied to every future model in silence,
+#: which is the one outcome worse than having no correction at all.
+REQUIRED_KEYS = ("offsets", "model_version")
+
+
 def save(fitted: dict[str, object], path: Path | None = None) -> Path:
-    path = path or ADJUSTMENT_PATH
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(fitted, indent=2), encoding="utf-8")
+    """Publish fitted offsets atomically, refusing an unusable payload.
+
+    Raises:
+        ValueError: If a required key is missing or empty. Writing nothing is
+            better than writing something the compatibility check cannot judge:
+            `load` falls back to no correction, which is the behaviour the site
+            had before this existed.
+    """
+    path = Path(path) if path is not None else ADJUSTMENT_PATH
+
+    missing = [k for k in REQUIRED_KEYS if not fitted.get(k)]
+    if missing:
+        raise ValueError(
+            f"refusing to save a league adjustment without {missing}: "
+            "an unstamped file is applied to every later model without warning"
+        )
+    if not isinstance(fitted["offsets"], dict):
+        raise ValueError(
+            f"offsets must be a mapping, got {type(fitted['offsets']).__name__}"
+        )
+
+    write_json(fitted, path)
     return path
 
 

@@ -30,6 +30,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from footballml import registry  # noqa: E402
+from footballml.atomic import write_csv
 from footballml.data import (  # noqa: E402
     PROCESSED_DIR,
     load_team_match_history,
@@ -133,7 +134,7 @@ def main() -> None:
     result = pd.concat(tables, ignore_index=True)
 
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
-    result.to_csv(OUTPUT, index=False)
+    write_csv(result, OUTPUT)
     logger.info("Wrote %d rows to %s", len(result), OUTPUT.name)
 
     for league, group in result.groupby("League"):

@@ -43,6 +43,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from footballml import registry  # noqa: E402
+from footballml.atomic import write_csv
 from footballml.data import PROCESSED_DIR, load_team_match_history, load_team_strength  # noqa: E402
 from footballml.european import fit_league_strength, head_to_head  # noqa: E402
 from footballml.features.build import (  # noqa: E402
@@ -386,7 +387,7 @@ def main() -> int:
         raw.assign(**{FINGERPRINT_COLUMN: fingerprint}).to_pickle(FEATURES_CACHE)
 
     scored = predict_with(features, model, "home")
-    scored.to_csv(PREDICTIONS_OUT, index=False)
+    write_csv(scored, PREDICTIONS_OUT)
 
     actual = scored["FTR"].to_numpy()
     probs = _probs(scored)
