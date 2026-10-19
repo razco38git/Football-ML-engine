@@ -36,6 +36,20 @@ from footballml.ingest.understat import (  # noqa: E402
     season_labels,
 )
 
+#: football-data's own results, one row per match, and nothing else's.
+#:
+#: Deliberately *not* the feature table. The FBref and Understat top-ups below
+#: are applied to `team_match_history_all.csv` after this is written, so the two
+#: diverge whenever football-data is behind -- on 2026-10-19 this file ended on
+#: the 12th while the history reached the 18th. That is the contract, not a bug:
+#: this is the single-source archive in match shape, the history is the merged
+#: multi-source table the model reads.
+#:
+#: It has one consumer besides this module. `tests/test_team_names.py` takes it
+#: as the authority for which club names the match data knows, which is what
+#: stops a newly promoted side silently losing its Elo chart. Nothing in the
+#: daily or weekly path reads it any more -- the refresh gate used to, and that
+#: was the bug fixed in `f3c11e1`.
 MATCHES_OUT = PROCESSED_DIR / "matches_all.csv"
 TMH_OUT = PROCESSED_DIR / "team_match_history_all.csv"
 
