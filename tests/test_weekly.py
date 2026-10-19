@@ -199,3 +199,99 @@ def test_a_required_step_failing_still_skips_the_reload(monkeypatch, tmp_path) -
 
     assert weekly.main() == 1
     assert reloaded == [], "a failed required step must not publish anything"
+
+
+# --- what a successful step is allowed to hide --------------------------------
+#
+# On 2026-10-19 `build_dataset` dropped 17 played matches -- every Bundesliga
+# and Serie A fixture of that round -- because their shooting rows came back
+# without the columns the model reads. It logged a WARNING naming the leagues
+# and the count. The run took 94 minutes and ended with a coverage table, so
+# the eight-line tail kept the table and discarded the only sentence that
+# explained what had happened. The weekly log shows no trace of it.
+
+
+def _output(lines: list[str]) -> str:
+    return "\n".join(lines)
+
+
+def test_a_warning_far_from_the_end_is_kept() -> None:
+    """The case this exists for: 200 lines of noise after the only line that
+    mattered."""
+    warning = "WARNING Dropping 34 of 88 team-match row(s) (league(s) ['D1', 'I1'])"
+    output = _output([warning, *[f"line {i}" for i in range(200)]])
+    summary = weekly._summary_lines(output)
+    assert warning in summary
+    assert summary[0] == warning, "flagged lines come first"
+
+
+def test_an_error_far_from_the_end_is_kept() -> None:
+    error = "ERROR could not read the shooting table"
+    output = _output([*[f"line {i}" for i in range(50)], error, *[f"tail {i}" for i in range(50)]])
+    assert error in weekly._summary_lines(output)
+
+
+def test_the_tail_is_still_the_tail() -> None:
+    """A clean run must produce exactly what it produced before."""
+    lines = [f"line {i}" for i in range(50)]
+    assert weekly._summary_lines(_output(lines)) == lines[-weekly.SUMMARY_LINES:]
+
+
+def test_a_flagged_line_inside_the_tail_is_not_repeated() -> None:
+    """It is already going to be shown; hoisting it would print it twice."""
+    warning = "WARNING something went wrong"
+    lines = [*[f"line {i}" for i in range(50)], warning, "after"]
+    summary = weekly._summary_lines(_output(lines))
+    assert summary.count(warning) == 1
+    assert summary == lines[-weekly.SUMMARY_LINES:], "the tail is unchanged"
+
+
+def test_an_earlier_copy_of_a_tail_line_is_not_hoisted() -> None:
+    """De-duplication is across the two groups, by text."""
+    warning = "WARNING the same thing twice"
+    lines = [warning, *[f"line {i}" for i in range(50)], warning, "after"]
+    summary = weekly._summary_lines(_output(lines))
+    assert summary.count(warning) == 1
+
+
+def test_flagged_lines_keep_their_original_order() -> None:
+    first = "WARNING first problem"
+    second = "ERROR second problem"
+    third = "WARNING third problem"
+    lines = [first, "noise", second, "noise", third, *[f"line {i}" for i in range(30)]]
+    summary = weekly._summary_lines(_output(lines))
+    assert [line for line in summary if line in {first, second, third}] == [
+        first, second, third,
+    ]
+
+
+def test_repeated_tail_lines_are_preserved() -> None:
+    """Two identical lines in the tail are two things that happened, not one.
+
+    De-duplicating the tail against itself would quietly rewrite a step's log.
+    """
+    lines = ["same", "same", "same", "same", "same", "same", "same", "same"]
+    assert weekly._summary_lines(_output(lines)) == lines
+
+
+def test_empty_and_blank_output() -> None:
+    assert weekly._summary_lines(None) == []
+    assert weekly._summary_lines("") == []
+    assert weekly._summary_lines("\n   \n\n") == []
+
+
+def test_output_shorter_than_the_tail_is_returned_whole() -> None:
+    lines = ["WARNING something", "done"]
+    assert weekly._summary_lines(_output(lines)) == lines
+
+
+def test_a_word_that_merely_contains_a_level_is_not_flagged() -> None:
+    """"no errors" is the opposite of an error, and `ERRORS` is not a level."""
+    noise = "checked for errors and found none"
+    lines = [noise, *[f"line {i}" for i in range(30)]]
+    assert noise not in weekly._summary_lines(_output(lines))
+
+
+def test_lines_are_stripped_as_before() -> None:
+    noise = "\n".join(f"l{i}" for i in range(30))
+    assert "WARNING padded" in weekly._summary_lines(f"   WARNING padded   \n{noise}")

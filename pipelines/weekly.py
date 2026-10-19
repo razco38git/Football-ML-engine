@@ -46,6 +46,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
@@ -201,11 +202,38 @@ def run_step(step: Step) -> float:
 #: Lines of a successful step's log to carry up into the weekly log.
 SUMMARY_LINES = 8
 
+#: Levels that are carried up wherever they appear, not just from the tail.
+#:
+#: Matched on a word boundary so "no errors" and "WARNINGS:" do not qualify a
+#: line that is not a log record.
+_FLAGGED = re.compile(r"\b(?:WARNING|ERROR)\b")
+
 
 def _summary_lines(output: str | None) -> list[str]:
-    """The tail of a step's own log, as a readable summary of what it did."""
+    """A step's warnings and errors, then the tail of its log.
+
+    The tail alone is not enough, and the gap was expensive. On 2026-10-19
+    `build_dataset` dropped 17 played matches -- every Bundesliga and Serie A
+    fixture of that round -- because their shooting rows came back without the
+    columns the model reads. It said so, in a `WARNING` naming the leagues and
+    the count. That line sat ninety minutes and several hundred lines before
+    the end of a run that finished with a coverage table, so the tail kept the
+    table and discarded the only sentence that explained the run.
+
+    A step that *fails* already has its last 25 lines logged at ERROR. This is
+    for the worse case: a step that succeeds while quietly throwing work away.
+
+    Flagged lines keep their original order and come first; the tail follows
+    exactly as it was, repeats and all. A flagged line already in the tail is
+    not repeated above it, so a clean run -- or one whose only warning is its
+    last line -- gets precisely the summary it got before.
+    """
     lines = [line.strip() for line in (output or "").splitlines() if line.strip()]
-    return lines[-SUMMARY_LINES:]
+    tail = lines[len(lines) - SUMMARY_LINES :] if SUMMARY_LINES else []
+    in_tail = set(tail)
+    earlier = lines[: len(lines) - len(tail)]
+    flagged = [line for line in earlier if _FLAGGED.search(line) and line not in in_tail]
+    return [*flagged, *tail]
 
 
 def reload_api(url: str = API_URL, timeout: float = 120.0) -> bool:
