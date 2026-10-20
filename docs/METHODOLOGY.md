@@ -88,23 +88,29 @@ for season in test_seasons:          # pipelines/backtest.py
 ```
 
 Train on every prior season, predict one, advance. Twelve test seasons from
-1516, **20,013 matches**. Random k-fold would train on 2024 to predict 2018 and
+1516, **20,108 matches**.
+
+*The figures in this section come from the walk-forward run of 2026-10-20
+against model `20261019-...064706962166Z`. `pipelines.backtest` is in neither
+the weekly nor the daily job, so it only moves when somebody runs it -- which
+is why this line carries a date. The previous run was 2026-10-12 over 20,038
+matches, and the numbers published here had been quoting an even earlier one.* Random k-fold would train on 2024 to predict 2018 and
 report a score that cannot be reproduced in production.
 
 | Season | n | RPS | Accuracy |
 |---|---|---|---|
 | 1516 | 1,826 | 0.2059 | 50.4% |
-| 1617 | 1,826 | 0.1952 | 56.6% |
+| 1617 | 1,826 | 0.1952 | 57.1% |
 | 1718 | 1,826 | 0.1951 | 54.2% |
-| 1819 | 1,826 | 0.1964 | 52.5% |
-| 1920 | 1,725 | 0.2034 | 52.6% |
-| 2021 | 1,826 | 0.2023 | 51.9% |
-| 2122 | 1,826 | 0.2003 | 51.9% |
-| 2223 | 1,826 | 0.2019 | 53.5% |
-| 2324 | 1,752 | **0.1927** | 53.6% |
-| 2425 | 1,752 | 0.1973 | 53.8% |
-| 2526 | 1,752 | 0.1999 | 51.9% |
-| 2627 | 250 | 0.2027 | 49.6% |
+| 1819 | 1,826 | 0.1962 | 52.0% |
+| 1920 | 1,725 | 0.2038 | 51.8% |
+| 2021 | 1,826 | 0.2026 | 51.9% |
+| 2122 | 1,826 | 0.1997 | 52.6% |
+| 2223 | 1,826 | 0.2020 | 53.3% |
+| 2324 | 1,752 | **0.1928** | 53.6% |
+| 2425 | 1,752 | 0.1975 | 53.9% |
+| 2526 | 1,752 | 0.2003 | 51.7% |
+| 2627 | 345 | 0.1970 | 53.0% |
 
 1920 and 2021 are the two worst seasons and the reason is covid: matches behind
 closed doors, with home advantage suppressed for most of both.
@@ -218,8 +224,8 @@ has 6 cells against 15 per win, so 1-1 is the single likeliest score in 67% of
 matches while the home side is usually the likeliest *winner*. Even a perfectly
 even match at 2.75 total goals gives the draw 0.280 against 0.360 each way — the
 draw leads only below about 2.0 total goals, and these leagues run 2.7–2.8. The
-highest draw probability in 20,013 backtested matches is 37.5%, and the draw was
-the top pick twice; the market made it favourite 7 times in 20,007.
+highest draw probability in 20,108 backtested matches is 37.9%, and the draw was
+the top pick twice; the market made it favourite 7 times in 20,054.
 
 ---
 
@@ -240,11 +246,11 @@ The last cumulative term is dropped because it is 1 for both; dividing by
 
 | | RPS | Log loss | Brier | Accuracy |
 |---|---|---|---|---|
-| base rate | 0.2299 | 1.0708 | 0.6477 | 44.06% |
-| **this model** | **0.1992** | **0.9809** | **0.5839** | **52.94%** |
-| bookmakers | 0.1950 | 0.9673 | 0.5747 | 53.85% |
+| base rate | 0.2299 | 1.0707 | 0.6477 | 44.09% |
+| **this model** | **0.1992** | **0.9808** | **0.5838** | **52.96%** |
+| bookmakers | 0.1949 | 0.9672 | 0.5746 | 53.87% |
 
-Exact scoreline right **12.8%** of the time.
+Exact scoreline right **12.9%** of the time.
 
 **Why not accuracy.** Model A says H 51 / D 25 / A 24; model B says H 90 / D 5 /
 A 5. Both pick home, so accuracy scores them identically — but if home loses, B
@@ -275,7 +281,7 @@ Draw probability against outcome, which is the bin most likely to hide a fudge:
    match. Anything that cannot beat this has learned nothing.
 
    Two conventions for this number appear in the project and differ in the
-   fourth decimal. **0.2299** is one global base rate fitted over all 20,013
+   fourth decimal. **0.2299** is one global base rate fitted over all 20,108
    matches, which is what the README headline quotes. **0.2301** is what
    `run_backtest` records: each season's baseline comes from *that season's*
    training set, pooled by match count, so it is the honest walk-forward
@@ -289,10 +295,10 @@ Draw probability against outcome, which is the bin most likely to hide a fudge:
    removal slightly over-corrects favourites and is more than good enough as a
    benchmark.
 
-The model covers **88.0%** of the RPS distance from the base rate to the market:
-`(0.2299 - 0.1992) / (0.2299 - 0.1950)`.
+The model covers **87.7%** of the RPS distance from the base rate to the market:
+`(0.2299 - 0.1992) / (0.2299 - 0.1949)`.
 
-The market is a strong benchmark, **not a theoretical ceiling.** It stays 0.0042
+The market is a strong benchmark, **not a theoretical ceiling.** It stays 0.0043
 ahead because it prices information this model does not have — team news,
 lineups, injuries — and the aggregated opinion of everyone betting into it.
 

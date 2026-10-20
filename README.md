@@ -16,15 +16,15 @@ over/under, both-teams-to-score — from the resulting distribution.
 
 ## How good is it
 
-Measured by walk-forward backtest over **20,013 matches** — each season
+Measured by walk-forward backtest over **20,108 matches** — each season
 predicted by a model trained only on earlier ones, so nothing has seen its own
 result:
 
 | | RPS | Accuracy |
 |---|---|---|
 | base rate | 0.2299 | 44.1% |
-| **this model** | **0.1992** | **52.9%** |
-| the bookmakers | 0.1950 | 53.9% |
+| **this model** | **0.1992** | **53.0%** |
+| the bookmakers | 0.1949 | 53.9% |
 
 The baseline is the **base-rate forecast** — the long-run 44/25/31 split on
 every fixture. Its accuracy is the same as always picking the home side, because

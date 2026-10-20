@@ -190,12 +190,12 @@ The part that is easy to skip and should not be.
 rewards being confidently right, punishes being confidently wrong, and unlike
 accuracy it cares about the whole distribution rather than just the top pick.
 
-Where it currently stands, on 20,013 walk-forward matches:
+Where it currently stands, on 20,108 walk-forward matches:
 
 ```
   base rate (always predict the average)   0.2301
   this model                               0.1992
-  the bookmakers                           0.1950
+  the bookmakers                           0.1949
 ```
 
 **A change is measured, not argued.** The walk-forward backtest trains on
