@@ -78,14 +78,25 @@ def main() -> int:
     # and "cannot be told apart" has to mean no rather than yes here -- the cost
     # of refusing is one week without a refreshed correction, which `load`
     # already degrades to safely.
-    scored_by = set(predictions.get(MODEL_VERSION_COLUMN, pd.Series(dtype=str)).dropna())
-    if scored_by != {serving}:
+    # Every row, not every row that happens to carry a stamp. Dropping the
+    # blanks first would accept a file half of whose rows came from an unknown
+    # model, which is the case being guarded against rather than an exception
+    # to it. Nothing writes such a file today -- `validate_european` stamps the
+    # whole frame -- but a later change to score incrementally would make it
+    # the normal shape, and this check would have waved it through.
+    stamps = predictions.get(MODEL_VERSION_COLUMN)
+    unstamped = len(predictions) if stamps is None else int(stamps.isna().sum())
+    recorded = sorted(set(stamps.dropna())) if stamps is not None else []
+    if unstamped or recorded != [serving]:
         logger.error(
             "%s was scored by %s, but the model being served is %s. Refusing to "
             "fit a correction on another model's residuals and stamp it as this "
             "one's; the previous correction is unchanged. Re-run "
             "`python -m pipelines.validate_european` first.",
-            PREDICTIONS.name, sorted(scored_by) or "no recorded model", serving,
+            PREDICTIONS.name,
+            ", ".join(recorded) + (f" (+{unstamped} row(s) with no stamp)" if unstamped else "")
+            if recorded or unstamped else "no recorded model",
+            serving,
         )
         return 1
 

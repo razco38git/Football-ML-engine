@@ -114,3 +114,116 @@ def test_startup_serves_what_works_rather_than_refusing(serving, monkeypatch):
 
     assert api.state.model == "new-model"
     assert api.state.metadata.version == "needs-elo"
+
+
+# --- the cross-league correction's compatibility verdict ----------------------
+#
+# The offsets describe one model's *residual* error, so they do not transfer to
+# another. The check used to read `fitted_model_version() not in (None, serving)`
+# -- which an unstamped file passes, so it would be applied to every later model
+# in silence. It is now two explicit cases, and the verdict is surfaced on
+# `/health` rather than only logged, because a log line nobody reads is how the
+# European results went four weeks stale unnoticed.
+#
+# These pin that a *clean* verdict requires the check to genuinely pass.
+
+
+class _FullMeta(_Meta):
+    """`health()` reads more of the metadata than the compatibility check does."""
+
+    def __init__(self, version: str, feature_names: list[str]) -> None:
+        super().__init__(version, feature_names)
+        self.trained_through = "2026-10-18"
+        self.n_train = 20_074
+
+
+def _adjustment(monkeypatch, offsets: dict | None, stamped: str | None) -> None:
+    monkeypatch.setattr(api, "load_league_adjustment", lambda *_a, **_k: offsets or {})
+    monkeypatch.setattr(api, "fitted_model_version", lambda *_a, **_k: stamped)
+
+
+def _serve(monkeypatch, version: str = "serving-v1") -> None:
+    monkeypatch.setattr(
+        api.registry, "load",
+        lambda *_a, **_k: ("m", _FullMeta(version, ["home_points_last_5"])),
+    )
+
+
+OFFSETS = {"E0": 0.0, "SP1": -0.18}
+
+
+def test_an_adjustment_fitted_on_the_serving_model_is_not_stale(serving, monkeypatch):
+    _serve(monkeypatch)
+    _adjustment(monkeypatch, OFFSETS, "serving-v1")
+
+    api._load_state()
+
+    assert api.state.league_offsets == OFFSETS
+    assert api.state.league_offsets_stale is False
+    assert api.health().league_adjustment_stale is False
+
+
+def test_an_adjustment_fitted_on_another_model_is_stale(serving, monkeypatch):
+    """Still applied -- a stale correction beats none -- but never silently."""
+    _serve(monkeypatch)
+    _adjustment(monkeypatch, OFFSETS, "some-older-model")
+
+    api._load_state()
+
+    assert api.state.league_offsets == OFFSETS, "the correction was dropped, not flagged"
+    assert api.state.league_offsets_stale is True
+    assert api.health().league_adjustment_stale is True
+
+
+def test_an_unstamped_adjustment_is_stale_rather_than_trusted(serving, monkeypatch):
+    """The original bug. `not in (None, serving)` let a file with no stamp
+    through as though it had been checked."""
+    _serve(monkeypatch)
+    _adjustment(monkeypatch, OFFSETS, None)
+
+    api._load_state()
+
+    assert api.state.league_offsets_stale is True
+    assert api.health().league_adjustment_stale is True
+
+
+def test_no_adjustment_at_all_is_not_reported_as_stale(serving, monkeypatch):
+    """Nothing is being applied, so there is nothing to be stale about -- and
+    claiming staleness here would cry wolf on every fresh checkout."""
+    _serve(monkeypatch)
+    _adjustment(monkeypatch, {}, None)
+
+    api._load_state()
+
+    assert api.state.league_offsets_stale is False
+    assert api.health().league_adjustment_stale is False
+
+
+def test_a_reload_that_fixes_the_mismatch_clears_the_verdict(serving, monkeypatch):
+    """The flag is state, so it has to be cleared before each check rather than
+    only set -- otherwise the first bad verdict sticks for the process's life."""
+    _serve(monkeypatch)
+    _adjustment(monkeypatch, OFFSETS, "some-older-model")
+    api._load_state()
+    assert api.state.league_offsets_stale is True
+
+    _adjustment(monkeypatch, OFFSETS, "serving-v1")
+    api._load_state()
+
+    assert api.state.league_offsets_stale is False
+    assert api.health().league_adjustment_stale is False
+
+
+def test_a_retrain_turns_a_clean_verdict_stale(serving, monkeypatch):
+    """The direction that matters in practice: the adjustment does not move, the
+    model does, and the verdict has to follow the model."""
+    _serve(monkeypatch, "serving-v1")
+    _adjustment(monkeypatch, OFFSETS, "serving-v1")
+    api._load_state()
+    assert api.state.league_offsets_stale is False
+
+    _serve(monkeypatch, "serving-v2")
+    api._load_state()
+
+    assert api.state.league_offsets_stale is True
+    assert api.health().league_adjustment_stale is True

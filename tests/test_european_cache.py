@@ -384,6 +384,38 @@ def test_a_mixture_of_model_versions_is_refused(monkeypatch, tmp_path):
     assert not written
 
 
+def test_a_partly_stamped_file_is_refused(monkeypatch, tmp_path):
+    """Found in the pre-push audit. The check read `set(...dropna())`, so a file
+    whose rows were *half* stamped with the serving model and half blank passed:
+    the blanks were dropped and the remainder matched.
+
+    Nothing writes that shape today -- `validate_european` stamps the whole
+    frame in one assignment -- but scoring incrementally would make it the
+    normal shape, and rows from an unknown model are the thing being guarded
+    against rather than an exception to it.
+    """
+    frame = _predictions("new-model")
+    frame.loc[2:, validate.MODEL_VERSION_COLUMN] = None
+    fit_mod = _fit_module(monkeypatch, tmp_path, frame, "new-model")
+    written: list = []
+    monkeypatch.setattr(fit_mod, "save", lambda *a, **k: written.append(a))
+
+    assert fit_mod.main() == 1
+    assert not written, "fitted on rows whose model is unknown"
+
+
+def test_an_empty_predictions_file_is_refused(monkeypatch, tmp_path):
+    """Zero rows carry zero evidence about which model scored them."""
+    fit_mod = _fit_module(
+        monkeypatch, tmp_path, _predictions("new-model").iloc[:0], "new-model"
+    )
+    written: list = []
+    monkeypatch.setattr(fit_mod, "save", lambda *a, **k: written.append(a))
+
+    assert fit_mod.main() == 1
+    assert not written
+
+
 def test_predictions_from_the_serving_model_are_accepted(monkeypatch, tmp_path):
     """The guard must not block the normal week, or it is just an outage."""
     fit_mod = _fit_module(monkeypatch, tmp_path, _predictions("new-model", n=200), "new-model")
