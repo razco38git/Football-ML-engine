@@ -83,10 +83,6 @@ from pipelines.weekly import (  # noqa: E402
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-#: Where football-data's own results land. Kept for the record and because it
-#: is what `build_dataset` writes, but **nothing in this job reads it** any
-#: more -- see :data:`HISTORY` for why the gate stopped.
-MATCHES = ROOT / "data" / "processed" / "matches_all.csv"
 EUROPEAN = ROOT / "data" / "processed" / "european_matches.csv"
 PREDICTIONS = ROOT / "data" / "processed" / "predictions.csv"
 

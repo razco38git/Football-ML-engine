@@ -10,6 +10,7 @@ experiment's numbers, 1,160 of 1,170 rows wrong, while the API served them.
 from __future__ import annotations
 
 import json
+import os
 
 import pandas as pd
 import pytest
@@ -158,3 +159,70 @@ def test_unchanged_is_false_when_a_value_moved(tmp_path, frame) -> None:
 def test_unchanged_is_false_when_the_target_is_absent(tmp_path, frame) -> None:
     """Absent means write it, which is the safe direction."""
     assert not atomic.unchanged(frame, tmp_path / "missing.csv")
+
+
+# --- what the module claims about fsync, and what it actually does ------------
+#
+# The docstring used to say "the handle is flushed and `fsync`'d before the
+# replace" as though it applied to every writer here. It does not: `atomic_open`
+# owns the handle and can fsync it, while `write_csv` and `write_bytes` hand the
+# path to pandas and to `Path.write_bytes`, which close the file and never
+# fsync. The audit that found the overclaim is the reason these exist -- the
+# point is that the documentation and the code agree, in whichever direction.
+
+
+def test_atomic_open_fsyncs_before_publishing(tmp_path, monkeypatch) -> None:
+    """`write_json` goes through `atomic_open`, so it gets the stronger
+    guarantee the docstring promises it."""
+    synced: list[int] = []
+    real = os.fsync
+    monkeypatch.setattr(atomic.os, "fsync", lambda fd: synced.append(fd) or real(fd))
+
+    atomic.write_json({"a": 1}, tmp_path / "x.json")
+
+    assert synced, "write_json published without fsync, which its docstring promises"
+
+
+def test_the_csv_writer_does_not_claim_an_fsync_it_never_makes(
+    tmp_path, frame, monkeypatch
+) -> None:
+    """Pins the honest version rather than the flattering one.
+
+    If `write_csv` ever starts fsync'ing, that is an improvement -- but the
+    module docstring says plainly that it does not, so the two must be changed
+    together.
+    """
+    synced: list[int] = []
+    real = os.fsync
+    monkeypatch.setattr(atomic.os, "fsync", lambda fd: synced.append(fd) or real(fd))
+
+    atomic.write_csv(frame, tmp_path / "x.csv")
+
+    assert not synced, (
+        "write_csv now fsyncs; update the module docstring, which says it does not"
+    )
+    assert "do not: they hand the path to pandas" in atomic.__doc__
+
+
+def test_every_writer_keeps_the_guarantee_the_callers_rely_on(tmp_path, frame) -> None:
+    """The three properties that hold regardless of fsync, for all four writers:
+    the target survives a failure whole, and no temporary file is left over."""
+    for name, publish in (
+        ("write_csv", lambda p: atomic.write_csv(frame, p)),
+        ("write_json", lambda p: atomic.write_json({"a": 1}, p)),
+        ("write_bytes", lambda p: atomic.write_bytes(b"new", p)),
+    ):
+        path = tmp_path / f"{name}.dat"
+        path.write_bytes(b"previous")
+        before = path.read_bytes()
+
+        with pytest.raises(RuntimeError), atomic.atomic_path(path) as tmp:
+            tmp.write_bytes(b"half")
+            raise RuntimeError("interrupted")
+
+        assert path.read_bytes() == before, f"{name}: target changed on failure"
+        leftovers = [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")]
+        assert not leftovers, f"{name}: {leftovers} left behind"
+
+        publish(path)
+        assert path.read_bytes() != before, f"{name}: a clean publish did nothing"

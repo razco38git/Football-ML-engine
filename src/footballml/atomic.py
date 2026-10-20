@@ -15,12 +15,26 @@ The mechanism is the obvious one and the details are what make it work:
 
 - the temporary file sits **in the same directory** as its target, so the
   replace never crosses a filesystem and never falls back to a copy;
-- the handle is flushed and `fsync`'d before the replace, so a power loss
-  cannot leave the directory entry pointing at unwritten blocks;
 - `Path.replace` is atomic on POSIX and on Windows, which is what lets a
   reader see either the old file or the new one and never a half of either;
 - a failure **removes the temporary file and leaves the target untouched**,
   which is the property the callers actually depend on.
+
+Those three hold for every writer here, and they are what the callers need:
+the threat is a reader -- or the other job -- catching a file mid-write, and
+`replace` answers it.
+
+**Durability against a power loss is a separate question, and only half
+answered.** `atomic_open`, and so `write_json`, flushes and `fsync`s the handle
+before the replace, so the directory entry cannot end up pointing at unwritten
+blocks. `write_csv` and `write_bytes` do not: they hand the path to pandas and
+to `Path.write_bytes`, which close the file but never `fsync` it. Nothing here
+needs more than that -- every file these publish is derived data that the
+pipeline can rebuild, and a crash loses at most the run that was interrupted --
+so the gap is recorded rather than papered over. A caller that genuinely needs
+the stronger guarantee should use `atomic_open` and write through the handle.
+(Full crash safety would also want the *directory* fsync'd, which Windows does
+not offer, so claiming it here would be false anyway.)
 
 The temporary name is unique per call, so two writers publishing the same path
 at once cannot scribble on each other's half-written copy. They still race for

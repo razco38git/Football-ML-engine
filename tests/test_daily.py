@@ -53,8 +53,9 @@ def runs(monkeypatch) -> list[str]:
 def _fingerprints(monkeypatch, matches, european=(0, "")) -> None:
     """Patch `_fingerprint` so the two results tables can move independently.
 
-    Called with no path it answers for `matches_all.csv`, and with one for
-    `european_matches.csv` -- which is how the run distinguishes them. A list
+    Called with no path it answers for the match *history* -- the gate's
+    default since `f3c11e1` -- and with one for `european_matches.csv`, which is
+    how the run distinguishes them. A list
     for `matches` is consumed one call at a time, so a test can say "the fetch
     moved the table".
     """
@@ -525,6 +526,12 @@ def test_the_gate_reads_the_history_not_the_file_football_data_writes(
     Both files are present and different, so a default pointing at either one
     gives a different answer -- which is what makes this a real test rather
     than an assertion about a name.
+
+    `matches_all.csv` is written but never pointed at: the `MATCHES` constant
+    that used to hold its path is gone, so there is nothing left to patch. It
+    stays on disk because a regression that re-pointed the default at that
+    name, by any route, would then read the real file and answer with neither
+    of these numbers.
     """
     history = tmp_path / "team_match_history_all.csv"
     history.write_text(
@@ -534,7 +541,9 @@ def test_the_gate_reads_the_history_not_the_file_football_data_writes(
     matches.write_text("Date\n2026-10-12\n", encoding="utf-8")
 
     monkeypatch.setattr(daily, "HISTORY", history)
-    monkeypatch.setattr(daily, "MATCHES", matches)
+    assert not hasattr(daily, "MATCHES"), (
+        "the dead constant is back; the gate must have exactly one source"
+    )
 
     assert daily._fingerprint() == (3, "2026-10-18"), (
         "the gate is reading matches_all.csv, which nothing downstream reads"
