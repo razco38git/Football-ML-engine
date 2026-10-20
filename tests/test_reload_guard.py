@@ -227,3 +227,55 @@ def test_a_retrain_turns_a_clean_verdict_stale(serving, monkeypatch):
 
     assert api.state.league_offsets_stale is True
     assert api.health().league_adjustment_stale is True
+
+
+# --- a season too thin to publish --------------------------------------------
+#
+# A club is rated only once eleven of its players clear the minutes threshold,
+# so a season in progress fills up gradually. Completed seasons hold 96-98
+# clubs; 2026/27 held five, nine matchweeks in. Defaulting to it showed the
+# Team Strength page five clubs across two leagues, and left the What-If tab
+# able to pair only those five.
+
+
+def _strength(counts: dict[str, int]) -> pd.DataFrame:
+    return pd.DataFrame([
+        {"League": "E0", "Season": s, "Team": f"t{i}", "strength_overall": 70.0}
+        for s, n in counts.items() for i in range(n)
+    ])
+
+
+def test_a_season_in_progress_is_not_offered() -> None:
+    seasons = api._publishable_seasons(_strength({"2425": 96, "2526": 96, "2627": 5}))
+    assert seasons == ["2526", "2425"], seasons
+
+
+def test_the_newest_full_season_becomes_the_default() -> None:
+    """What the page lands on when nobody picks: the newest season that is
+    actually representative, not the newest that exists."""
+    seasons = api._publishable_seasons(_strength({"2425": 96, "2526": 96, "2627": 5}))
+    assert seasons[0] == "2526"
+
+
+def test_a_season_opens_once_it_fills_up() -> None:
+    """The floor has to let go by itself. Hardcoding 2026/27 would hide the
+    season that follows it too, in August, with nobody watching."""
+    thin = api._publishable_seasons(_strength({"2526": 96, "2627": 71}))
+    full = api._publishable_seasons(_strength({"2526": 96, "2627": 72}))
+    assert "2627" not in thin
+    assert "2627" in full and full[0] == "2627"
+
+
+def test_the_yardstick_excludes_the_season_being_judged() -> None:
+    """Measured against itself, five clubs out of five is full coverage and the
+    season would always qualify."""
+    assert "2627" not in api._publishable_seasons(_strength({"2526": 96, "2627": 5}))
+
+
+def test_a_single_season_is_still_offered() -> None:
+    """A fresh checkout with one season built must not show an empty page."""
+    assert api._publishable_seasons(_strength({"2526": 96})) == ["2526"]
+
+
+def test_no_team_ratings_at_all_is_not_an_error() -> None:
+    assert api._publishable_seasons(_strength({})) == []

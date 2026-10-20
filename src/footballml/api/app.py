@@ -1605,6 +1605,42 @@ def player_similarity(
     )
 
 
+#: How much of a normal season a season needs before it is offered as a choice.
+#:
+#: A club gets a rating only once eleven of its players clear the minutes
+#: threshold (`MIN_RATED_PLAYERS`), so a season in progress fills up gradually:
+#: completed seasons here hold 96-98 clubs, and 2026/27 held **5** nine
+#: matchweeks in. Offering that as the newest season -- and defaulting to it --
+#: meant the Team Strength page showed five clubs and two leagues, and the
+#: What-If tab would pair only those five.
+#:
+#: Three quarters is high enough that the page is representative and low enough
+#: that it opens a few weeks into a season rather than in May. It is a share of
+#: a *typical* season rather than a fixed count, so promotion, relegation or a
+#: sixth league do not quietly move the bar.
+SEASON_COVERAGE = 0.75
+
+
+def _publishable_seasons(teams: pd.DataFrame) -> list[str]:
+    """Seasons complete enough to offer, newest first.
+
+    The season in progress is excluded from its own yardstick -- otherwise a
+    season with five clubs would be measured against five clubs and always
+    qualify.
+    """
+    if teams.empty or "Season" not in teams.columns:
+        return []
+    counts = teams.groupby(teams["Season"].astype(str)).size()
+    if counts.empty:
+        return []
+    settled = counts.drop(index=counts.index.max()) if len(counts) > 1 else counts
+    yardstick = float(settled.median())
+    return [
+        s for s in sorted(counts.index, reverse=True)
+        if counts[s] >= SEASON_COVERAGE * yardstick
+    ]
+
+
 @app.get("/teams", response_model=TeamStrengthPage)
 def teams(
     league: str | None = Query(None, description="Division code, e.g. E0"),
@@ -1617,9 +1653,10 @@ def teams(
             404, "No team ratings loaded. Run `python -m pipelines.build_players`."
         )
 
-    seasons = sorted(
-        {str(s) for s in state.teams["Season"].dropna().unique()}, reverse=True
-    )
+    seasons = _publishable_seasons(state.teams)
+    # An explicit `season=` is still honoured, including one held back below:
+    # the rows are real, they are only too thin to put in front of someone who
+    # did not ask for them.
     shown = season or (seasons[0] if seasons else None)
     rows = state.teams
     rows = rows[rows["Season"].astype(str) == str(shown)]
@@ -1676,7 +1713,14 @@ def league_strength(
         )
 
     rows = state.teams
-    rows = rows[rows["Season"] == (season or rows["Season"].max())]
+    # The same coverage floor `/teams` applies, and for a sharper reason: a
+    # league average over a season in progress is taken across whichever clubs
+    # happen to be rated yet. Nine matchweeks into 2026/27 that was Ligue 1
+    # from one club and LaLiga from four, published as "average squad rating"
+    # beside a note about how the leagues compare.
+    publishable = _publishable_seasons(state.teams)
+    default = publishable[0] if publishable else rows["Season"].max()
+    rows = rows[rows["Season"].astype(str) == str(season or default)]
     rows = rows[rows["strength_overall"].notna()]
     if rows.empty:
         raise HTTPException(404, f"No team ratings for season {season!r}")

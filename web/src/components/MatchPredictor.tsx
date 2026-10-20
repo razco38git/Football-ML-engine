@@ -437,10 +437,16 @@ function SquadStrength({ p }: { p: Prediction }) {
 /** One prediction, rendered. Exported so the What-If tab shows the same card
  *  rather than a second, subtly different one.
  *
- *  `leagues` overrides the per-side league label. A real fixture has one league
- *  and needs no override, but a hypothetical pairing can cross borders, and the
- *  prediction carries only the league it was *scored* in -- which would label
- *  Man City "LaLiga" in a Real Madrid tie. */
+ *  `leagues` overrides the per-side league label, for a pairing the API never
+ *  scored -- the What-If tab invents those, so nothing on the prediction says
+ *  where either club plays.
+ *
+ *  Everything else takes the label from `home_division`/`away_division`, which
+ *  the API resolves per club. `p.league` is the league the fixture was *scored*
+ *  in, which for a European tie is the home side's: it labelled Ath Madrid
+ *  "Bundesliga" in a Stuttgart tie and Villarreal "Premier League" at Anfield.
+ *  The comment here used to say a real fixture has one league and needs no
+ *  override; a Champions League night is the counter-example. */
 /**
  * What the model said would happen: likeliest exact score, the scores either
  * side of it, a verdict and a confidence.
@@ -608,7 +614,12 @@ export function MatchCard({ p, leagues }: {
           its badge and form pills were simply unreachable.
         */}
         <div className="grid items-center gap-4 grid-cols-1 sm:grid-cols-[1fr_auto_1fr]">
-          <TeamSide team={p.home_team} form={p.form_home} league={leagues?.home ?? p.league} align="left" />
+          <TeamSide
+            team={p.home_team}
+            form={p.form_home}
+            league={leagues?.home ?? p.home_division ?? p.league}
+            align="left"
+          />
 
           {/*
             Before kick-off, the forecast. Afterwards, what actually happened
@@ -644,7 +655,12 @@ export function MatchCard({ p, leagues }: {
             <ForecastSummary p={p} />
           )}
 
-          <TeamSide team={p.away_team} form={p.form_away} league={leagues?.away ?? p.league} align="right" />
+          <TeamSide
+            team={p.away_team}
+            form={p.form_away}
+            league={leagues?.away ?? p.away_division ?? p.league}
+            align="right"
+          />
         </div>
 
         <div className="mt-4">
