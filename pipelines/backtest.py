@@ -14,7 +14,9 @@ Run with::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -22,6 +24,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from footballml.atomic import write_csv, write_json  # noqa: E402
 from footballml.data import (  # noqa: E402
     ODDS_COLUMNS,
     PROCESSED_DIR,
@@ -47,6 +50,52 @@ from footballml.models.match_model import MatchPredictor, feature_columns  # noq
 #: swinging between 0.89 and 1.82 that did not transfer to the next season,
 #: leaving calibration marginally worse than doing nothing.
 MIN_CALIBRATION_MATCHES = 700
+
+
+#: Provenance for the predictions, written beside them.
+#:
+#: **What the backtest measures, and what it does not.** Each fold fits a fresh
+#: model on the seasons before the one it scores -- `registry` is never touched.
+#: So these metrics describe the *method* on this data: the feature set, the
+#: hyperparameters, the calibration. They have never described the artifact the
+#: site serves, not even when run seconds after `pipelines.train`, and stamping
+#: them with that artifact's version would claim exactly the thing that is not
+#: true.
+#:
+#: What does make them stale is the input moving underneath them, so that is
+#: what is recorded: when the run happened, how many matches it scored, and a
+#: digest of the two files it read. `model_version` is carried only as
+#: provenance -- which model happened to be current at the time -- and is
+#: deliberately not what the staleness check reads.
+META_PATH = PROCESSED_DIR / "backtest_meta.json"
+
+
+def _digest(path: Path | None) -> str | None:
+    if path is None or not path.exists():
+        return None
+    return hashlib.md5(path.read_bytes()).hexdigest()[:12]  # noqa: S324 - a cache key
+
+
+def _provenance(preds: pd.DataFrame, history: Path | None) -> dict[str, object]:
+    try:
+        from footballml import registry
+
+        current_model = registry.load()[1].version
+    except Exception:  # noqa: BLE001 - provenance only; a missing model is fine
+        current_model = None
+
+    seasons = sorted(str(s) for s in preds["Season"].unique())
+    return {
+        "evaluated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "n_matches": int(len(preds)),
+        "seasons": seasons,
+        "inputs": {
+            "team_match_history_all.csv": _digest(history),
+            "team_strength.csv": _digest(PROCESSED_DIR / "team_strength.csv"),
+        },
+        # Provenance, not a claim. See META_PATH.
+        "model_version_at_run": current_model,
+    }
 
 
 def run_backtest(
@@ -295,8 +344,14 @@ def main() -> None:
         # Every walk-forward prediction, each made by a model trained only on
         # earlier seasons. This is what the site's accuracy page reads as its
         # backtest history.
+        # Atomically, because this now runs unattended in the weekly: a run
+        # killed mid-write would otherwise leave a truncated file that still
+        # parses, so a short backtest would read as a worse one rather than a
+        # broken one. A failure anywhere above never reaches here, so the
+        # previous run's predictions survive it untouched.
         out = PROCESSED_DIR / "backtest_predictions.csv"
-        preds.to_csv(out, index=False)
+        write_csv(preds, out)
+        write_json(_provenance(preds, path), META_PATH)
         print(f"\nWrote {len(preds):,} walk-forward predictions to {out.name}")
 
     print("\n=== Calibration ===")

@@ -16,6 +16,7 @@ feed.
 from __future__ import annotations
 
 import importlib
+import json
 
 import pandas as pd
 import pytest
@@ -279,3 +280,89 @@ def test_a_single_season_is_still_offered() -> None:
 
 def test_no_team_ratings_at_all_is_not_an_error() -> None:
     assert api._publishable_seasons(_strength({})) == []
+
+
+# --- how fresh the backtest figures are --------------------------------------
+#
+# These metrics never described the serving model: every walk-forward fold fits
+# its own model on the seasons before the one it scores, so `registry` is never
+# read. Tying the verdict to `model_version` would assert exactly that
+# relationship. What ages them is the data underneath, so that is compared.
+
+
+def _meta(tmp_path, **over) -> dict:
+    payload = {
+        "evaluated_at": "2026-10-20T11:00:00+00:00",
+        "n_matches": 20108,
+        "inputs": {"team_strength.csv": "aaaaaaaaaaaa"},
+        "model_version_at_run": "some-model",
+        **over,
+    }
+    (tmp_path / "backtest_meta.json").write_text(json.dumps(payload), encoding="utf-8")
+    return payload
+
+
+def _point_at(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(api, "PROCESSED_DIR", tmp_path)
+    api.state.backtest = pd.DataFrame({"FTR": ["H"]})
+
+
+def test_an_unchanged_input_reads_as_fresh(monkeypatch, tmp_path) -> None:
+    _point_at(monkeypatch, tmp_path)
+    (tmp_path / "team_strength.csv").write_bytes(b"strength")
+    digest = api._digest(tmp_path / "team_strength.csv")
+    _meta(tmp_path, inputs={"team_strength.csv": digest})
+
+    when, stale = api._backtest_freshness()
+
+    assert stale is False
+    assert when == "2026-10-20T11:00:00+00:00"
+
+
+def test_a_changed_input_reads_as_stale(monkeypatch, tmp_path) -> None:
+    """The real case: `build_players` reran and moved squad strength, so the
+    figures describe a vintage that no longer exists."""
+    _point_at(monkeypatch, tmp_path)
+    (tmp_path / "team_strength.csv").write_bytes(b"strength")
+    _meta(tmp_path, inputs={"team_strength.csv": "0000notthehash"})
+
+    _, stale = api._backtest_freshness()
+
+    assert stale is True
+
+
+def test_no_provenance_reads_as_unknown_not_fresh(monkeypatch, tmp_path) -> None:
+    """Every file written before the sidecar existed. Unknown must not be
+    reported as a clean bill of health."""
+    _point_at(monkeypatch, tmp_path)
+
+    assert api._backtest_freshness() == (None, None)
+
+
+def test_a_corrupt_sidecar_reads_as_unknown(monkeypatch, tmp_path) -> None:
+    _point_at(monkeypatch, tmp_path)
+    (tmp_path / "backtest_meta.json").write_text("{not json", encoding="utf-8")
+
+    assert api._backtest_freshness() == (None, None)
+
+
+def test_no_backtest_at_all_reads_as_unknown(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(api, "PROCESSED_DIR", tmp_path)
+    api.state.backtest = pd.DataFrame()
+    _meta(tmp_path)
+
+    assert api._backtest_freshness() == (None, None)
+
+
+def test_the_verdict_does_not_read_the_model_version(monkeypatch, tmp_path) -> None:
+    """The point of the design, pinned. A retrain alone must not mark the
+    backtest stale -- it never claimed to describe that artifact."""
+    _point_at(monkeypatch, tmp_path)
+    (tmp_path / "team_strength.csv").write_bytes(b"strength")
+    digest = api._digest(tmp_path / "team_strength.csv")
+    _meta(tmp_path, inputs={"team_strength.csv": digest},
+          model_version_at_run="a-model-that-is-long-gone")
+
+    _, stale = api._backtest_freshness()
+
+    assert stale is False, "a retrain alone was treated as invalidating"

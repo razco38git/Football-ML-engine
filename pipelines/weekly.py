@@ -97,6 +97,24 @@ STEPS: tuple[Step, ...] = (
     Step("train", (), "retrain on the new matches"),
     Step("score_upcoming", (), "settle played predictions, forecast the next round"),
     Step("project_season", (), "simulate the rest of the season for each league"),
+    # Reporting, not publication, which is why it sits here rather than earlier.
+    #
+    # It depends on `build_dataset` and `build_players` and on **nothing else**:
+    # every fold fits its own model on the seasons before the one it scores, so
+    # `registry` is never read and `train` is not a prerequisite. Placing it
+    # after the publication path means a three-minute re-score does not delay
+    # the model the site is waiting for; placing it before `validate_european`
+    # keeps the domestic reference line that step prints from quoting last
+    # week's numbers.
+    #
+    # Optional: a failed backtest costs a stale accuracy page, which the page
+    # now says out loud, and must never cost the reload.
+    Step(
+        "backtest",
+        ("--all-leagues", "--save-predictions"),
+        "re-score the walk-forward history",
+        required=False,
+    ),
     # The cross-league correction has to follow `train`: the offsets describe
     # that model's residual error on European ties, so a retrain makes the old
     # ones stale. `validate_european` caches the features it builds -- a past

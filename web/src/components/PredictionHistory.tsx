@@ -596,9 +596,33 @@ export default function PredictionHistory() {
         {data && (
           <span className="text-xs ml-auto" style={{ color: 'var(--muted-foreground)' }}>
             {data.total.toLocaleString()} settled matches
+            {/*
+              When the walk-forward run happened, and whether its inputs have
+              moved since. Only the backtest carries this -- the live record
+              settles continuously. It is here because the headline above once
+              sat eight days and three retrains behind its own data with
+              nothing on the page saying so.
+            */}
+            {summary?.evaluated_at && (
+              <> · re-scored {new Date(summary.evaluated_at).toLocaleDateString()}</>
+            )}
           </span>
         )}
       </div>
+
+      {summary?.stale === true && (
+        <p
+          className="text-xs mb-3 px-3 py-2 rounded"
+          style={{
+            color: 'var(--foreground)',
+            background: 'color-mix(in srgb, #ffea00 12%, transparent)',
+          }}
+        >
+          These figures were measured on data that has changed since. They
+          describe the method as it stood, not the results it would give now —
+          re-run the backtest to refresh them.
+        </p>
+      )}
 
       {loading && !data && (
         <div className="text-center py-16 text-sm" style={{ color: 'var(--muted-foreground)' }}>

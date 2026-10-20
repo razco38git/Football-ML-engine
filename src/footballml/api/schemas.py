@@ -455,6 +455,18 @@ class Accuracy(BaseModel):
     rps_base_rate: float
     rps_market: float | None = None
 
+    #: When the walk-forward run that produced these numbers was evaluated, and
+    #: whether its inputs have moved since. Only set for the backtest source --
+    #: the live track record is settled continuously and cannot go stale.
+    #:
+    #: `evaluated_at` is not the serving model's training date and is not meant
+    #: to be: each backtest fold fits its own model, so these metrics describe
+    #: the method on the data it was run over, never the artifact being served.
+    #: `stale` says that data has changed since, so the figures characterise a
+    #: vintage that no longer exists.
+    evaluated_at: str | None = None
+    stale: bool | None = None
+
     #: Reference points that make `accuracy` readable. A match has three
     #: outcomes, so 52% is not a coin flip falling badly -- it sits against 33%
     #: for a random guess, `accuracy_base_rate` for always backing the home

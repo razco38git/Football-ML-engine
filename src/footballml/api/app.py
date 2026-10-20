@@ -16,12 +16,15 @@ control possible in the UI.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -136,6 +139,12 @@ class State:
     players: pd.DataFrame = field(default_factory=pd.DataFrame)
     teams: pd.DataFrame = field(default_factory=pd.DataFrame)
     backtest: pd.DataFrame = field(default_factory=pd.DataFrame)
+
+    #: When the walk-forward run was evaluated, and whether the files it read
+    #: have changed since. `None` for both means no provenance was recorded --
+    #: reported as unknown rather than quietly as fresh.
+    backtest_evaluated_at: str | None = None
+    backtest_stale: bool | None = None
     #: Squad strength for the model's features -- distinct from `teams`, which is
     #: the same file presented for display. Every feature build must pass it, or
     #: the artifact's expected columns cannot be produced.
@@ -335,6 +344,7 @@ def _load_state(startup: bool = False) -> dict[str, int]:
         state.backtest = pd.read_csv(backtest_path)
         state.backtest["Date"] = pd.to_datetime(state.backtest["Date"])
         logger.info("Loaded %d backtest predictions", len(state.backtest))
+    state.backtest_evaluated_at, state.backtest_stale = _backtest_freshness()
 
     # Scored fixtures are cached for a few minutes; after a reload that cache
     # describes the previous model, so drop it.
@@ -1966,6 +1976,51 @@ def _to_match_result(row: pd.Series, source: str, columns: dict[str, str]) -> Ma
     )
 
 
+def _backtest_freshness() -> tuple[str | None, bool | None]:
+    """When the walk-forward run happened, and whether its inputs have moved.
+
+    Deliberately **not** a comparison against the serving model's version. Each
+    backtest fold fits its own model on the seasons before the one it scores,
+    so the metrics have never described the artifact being served; tying the
+    verdict to `model_version` would assert exactly the relationship that does
+    not hold. What ages them is the data underneath, so that is what is
+    compared -- the digests `pipelines.backtest` recorded against the files as
+    they stand now.
+
+    Returns ``(None, None)`` when no provenance was recorded, which is every
+    file written before this existed. Unknown is reported as unknown rather
+    than as fresh.
+    """
+    meta_path = PROCESSED_DIR / "backtest_meta.json"
+    if state.backtest.empty or not meta_path.exists():
+        return None, None
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):  # pragma: no cover - corrupt sidecar
+        logger.warning("Could not read %s; backtest freshness unknown", meta_path.name)
+        return None, None
+
+    recorded = meta.get("inputs") or {}
+    moved = [
+        name for name, digest in recorded.items()
+        if digest is not None and _digest(PROCESSED_DIR / name) != digest
+    ]
+    if moved:
+        logger.warning(
+            "The backtest was evaluated on an older %s; its accuracy figures "
+            "describe data that has since changed. Re-run "
+            "`python -m pipelines.backtest --all-leagues --save-predictions`.",
+            " and ".join(moved),
+        )
+    return meta.get("evaluated_at"), bool(moved)
+
+
+def _digest(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    return hashlib.md5(path.read_bytes()).hexdigest()[:12]  # noqa: S324 - a cache key
+
+
 def _exact_score_rate(rows: pd.DataFrame) -> float | None:
     """How often the single likeliest scoreline was exactly right.
 
@@ -2123,6 +2178,11 @@ def accuracy_history(
         raise HTTPException(404, f"No {source} results for {league}")
 
     summary = _summarise(rows, prob_cols, actual_col)
+    if source != "live":
+        # Only the backtest can go stale. The live record settles continuously,
+        # so "when was it evaluated" has no meaning there.
+        summary.evaluated_at = state.backtest_evaluated_at
+        summary.stale = state.backtest_stale
     window = rows.sort_values("Date", ascending=False).iloc[offset : offset + limit]
 
     return MatchResultPage(

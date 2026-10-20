@@ -176,11 +176,38 @@ def test_an_optional_step_failing_does_not_stop_the_refresh(monkeypatch, tmp_pat
     assert exit_code == 1
 
 
-def test_the_european_steps_are_the_optional_ones() -> None:
-    """Required steps build the dataset the site serves; optional ones refine a
-    correction that applies to European ties alone."""
+def test_only_the_reporting_and_european_steps_are_optional() -> None:
+    """Required steps build the dataset and the model the site serves. Optional
+    ones refine a correction that applies to European ties, or re-score the
+    walk-forward history -- neither of which the site needs in order to be
+    correct, and neither of which may cost the reload when it fails."""
     optional = {s.name for s in weekly.STEPS if not s.required}
-    assert optional == {"fetch_european", "validate_european", "fit_league_adjustment"}
+    assert optional == {
+        "backtest", "fetch_european", "validate_european", "fit_league_adjustment",
+    }
+
+
+def test_the_backtest_runs_after_the_publication_path_and_before_european() -> None:
+    """Order, stated as the two constraints that produced it.
+
+    It needs `build_players` (it reads `team_strength.csv`) and must precede
+    `validate_european`, which prints the walk-forward figure as its domestic
+    reference. It does **not** need `train`: every fold fits its own model, so
+    placing it after the model the site is waiting for costs the site nothing.
+    """
+    order = [s.name for s in weekly.STEPS]
+    assert order.index("build_players") < order.index("backtest")
+    assert order.index("project_season") < order.index("backtest"), (
+        "the backtest delays publication"
+    )
+    assert order.index("backtest") < order.index("validate_european")
+
+
+def test_the_backtest_is_asked_for_the_five_league_predictions() -> None:
+    """Without both flags it scores one league, or scores and saves nothing --
+    and the accuracy page reads the file it would not have written."""
+    step = next(s for s in weekly.STEPS if s.name == "backtest")
+    assert set(step.args) == {"--all-leagues", "--save-predictions"}
 
 
 def test_a_required_step_failing_still_skips_the_reload(monkeypatch, tmp_path) -> None:
@@ -295,3 +322,54 @@ def test_a_word_that_merely_contains_a_level_is_not_flagged() -> None:
 def test_lines_are_stripped_as_before() -> None:
     noise = "\n".join(f"l{i}" for i in range(30))
     assert "WARNING padded" in weekly._summary_lines(f"   WARNING padded   \n{noise}")
+
+
+# --- a failed backtest costs the accuracy page, never the reload --------------
+
+
+def test_a_failed_backtest_still_reloads_the_site(monkeypatch, tmp_path) -> None:
+    """It is reporting. The model, the projections and the fixtures are all
+    published by steps that ran before it."""
+    reloaded: list[bool] = []
+
+    def fake_run(step):
+        if step.name == "backtest":
+            raise subprocess.CalledProcessError(1, step.name, "", "boom")
+        return 0.0
+
+    monkeypatch.setattr(weekly, "run_step", fake_run)
+    monkeypatch.setattr(weekly, "reload_api", lambda url: reloaded.append(True) or True)
+    monkeypatch.setattr(weekly, "LOG_DIR", tmp_path)
+    monkeypatch.setattr("sys.argv", ["weekly"])
+
+    code = weekly.main()
+
+    assert reloaded == [True], "a failed backtest blocked the reload"
+    assert code != 0, "the run reported success despite a failed step"
+
+
+def test_a_failed_backtest_is_named_in_the_summary(monkeypatch, tmp_path) -> None:
+    """Silence here is how the figures went stale through three retrains in the
+    first place.
+
+    Asserted against the log file the job writes rather than `caplog`, because
+    that file is what somebody actually reads on a Monday -- and the job
+    installs its own handlers, so captured records prove nothing about it.
+    """
+    def fake_run(step):
+        if step.name == "backtest":
+            raise subprocess.CalledProcessError(1, step.name, "", "boom")
+        return 0.0
+
+    monkeypatch.setattr(weekly, "run_step", fake_run)
+    monkeypatch.setattr(weekly, "reload_api", lambda url: True)
+    monkeypatch.setattr(weekly, "LOG_DIR", tmp_path)
+    monkeypatch.setattr("sys.argv", ["weekly"])
+
+    weekly.main()
+
+    written = [p.read_text(encoding="utf-8") for p in tmp_path.glob("weekly-*.log")]
+    assert written, "the run left no log behind"
+    summary = written[0]
+    assert "backtest" in summary, summary
+    assert "optional step(s) failed" in summary, summary

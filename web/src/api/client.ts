@@ -588,6 +588,10 @@ export interface Accuracy {
   accuracy_base_rate: number;
   /** How often the bookmakers' shortest price won, where odds exist. */
   accuracy_market: number | null;
+  /** Backtest only: when the walk-forward run happened, and whether its inputs
+   *  have moved since. The live record settles continuously and carries neither. */
+  evaluated_at?: string | null;
+  stale?: boolean | null;
   /**
    * Share of settled matches whose single likeliest scoreline was exactly
    * right. Expect roughly one in eight: the leader in a scoreline distribution
