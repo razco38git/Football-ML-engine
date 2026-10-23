@@ -133,6 +133,23 @@ SETTLE_ONLY = Step(
     "score_upcoming", ("--settle-only",), "settle what was played -- the fast path"
 )
 
+#: Score the new ties into `european_predictions.csv`, which is what the site
+#: reads for European recent results.
+#:
+#: `--max-new-matchdays` is the whole reason this is safe to run here. The
+#: feature cache goes cold when `build_players` rewrites completed-season squad
+#: strength, which is weekly; the weekly's own `validate_european` normally
+#: rebuilds it in the same run, but that step is optional and failed on
+#: 2026-10-12. A daily inheriting a cold cache would start an hour-plus rebuild
+#: inside a one-hour `ExecutionTimeLimit`, be killed, and do it again every
+#: morning. Four is comfortably past a European week's three matchdays and
+#: nowhere near 441.
+SCORE_EUROPEAN = Step(
+    "validate_european",
+    ("--max-new-matchdays", "4", "--no-domestic-reference"),
+    "score the new European ties",
+)
+
 SETTLE = Step("score_upcoming", (), "settle what was played, re-forecast the next round")
 
 #: Projecting runs only when the results table actually moved.
@@ -301,7 +318,27 @@ def _run(args: argparse.Namespace, started: float) -> int:
         )
     else:
         if _fingerprint(EUROPEAN) != european_before:
-            logger.info("New European results; settling them")
+            logger.info("New European results; scoring and settling them")
+            # Scoring, not only settling. Settling marks the stored forecast
+            # right or wrong; it does not put the tie on the page. "Recent
+            # results" reads `european_predictions.csv`, which only
+            # `validate_european` writes -- and that ran weekly, so a
+            # Wednesday-night tie waited until the following Monday to appear
+            # while its result had been on disk since Thursday morning.
+            #
+            # Bounded, because this job has an hour to live and the step does
+            # not: a warm cache is seconds, a cold one measured 59 to 235
+            # minutes across four runs. Past the limit it writes nothing and
+            # says so, and the weekly -- which has the time and already does
+            # the building -- catches up.
+            try:
+                run_step(SCORE_EUROPEAN)
+            except subprocess.CalledProcessError as exc:
+                logger.error(
+                    "Scoring the European results failed (exit %d). They are "
+                    "settled below but will not appear under Recent results "
+                    "until the weekly scores them.", exc.returncode,
+                )
             try:
                 run_step(SETTLE_ONLY)
                 published = reload_api(args.api_url) or published

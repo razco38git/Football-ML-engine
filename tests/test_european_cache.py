@@ -475,3 +475,106 @@ def test_the_scored_file_records_the_model_that_scored_it(monkeypatch, tmp_path)
         fit_mod, "fit", lambda *a, **k: {"offsets": {"E0": 0.0}, "n_matches": 6, "holdout": {}}
     )
     assert fit_mod.main() == 0
+
+
+# --- a bounded run, for a job that has an hour to live -----------------------
+#
+# `validate_european` is weekly because it is unbounded: a warm cache scores in
+# ~30 seconds, a cold one measured 59, 60 and 235 minutes, and one run was
+# killed at 148. The daily needs the first case and must never start the
+# second -- its ExecutionTimeLimit is one hour, so a cold rebuild would be
+# killed, resumed next morning, and killed again.
+
+
+def _ties(dates: list[str]) -> pd.DataFrame:
+    return pd.DataFrame([
+        {"Date": pd.Timestamp(d), "HomeTeam": f"H{i}", "AwayTeam": f"A{i}"}
+        for i, d in enumerate(dates)
+    ])
+
+
+def test_an_empty_cache_means_every_matchday_must_be_built() -> None:
+    european = _ties(["2026-10-20", "2026-10-21", "2026-10-21"])
+    assert validate._matchdays_to_build(european, pd.DataFrame()) == 2
+
+
+def test_a_warm_cache_counts_only_what_is_new() -> None:
+    european = _ties(["2026-10-20", "2026-10-21"])
+    cached = european.iloc[:1]
+    assert validate._matchdays_to_build(european, cached) == 1
+
+
+def test_a_fully_warm_cache_has_nothing_to_build() -> None:
+    european = _ties(["2026-10-20", "2026-10-21"])
+    assert validate._matchdays_to_build(european, european) == 0
+
+
+def _run(monkeypatch, tmp_path, cached: pd.DataFrame, limit: str | None) -> tuple[int, bool]:
+    """`main` wired to throwaway inputs. Returns (exit code, wrote anything)."""
+    european = _ties(["2026-10-20", "2026-10-21", "2026-10-22"]).assign(
+        Season="2627", League="UCL", competition="UCL",
+        home_league="E0", away_league="SP1",
+        FTHG=1, FTAG=0, FTR="H",
+        prob_home_win=0.5, prob_draw=0.26, prob_away_win=0.24,
+        expected_goals_home=1.5, expected_goals_away=1.1,
+    )
+    matches = tmp_path / "european_matches.csv"
+    european.to_csv(matches, index=False)
+    out = tmp_path / "european_predictions.csv"
+    out.write_text("previous,contents", encoding="utf-8")
+
+    class _Meta:
+        version, trained_through = "m1", "2026-10-19"
+
+    monkeypatch.setattr(validate, "MATCHES_IN", matches)
+    monkeypatch.setattr(validate, "PREDICTIONS_OUT", out)
+    monkeypatch.setattr(validate, "BACKTEST", tmp_path / "absent.csv")
+    monkeypatch.setattr(validate, "FEATURES_CACHE", tmp_path / "features.pkl")
+    monkeypatch.setattr(validate, "load_team_match_history", lambda *a: pd.DataFrame())
+    monkeypatch.setattr(validate, "load_team_strength", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(validate.registry, "load", lambda *a, **k: (object(), _Meta()))
+    monkeypatch.setattr(validate, "strength_fingerprint", lambda *a, **k: "fp")
+    monkeypatch.setattr(validate, "load_cache", lambda *a, **k: cached)
+
+    built: list[int] = []
+
+    def fake_build(eur, *a, **k):
+        built.append(len(eur))
+        return eur, eur
+
+    monkeypatch.setattr(validate, "build_features", fake_build)
+    monkeypatch.setattr(validate, "predict_with", lambda frame, *a: frame)
+    argv = ["validate_european", "--no-domestic-reference"]
+    if limit is not None:
+        argv += ["--max-new-matchdays", limit]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    code = validate.main()
+    return code, out.read_text(encoding="utf-8") != "previous,contents"
+
+
+def test_a_cold_cache_past_the_limit_writes_nothing(monkeypatch, tmp_path) -> None:
+    """The failure this guard exists for. Nothing is written, so the site keeps
+    serving the predictions it already has."""
+    code, wrote = _run(monkeypatch, tmp_path, pd.DataFrame(), limit="1")
+
+    assert code == 0, "a deliberate skip is not a failure"
+    assert not wrote, "a bounded run overwrote the previous predictions"
+
+
+def test_a_warm_cache_inside_the_limit_still_runs(monkeypatch, tmp_path) -> None:
+    """The guard must not block the case it was built to allow, or the daily
+    gains nothing."""
+    european = _ties(["2026-10-20", "2026-10-21", "2026-10-22"])
+    code, wrote = _run(monkeypatch, tmp_path, european.iloc[:2], limit="4")
+
+    assert code == 0
+    assert wrote
+
+
+def test_without_the_flag_nothing_is_bounded(monkeypatch, tmp_path) -> None:
+    """The weekly has the time and does the building; it must keep doing it."""
+    code, wrote = _run(monkeypatch, tmp_path, pd.DataFrame(), limit=None)
+
+    assert code == 0
+    assert wrote

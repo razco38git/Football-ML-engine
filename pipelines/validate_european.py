@@ -180,6 +180,19 @@ def _checkpoint(frames: list[pd.DataFrame], fingerprint: str | None) -> None:
     tmp.replace(FEATURES_CACHE)
 
 
+def _matchdays_to_build(european: pd.DataFrame, cached: pd.DataFrame) -> int:
+    """How many matchdays :func:`build_features` would have to build.
+
+    Counted before building rather than discovered during it, because the only
+    useful thing to do with a large answer is to not start.
+    """
+    if cached is None or cached.empty:
+        return int(european["Date"].nunique())
+    have = set(cached[KEY].astype(str).apply(tuple, axis=1))
+    wanted = european[KEY].astype(str).apply(tuple, axis=1)
+    return int(european[~wanted.isin(have)]["Date"].nunique())
+
+
 def build_features(
     european: pd.DataFrame,
     tmh: pd.DataFrame,
@@ -351,6 +364,16 @@ def main() -> int:
     )
     parser.add_argument("--no-domestic-reference", action="store_true")
     parser.add_argument(
+        "--max-new-matchdays",
+        type=int,
+        default=None,
+        help=(
+            "Write nothing if more than N matchdays would have to be built. "
+            "For the daily job, which has an hour to live: a warm cache needs "
+            "seconds, a cold one took 59 to 235 minutes on four measured runs."
+        ),
+    )
+    parser.add_argument(
         "--no-cache",
         action="store_true",
         help="Rebuild every matchday's features instead of reusing the cache.",
@@ -382,6 +405,19 @@ def main() -> int:
 
     fingerprint = strength_fingerprint()
     cached = pd.DataFrame() if args.no_cache else load_cache(fingerprint)
+
+    if args.max_new_matchdays is not None:
+        behind = _matchdays_to_build(european, cached)
+        if behind > args.max_new_matchdays:
+            print(
+                f"{behind} matchday(s) would have to be built, past the limit of "
+                f"{args.max_new_matchdays}. Nothing written. "
+                "This run is bounded on purpose and the weekly is not, so the "
+                "rebuild belongs there. The previous predictions are unchanged "
+                "and the site keeps serving them."
+            )
+            return 0
+
     features, raw = build_features(
         european, tmh, strength, cached=cached,
         fingerprint=None if args.no_cache else fingerprint,

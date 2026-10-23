@@ -55,16 +55,20 @@ def _fingerprints(monkeypatch, matches, european=(0, "")) -> None:
 
     Called with no path it answers for the match *history* -- the gate's
     default since `f3c11e1` -- and with one for `european_matches.csv`, which is
-    how the run distinguishes them. A list
-    for `matches` is consumed one call at a time, so a test can say "the fetch
-    moved the table".
+    how the run distinguishes them.
+
+    Either may be a list, consumed one call at a time, so a test can say "the
+    fetch moved this table". The European branch needs that as much as the
+    domestic one does: it fires only when the fingerprint differs either side
+    of the fetch, so a fixed value can only ever express "nothing new".
     """
-    sequence = iter(matches) if isinstance(matches, list) else None
+    pending = iter(matches) if isinstance(matches, list) else None
+    pending_european = iter(european) if isinstance(european, list) else None
 
     def fingerprint(path=None):
         if path is not None:
-            return european
-        return next(sequence) if sequence is not None else matches
+            return next(pending_european) if pending_european is not None else european
+        return next(pending) if pending is not None else matches
 
     monkeypatch.setattr(daily, "_fingerprint", fingerprint)
 
@@ -602,3 +606,64 @@ def test_the_european_fingerprint_is_unaffected(tmp_path, monkeypatch) -> None:
     path = tmp_path / "european_matches.csv"
     path.write_text("Date\n2026-10-01\n2026-10-02\n", encoding="utf-8")
     assert daily._fingerprint(path) == (2, "2026-10-02")
+
+
+# --- new European results reach the page the next morning --------------------
+#
+# The daily already noticed them: it fingerprints `european_matches.csv` either
+# side of the fetch and settles the stored forecasts when it moves. Settling
+# marks a forecast right or wrong; it does not put the tie on the page. Recent
+# results reads `european_predictions.csv`, which only `validate_european`
+# writes -- and that ran weekly, so a Wednesday tie waited until Monday to
+# appear while its result had been on disk since Thursday.
+
+
+def test_new_european_results_are_scored_as_well_as_settled(monkeypatch, runs) -> None:
+    _args(monkeypatch)
+    _fingerprints(monkeypatch, (1, "2026-10-21"), european=[(1, "a"), (2, "b")])
+
+    daily.main()
+
+    assert "validate_european" in runs, "the tie was settled but never scored"
+    assert runs.index("validate_european") < len(runs)
+
+
+def test_nothing_new_scores_nothing(monkeypatch, runs) -> None:
+    """The step is not free, and most mornings there is no European football."""
+    _args(monkeypatch)
+    _fingerprints(monkeypatch, (1, "2026-10-21"), european=(1, "unchanged"))
+
+    daily.main()
+
+    assert "validate_european" not in runs
+
+
+def test_the_daily_scores_with_a_bound(monkeypatch) -> None:
+    """Unbounded here would be a one-hour task starting an hour-plus rebuild.
+
+    The cache goes cold when `build_players` rewrites completed-season squad
+    strength. The weekly normally rebuilds it in the same run, but that step is
+    optional and failed on 2026-10-12.
+    """
+    assert "--max-new-matchdays" in daily.SCORE_EUROPEAN.args
+    limit = daily.SCORE_EUROPEAN.args[daily.SCORE_EUROPEAN.args.index("--max-new-matchdays") + 1]
+    assert 0 < int(limit) < 20, f"{limit} is not a bound worth having"
+
+
+def test_a_failed_scoring_still_settles_and_publishes(monkeypatch, runs) -> None:
+    """Scoring is how the tie appears on the page; settling is how the track
+    record stays honest. Losing the first must not cost the second."""
+    _args(monkeypatch)
+    _fingerprints(monkeypatch, (1, "2026-10-21"), european=[(1, "a"), (2, "b")])
+
+    real = daily.run_step
+
+    def fake(step):
+        if step.name == "validate_european":
+            raise subprocess.CalledProcessError(1, step.name, "", "boom")
+        return real(step)
+
+    monkeypatch.setattr(daily, "run_step", fake)
+
+    assert daily.main() == 0
+    assert runs.count("score_upcoming") >= 1, "settling was skipped"
