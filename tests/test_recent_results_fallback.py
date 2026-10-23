@@ -324,3 +324,76 @@ def test_an_unrated_club_simply_has_no_strength(monkeypatch) -> None:
     out = api._recent_from_store(pd.Timestamp("2026-09-20"), None)[0]
     assert out.strength_home_overall == 75.2
     assert out.strength_away_overall is None
+
+
+# --- European ties under "All competitions" ----------------------------------
+#
+# They were reachable only by picking Champions League from the dropdown. The
+# Upcoming board has always merged both sources and filtered per request, so a
+# tie appeared there, then vanished the moment it was played unless the reader
+# changed the filter. Same page, same dropdown, opposite behaviour.
+
+
+def _scored_european(rows: list[tuple[str, str, str, str]]) -> pd.DataFrame:
+    return pd.DataFrame([
+        {
+            "competition": comp, "Date": pd.Timestamp(date),
+            "HomeTeam": home, "AwayTeam": away,
+            "FTHG": 2.0, "FTAG": 1.0, "FTR": "H",
+            "home_league": "E0", "away_league": "SP1",
+            "expected_goals_home": 1.6, "expected_goals_away": 1.1,
+            "prob_home_win": 0.5, "prob_draw": 0.26, "prob_away_win": 0.24,
+            "predicted_outcome": "H", "modal_score_home": 1, "modal_score_away": 1,
+            "prob_over_2_5": 0.5, "prob_btts": 0.5,
+        }
+        for date, home, away, comp in rows
+    ])
+
+
+def test_a_played_tie_is_reachable_without_changing_the_filter(monkeypatch) -> None:
+    monkeypatch.setattr(
+        api.state, "european",
+        _scored_european([("2026-10-21", "Bayern Munich", "Arsenal", "UCL")]),
+    )
+
+    out = api._european_matches(None, 10, 0)
+
+    assert [(p.home_team, p.away_team) for p in out] == [("Bayern Munich", "Arsenal")]
+
+
+def test_the_unshown_competitions_stay_unshown(monkeypatch) -> None:
+    """Europa and Conference are scored into the same file because they feed
+    the cross-league correction, not because they are fit to display -- we can
+    rate 14% and 6% of their ties. Widening the merge must not widen that."""
+    monkeypatch.setattr(
+        api.state, "european",
+        _scored_european([
+            ("2026-10-22", "Bournemouth", "Milan", "UEL"),
+            ("2026-10-22", "Monaco", "Freiburg", "UECL"),
+            ("2026-10-21", "Bayern Munich", "Arsenal", "UCL"),
+        ]),
+    )
+
+    out = api._european_matches(None, 10, 0)
+
+    assert {p.competition for p in out} == {"UCL"}
+
+
+def test_an_unshown_competition_returns_nothing_however_it_is_asked_for(monkeypatch) -> None:
+    """Second lock on the same door: the endpoint refuses to pass one, and the
+    helper refuses to serve one."""
+    monkeypatch.setattr(
+        api.state, "european",
+        _scored_european([
+            ("2026-10-21", "Bayern Munich", "Arsenal", "UCL"),
+            ("2026-10-22", "Bournemouth", "Milan", "UEL"),
+        ]),
+    )
+
+    assert {p.competition for p in api._european_matches("UCL", 10, 0)} == {"UCL"}
+    assert api._european_matches("UEL", 10, 0) == []
+
+
+def test_no_european_results_is_not_an_error(monkeypatch) -> None:
+    monkeypatch.setattr(api.state, "european", pd.DataFrame())
+    assert api._european_matches(None, 10, 0) == []

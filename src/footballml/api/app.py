@@ -986,19 +986,39 @@ def matches(
     played = state.features[state.features["FTR"].notna()]
     if league:
         played = played[played["League"] == league]
-    window = played.sort_values("Date", ascending=False).iloc[offset : offset + limit]
-    if window.empty:
-        return []
 
-    preds = model.predict_frame(window[state.columns])
-    frame = pd.concat([window.reset_index(drop=True), preds.reset_index(drop=True)], axis=1)
-    scored = _to_predictions(frame)
+    # Take the same window from every source before merging. Each is sorted by
+    # date, so a row beyond this window cannot reach the merged one either.
+    take = offset + limit
+
+    window = played.sort_values("Date", ascending=False).iloc[:take]
+    scored: list[Prediction] = []
+    if not window.empty:
+        preds = model.predict_frame(window[state.columns])
+        frame = pd.concat([window.reset_index(drop=True), preds.reset_index(drop=True)], axis=1)
+        scored = _to_predictions(frame)
 
     # Anything played since the feature table ends can only come from the store.
-    fresher = _recent_from_store(played["Date"].max(), league)
-    if not fresher:
-        return scored
-    return (fresher + scored)[offset : offset + limit]
+    fresher = [] if played.empty else _recent_from_store(played["Date"].max(), league)
+
+    # European ties belong under "All competitions" as well as under their own
+    # filter. They were reachable only by selecting Champions League, so a tie
+    # appeared on the Upcoming board -- which has always merged both -- and then
+    # vanished the moment it was played, unless the reader changed the dropdown.
+    # Same page, same dropdown, opposite behaviour.
+    #
+    # They are merged rather than recomputed because `state.features` holds only
+    # domestic matches: European results are kept out of the match history on
+    # purpose, so there is nothing here to score them from.
+    european = _european_matches(None, take, 0) if league is None else []
+
+    # One row per fixture. The store's copy wins where both have it: it was
+    # committed before kickoff, where the others are retrospective.
+    merged: dict[tuple, Prediction] = {}
+    for entry in [*scored, *european, *fresher]:
+        merged[(entry.date, entry.home_team, entry.away_team, entry.competition)] = entry
+    ordered = sorted(merged.values(), key=lambda p: p.date, reverse=True)
+    return ordered[offset:take]
 
 
 def _recent_from_store(known_through: pd.Timestamp, league: str | None) -> list[Prediction]:
@@ -1117,8 +1137,14 @@ def _form_for(team: str, before: pd.Timestamp) -> TeamForm | None:
         return None
 
 
-def _european_matches(competition: str, limit: int, offset: int) -> list[Prediction]:
+def _european_matches(
+    competition: str | None, limit: int, offset: int
+) -> list[Prediction]:
     """Played European ties, already scored.
+
+    ``competition`` of ``None`` means every shown one. Anything outside
+    :data:`SHOWN_COMPETITIONS` returns nothing, however explicitly it is asked
+    for -- see the comment below.
 
     Served from `european_predictions.csv` rather than recomputed, because
     `state.features` holds only domestic matches -- European results are kept
@@ -1129,7 +1155,14 @@ def _european_matches(competition: str, limit: int, offset: int) -> list[Predict
     """
     if state.european.empty:
         return []
-    rows = state.european[state.european["competition"] == competition]
+    # Clamped to the shown set whatever is asked for. Europa and Conference are
+    # scored into this file because they feed the cross-league correction, not
+    # because they are fit to display -- we can rate 14% and 6% of their ties,
+    # so a page of them would be 86-94% holes. The endpoint already refuses to
+    # pass one; this is the second lock on the same door.
+    wanted = [c for c in ([competition] if competition else SHOWN_COMPETITIONS)
+              if c in SHOWN_COMPETITIONS]
+    rows = state.european[state.european["competition"].isin(wanted)]
     rows = rows[rows["FTR"].notna()]
     window = rows.sort_values("Date", ascending=False).iloc[offset : offset + limit]
     if window.empty:
