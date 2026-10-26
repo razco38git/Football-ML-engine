@@ -90,7 +90,7 @@ retrain.
 
 | Tab | What it answers |
 |---|---|
-| **Match Predictor** | Who wins the next round, with the model's own reasoning per fixture |
+| **Match Predictor** | Who wins the next round, with the model's own reasoning per fixture. A settled match also carries how likely that result was given the chances it produced |
 | **Discover** | Where we disagree with the bookmakers, where we are most certain, which outsiders we back |
 | **Player Ratings** | How good was this player that season, and what did he actually do |
 | **Player Similarity** | Who plays like him, on EA's attributes and on our own percentiles |

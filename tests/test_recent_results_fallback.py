@@ -397,3 +397,100 @@ def test_an_unshown_competition_returns_nothing_however_it_is_asked_for(monkeypa
 def test_no_european_results_is_not_an_error(monkeypatch) -> None:
     monkeypatch.setattr(api.state, "european", pd.DataFrame())
     assert api._european_matches(None, 10, 0) == []
+
+
+# --- how likely was that result, given the chances ---------------------------
+#
+# A retrodiction, not a forecast: it reads the match's own xG, so it could only
+# ever be computed afterwards. The four ways it can be unavailable are all
+# different and all must degrade to `None` rather than to a zero, because "this
+# result had a 0.0% chance" is a confident number with nothing behind it.
+
+
+@pytest.fixture
+def scored_match(monkeypatch):
+    """One settled match whose own xG is known."""
+    monkeypatch.setattr(
+        api.state, "match_xg",
+        {(pd.Timestamp("2026-10-19").date(), "Arsenal", "Chelsea"): (2.40, 0.60)},
+    )
+    monkeypatch.setattr(api.state, "metadata", SimpleNamespace(rho=-0.0567))
+    return pd.Series({
+        "Date": pd.Timestamp("2026-10-19"),
+        "HomeTeam": "Arsenal", "AwayTeam": "Chelsea", "FTR": "H",
+    })
+
+
+def test_the_chances_favour_the_side_that_created_them(scored_match) -> None:
+    r = api._retrodiction(scored_match)
+
+    assert r is not None
+    assert r.prob_home_win > r.prob_away_win
+    assert r.prob_home_win + r.prob_draw + r.prob_away_win == pytest.approx(1.0, abs=1e-3)
+    assert r.xg_home == 2.40 and r.xg_away == 0.60
+
+
+def test_prob_actual_is_the_component_that_happened(scored_match) -> None:
+    """The headline number on the card. Reading the wrong component would be
+    invisible on a home win and wrong on every away win."""
+    assert api._retrodiction(scored_match).prob_actual == pytest.approx(
+        api._retrodiction(scored_match).prob_home_win
+    )
+
+    away = scored_match.copy()
+    away["FTR"] = "A"
+    r = api._retrodiction(away)
+    assert r.prob_actual == pytest.approx(r.prob_away_win)
+
+
+@pytest.mark.parametrize(
+    ("reason", "mutate"),
+    [
+        ("an unplayed fixture", lambda s: s.drop(labels=["FTR"])),
+        ("a match with no xG on record", lambda s: s.replace({"Arsenal": "Burnley"})),
+    ],
+)
+def test_it_is_absent_rather_than_zero(scored_match, reason, mutate) -> None:
+    assert api._retrodiction(mutate(scored_match)) is None, reason
+
+
+def test_an_abandoned_match_is_gated_out(monkeypatch, scored_match) -> None:
+    """Bastia 0-3 Lyon, 2017-04-16: abandoned after crowd trouble and awarded,
+    so both sides record 0.00 xG. One match in 21,933, and without the gate the
+    page would tell a reader that result had a 0.0% chance."""
+    monkeypatch.setattr(
+        api.state, "match_xg",
+        {(pd.Timestamp("2026-10-19").date(), "Arsenal", "Chelsea"): (0.0, 0.0)},
+    )
+    assert api._retrodiction(scored_match) is None
+
+
+def test_the_gate_lets_a_genuinely_quiet_match_through(monkeypatch, scored_match) -> None:
+    """The floor has to catch the degenerate case and nothing else. The 0.1%
+    quantile of combined match xG is 0.431, well clear of 0.1."""
+    monkeypatch.setattr(
+        api.state, "match_xg",
+        {(pd.Timestamp("2026-10-19").date(), "Arsenal", "Chelsea"): (0.25, 0.20)},
+    )
+    assert api._retrodiction(scored_match) is not None
+
+
+def test_the_lookup_reads_both_sides_off_the_home_row() -> None:
+    """`xGAgainst` on the home row equals the away row's `xGFor` on all 29,239
+    rows, so there is nothing to merge -- and merging would risk duplicating."""
+    tmh = pd.DataFrame([
+        {"Date": pd.Timestamp("2026-10-19"), "Team": "Arsenal", "Opponent": "Chelsea",
+         "Venue": "Home", "xGFor": 2.4, "xGAgainst": 0.6},
+        {"Date": pd.Timestamp("2026-10-19"), "Team": "Chelsea", "Opponent": "Arsenal",
+         "Venue": "Away", "xGFor": 0.6, "xGAgainst": 2.4},
+    ])
+
+    lookup = api._match_xg_lookup(tmh)
+
+    assert lookup == {(pd.Timestamp("2026-10-19").date(), "Arsenal", "Chelsea"): (2.4, 0.6)}
+
+
+def test_a_history_without_xg_columns_is_survivable() -> None:
+    """Every season before 2014/15 -- Understat does not go back further."""
+    assert api._match_xg_lookup(pd.DataFrame()) == {}
+    assert api._match_xg_lookup(pd.DataFrame({"Team": ["A"]})) == {}

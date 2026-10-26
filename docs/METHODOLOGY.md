@@ -747,6 +747,29 @@ strength → full). The walk-forward harness can produce it.
 
 ---
 
+## 11b. How likely was that result, given the chances?
+
+A settled match card carries a **retrodiction**: the match's own xG through the
+same Dixon-Coles matrix, giving the probability of the result that happened. It
+is not a forecast and could not have been computed before kick-off, and the page
+says so.
+
+Measured before it was published, over 21,933 matches since 2014/15: RPS
+**0.1641** against the model's pre-match 0.1992, calibrated to within ±0.011
+through the middle bands, and near-insensitive to `rho` (at most 0.0154 across
+its whole plausible range).
+
+The limitation is state dependence, and it is quantified rather than waved at:
+a side two goals up at half time stops needing chances, so in the 0.1-0.2 band
+those matches land **-0.087** against the stated probability while matches
+level at half time land **+0.019**. The pooled calibration looks clean only
+because the two cancel. Full table and the discarded measurements in
+[`../EXPERIMENTS.md`](../EXPERIMENTS.md).
+
+The inputs never touch `state.features`: `feature_columns` is a denylist, so a
+same-match xG column there would become a model input on the next build. See
+§6 for the time that happened with odds.
+
 ## 12. Why there is no player-level what-if
 
 The most-requested feature, and the one to keep refusing. "Barcelona without

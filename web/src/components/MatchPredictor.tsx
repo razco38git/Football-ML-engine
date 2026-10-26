@@ -434,6 +434,98 @@ function SquadStrength({ p }: { p: Prediction }) {
   );
 }
 
+/** How likely the result was, given the chances the match actually produced.
+ *
+ *  A retrodiction, not a forecast, and the distinction is the whole point: it
+ *  reads this match's own xG, so nobody could have had it before kick-off. It
+ *  sits after ScoreGrid rather than beside "What we forecast" deliberately —
+ *  the card already carries two other xG numbers (the model's pre-match rates
+ *  under the score, and the last-five bars above), and a reader has conflated
+ *  two of them before now. Distance and wording keep them apart.
+ */
+//: Understat's shot data starts in 2014/15. Before that there is nothing to
+//: read a result against, and the card says so rather than leaving a gap.
+const XG_ERA_START = '2014-08-01';
+
+function Retrodiction({ p }: { p: Prediction }) {
+  const r = p.retrodiction;
+  const settled = p.actual_result != null;
+  const european = !!p.competition && p.competition !== 'domestic';
+  if (!settled || european) return null;
+
+  const heading = (
+    <div
+      className="text-xs font-display font-bold uppercase tracking-wider mb-1"
+      style={{ color: 'var(--muted-foreground)' }}
+    >
+      How likely was that result?
+    </div>
+  );
+
+  // Absent is explained, never silent: on the newest cards the shot data
+  // simply has not been published yet, and a blank space reads as a bug.
+  if (!r) {
+    const old = p.date < XG_ERA_START;
+    return (
+      <div className="mt-5">
+        {heading}
+        <div className="text-xs leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
+          {old
+            ? 'Shot data starts in 2014/15, so there is nothing to read this result against.'
+            : 'The shot data for this match has not been published yet. It usually lands a day or two after the result.'}
+        </div>
+      </div>
+    );
+  }
+
+  const label =
+    p.actual_result === 'H' ? `a ${p.home_team} win`
+    : p.actual_result === 'A' ? `a ${p.away_team} win`
+    : 'a draw';
+  return (
+    <div className="mt-5">
+      {heading}
+      <div className="text-xs mb-3" style={{ color: 'var(--muted-foreground)' }}>
+        Chances created: <span style={{ color: '#00e676' }}>{p.home_team} {r.xg_home.toFixed(2)}</span>
+        {' · '}
+        <span style={{ color: '#3b82f6' }}>{p.away_team} {r.xg_away.toFixed(2)}</span>
+        {' — penalties included.'}
+      </div>
+
+      <div className="flex items-baseline gap-2 mb-2">
+        <span className="font-display font-black text-3xl" style={{ color: 'var(--foreground)' }}>
+          {r.prob_actual < 0.01 ? '<1%' : pct(r.prob_actual)}
+        </span>
+        <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+          chance of {label}, on these chances
+        </span>
+      </div>
+
+      <OutcomeBar home={r.prob_home_win} draw={r.prob_draw} away={r.prob_away_win} />
+      <OutcomeSplit
+        home={p.home_team}
+        away={p.away_team}
+        probHome={r.prob_home_win}
+        probDraw={r.prob_draw}
+        probAway={r.prob_away_win}
+        actual={p.actual_result}
+        pct={pct}
+      />
+
+      <div className="text-xs mt-3 leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
+        These are not predictions. They use the chances each side actually
+        created, so nobody could have had them before kick-off — they say how
+        often this match would end this way if it were replayed. They are least
+        reliable in a match that was settled early: a side two goals up at half
+        time stops needing chances, so its xG understates it and the result it
+        won reads as flukier here than it was, by four to nine points in those
+        matches. In matches still level at half time the figures land close to
+        what actually happens.
+      </div>
+    </div>
+  );
+}
+
 /** One prediction, rendered. Exported so the What-If tab shows the same card
  *  rather than a second, subtly different one.
  *
@@ -753,6 +845,8 @@ export function MatchCard({ p, leagues }: {
           <SquadStrength p={p} />
 
           <ScoreGrid p={p} />
+
+          <Retrodiction p={p} />
 
           {/* SHAP drivers: the model's actual reasoning, not a summary of it. */}
           {!!p.drivers_home.length && (

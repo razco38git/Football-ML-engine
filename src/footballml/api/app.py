@@ -53,6 +53,7 @@ from footballml.api.schemas import (
     Prediction,
     PredictRequest,
     ProjectedTeam,
+    Retrodiction,
     SeasonProjection,
     SimilarPlayer,
     SimilarPlayers,
@@ -82,7 +83,11 @@ from footballml.labels import humanise
 from footballml.league_adjust import adjust as adjust_for_league
 from footballml.league_adjust import fitted_model_version
 from footballml.league_adjust import load as load_league_adjustment
-from footballml.models.dixon_coles import most_likely_score, score_matrix
+from footballml.models.dixon_coles import (
+    most_likely_score,
+    outcome_probs,
+    score_matrix,
+)
 from footballml.models.evaluate import (
     base_rate_probs,
     calibration_table,
@@ -139,6 +144,18 @@ class State:
     players: pd.DataFrame = field(default_factory=pd.DataFrame)
     teams: pd.DataFrame = field(default_factory=pd.DataFrame)
     backtest: pd.DataFrame = field(default_factory=pd.DataFrame)
+
+    #: Each played match's own xG, keyed `(date, home, away)`.
+    #:
+    #: A dict rather than columns on `state.features`, and that is the whole
+    #: point. `feature_columns` is a *denylist* -- "every numeric column that is
+    #: not an identifier or target" -- so a `match_xg_home` column there becomes
+    #: a model input on the next build. Its own docstring records the last time
+    #: this happened: "the moment the API joined them for display, every odds
+    #: column silently became a model feature." Same-match xG is a far more
+    #: plausible-looking feature than a bookmaker price, so it never goes near
+    #: that frame.
+    match_xg: dict[tuple, tuple[float, float]] = field(default_factory=dict)
 
     #: When the walk-forward run was evaluated, and whether the files it read
     #: have changed since. `None` for both means no provenance was recorded --
@@ -345,6 +362,9 @@ def _load_state(startup: bool = False) -> dict[str, int]:
         state.backtest["Date"] = pd.to_datetime(state.backtest["Date"])
         logger.info("Loaded %d backtest predictions", len(state.backtest))
     state.backtest_evaluated_at, state.backtest_stale = _backtest_freshness()
+
+    state.match_xg = _match_xg_lookup(tmh)
+    logger.info("Loaded own-match xG for %d matches", len(state.match_xg))
 
     # Scored fixtures are cached for a few minutes; after a reload that cache
     # describes the previous model, so drop it.
@@ -585,6 +605,11 @@ def _to_predictions(
             entry.actual_home_goals = int(r["FTHG"])
             entry.actual_away_goals = int(r["FTAG"])
             entry.actual_result = r["FTR"]
+            # Gated on the result, not on the date: that makes the block
+            # structurally impossible on an unplayed fixture, and stops a
+            # `/predict` hypothetical from picking up a real past match that
+            # happens to share a date and two club names.
+            entry.retrodiction = _retrodiction(r)
         if pd.notna(r.get("B365H")):
             market = odds_implied_probs(pd.DataFrame([r]), ODDS_COLUMNS)[0]
             entry.market_prob_home = round(float(market[0]), 4)
@@ -1104,6 +1129,12 @@ def _recent_from_store(known_through: pd.Timestamp, league: str | None) -> list[
                 value = r.get(f"{side}_strength_{metric}")
                 if pd.notna(value):
                     setattr(entry, f"strength_{side}_{metric}", round(float(value), 1))
+
+        # These rows are the newest on the page -- played after the feature
+        # table ends -- so this is usually `None`: the xG feed is a day or two
+        # behind the schedule pages that settled them. That is the honest
+        # answer, and the card says so rather than leaving a gap.
+        entry.retrodiction = _retrodiction(r)
 
         out.append(entry)
     return out
@@ -2052,6 +2083,71 @@ def _digest(path: Path) -> str | None:
     if not path.exists():
         return None
     return hashlib.md5(path.read_bytes()).hexdigest()[:12]  # noqa: S324 - a cache key
+
+
+#: Below this combined xG a match has no chances worth reading a result against.
+#:
+#: Catches exactly one match in 21,933 -- Bastia 0-3 Lyon, 2017-04-16, abandoned
+#: after crowd trouble and awarded, so both sides record 0.00. Without the gate
+#: the page would tell a reader that result had a 0.0% chance. The 0.1% quantile
+#: of combined match xG is 0.431, so this floor catches the degenerate case and
+#: nothing genuine.
+MIN_TOTAL_MATCH_XG = 0.1
+
+
+def _match_xg_lookup(tmh: pd.DataFrame) -> dict[tuple, tuple[float, float]]:
+    """Each played match's own xG, keyed `(date, home, away)`.
+
+    Read off the home-perspective row alone: `xGAgainst` there equals the away
+    row's `xGFor` on all 29,239 rows with zero mismatches, and
+    `(Date, Team, Opponent)` has no duplicates, so there is nothing to merge.
+    """
+    needed = {"Venue", "Team", "Opponent", "Date", "xGFor", "xGAgainst"}
+    if tmh.empty or not needed <= set(tmh.columns):
+        return {}
+    home = tmh[tmh["Venue"].astype(str).str.lower() == "home"]
+    home = home.dropna(subset=["xGFor", "xGAgainst"])
+    return {
+        (pd.Timestamp(r.Date).date(), r.Team, r.Opponent): (float(r.xGFor), float(r.xGAgainst))
+        for r in home.itertuples()
+    }
+
+
+def _retrodiction(row: pd.Series) -> Retrodiction | None:
+    """How likely the result was, given the chances the match actually produced.
+
+    Returns `None` rather than a placeholder whenever it cannot be computed --
+    an unplayed fixture, a European tie (those carry no xG), a match before
+    Understat's data starts in 2014/15, or the one abandoned match caught by
+    :data:`MIN_TOTAL_MATCH_XG`.
+
+    `rho` comes from the serving model, as it does for every other scoreline
+    number here. That it is the *model's* rho, fitted against pre-match rates
+    rather than these, turns out not to matter: across the whole plausible
+    range the probability of the observed result moves by at most 0.0154
+    (rho=0) and 0.0117 (rho=-0.10). Measured, in `EXPERIMENTS.md`.
+    """
+    actual = row.get("FTR") if "FTR" in row else row.get("actual_result")
+    if not isinstance(actual, str) or actual not in OUTCOMES:
+        return None
+    key = (pd.Timestamp(row["Date"]).date(), row["HomeTeam"], row["AwayTeam"])
+    pair = state.match_xg.get(key)
+    if pair is None:
+        return None
+    xg_home, xg_away = pair
+    if xg_home + xg_away < MIN_TOTAL_MATCH_XG:
+        return None
+
+    rho = state.metadata.rho if state.metadata else 0.0
+    probs = outcome_probs(score_matrix(xg_home, xg_away, rho=rho))[0]
+    return Retrodiction(
+        xg_home=round(xg_home, 2),
+        xg_away=round(xg_away, 2),
+        prob_home_win=round(float(probs[0]), 4),
+        prob_draw=round(float(probs[1]), 4),
+        prob_away_win=round(float(probs[2]), 4),
+        prob_actual=round(float(probs[OUTCOMES.index(actual)]), 4),
+    )
 
 
 def _exact_score_rate(rows: pd.DataFrame) -> float | None:

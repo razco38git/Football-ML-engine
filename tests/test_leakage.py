@@ -11,6 +11,8 @@ just before M must give identical answers. If they differ, the future leaked in.
 
 from __future__ import annotations
 
+import inspect
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -177,3 +179,45 @@ def test_bookmaker_odds_can_never_become_features() -> None:
     cols = feature_columns(frame)
 
     assert cols == ["home_elo"], f"odds leaked into the feature set: {cols}"
+
+
+def test_same_match_xg_can_never_become_a_feature() -> None:
+    """The retrodiction's inputs are the one thing in this API that would be a
+    catastrophic feature: a match's own xG predicts its own result almost
+    perfectly, and a model fed it would look superb and be worthless.
+
+    `feature_columns` cannot save us here. It is a *denylist* -- "every numeric
+    column that is not an identifier or target" -- so it would happily return
+    `match_xg_home`, exactly as it once returned `B365H`. This asserts the
+    architectural choice instead: the retrodiction reads a lookup keyed off
+    `state.tmh`, and those numbers never join the frame the model is built
+    from.
+    """
+    frame = pd.DataFrame(
+        {
+            "Date": [pd.Timestamp("2026-01-01")],
+            "HomeTeam": ["A"],
+            "AwayTeam": ["B"],
+            "FTHG": [1],
+            "FTAG": [0],
+            "FTR": ["H"],
+            "home_elo": [1500.0],
+            "match_xg_home": [2.1],
+            "match_xg_away": [0.4],
+        }
+    )
+
+    # The denylist does not stop them -- that is the whole point of not relying
+    # on it. If this ever starts failing, someone has added them to `excluded`
+    # and the real guard below has been quietly replaced by a weaker one.
+    assert "match_xg_home" in feature_columns(frame)
+
+    # The guard that actually holds: nothing joins them in the first place.
+    import importlib
+
+    api = importlib.import_module("footballml.api.app")
+    source = inspect.getsource(api._load_state)
+    assert "match_xg" in source, "the lookup is no longer built at load"
+    assert "state.features" not in source.split("_match_xg_lookup")[1][:200], (
+        "same-match xG is being joined into the frame the model is built from"
+    )

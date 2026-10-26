@@ -119,6 +119,24 @@ export interface Prediction {
   drivers_away: Driver[];
   form_home: TeamForm | null;
   form_away: TeamForm | null;
+
+  /** How likely the result was, given the chances the match actually produced.
+   *  Not a forecast — it reads the match's own xG, so it could only ever be
+   *  worked out afterwards. Null on an unplayed fixture, a European tie, a
+   *  match before Understat's data starts in 2014/15, or one whose shot data
+   *  has not been published yet. Never a placeholder zero. */
+  retrodiction?: Retrodiction | null;
+}
+
+export interface Retrodiction {
+  /** The chances each side created, as xG. Penalties included. */
+  xg_home: number;
+  xg_away: number;
+  prob_home_win: number;
+  prob_draw: number;
+  prob_away_win: number;
+  /** The probability it gave the result that actually happened. */
+  prob_actual: number;
 }
 
 export interface ModelInfo {

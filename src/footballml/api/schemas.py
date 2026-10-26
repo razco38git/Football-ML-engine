@@ -73,6 +73,41 @@ class LikelyScore(BaseModel):
     probability: float
 
 
+class Retrodiction(BaseModel):
+    """How likely the result was, given the chances that match actually produced.
+
+    **Not a prediction, and not available before kick-off**: the inputs are the
+    match's own xG, so this could only ever be computed afterwards. It answers
+    "how often would this match end this way if it were replayed", which is a
+    different question from the forecast shown beside it.
+
+    Present only on a settled match whose shot data exists. Everything about
+    when it is absent is in `_retrodiction` in `api/app.py`.
+
+    **Where it is weakest**, measured rather than asserted: a side two goals up
+    at half time stops needing chances, so its xG understates it and the result
+    it won reads as flukier here than it was. In the 0.1-0.2 band, matches level
+    at half time land +0.019 against the stated probability while matches
+    already two goals apart land -0.087. See `EXPERIMENTS.md`.
+    """
+
+    #: The chances each side created, as xG. Penalties included -- a penalty is
+    #: the clearest chance in football, and excluding them made the retrodiction
+    #: measurably worse (RPS 0.1704 against 0.1641).
+    xg_home: float
+    xg_away: float
+
+    prob_home_win: float
+    prob_draw: float
+    prob_away_win: float
+
+    #: The probability it assigned to the result that actually happened. The
+    #: page floors the display at 1%: three matches of 21,933 fall below that,
+    #: and the lowest calibration band is 0-0.1, so there is no measurement
+    #: behind a smaller figure.
+    prob_actual: float
+
+
 class Prediction(BaseModel):
     league: str
     date: date
@@ -160,6 +195,10 @@ class Prediction(BaseModel):
 
     form_home: TeamForm | None = None
     form_away: TeamForm | None = None
+
+    #: Absent unless the match is settled and its shot data exists. Never a
+    #: placeholder: a missing retrodiction is `None`, not a zero.
+    retrodiction: Retrodiction | None = None
 
 
 class PlayerRating(BaseModel):

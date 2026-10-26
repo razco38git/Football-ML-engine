@@ -2354,3 +2354,143 @@ feeds no outcome pair -- and it removes the only input that moves.
    of what that floor should be.
 4. **Treat an unreplicated ordering as noise.** The squad-size decision ("nothing
    beats 15") replicated across every vintage tested; only the ordering moved.
+
+---
+
+# How likely was that result, given the chances the match produced?
+
+A display feature, measured before it was published rather than after. It is
+not a model change: nothing here touches a feature, a weight or an artifact,
+and the only decision riding on it is whether a block goes on a match card.
+
+**Not pre-registered, and it could not honestly have been.** `docs/PROTOCOLS.md`
+is for experiments *"specified but not yet run"* whose criteria are *"fixed
+before any result exists"*. These numbers were produced while deciding whether
+the feature was worth building at all. The bar was the defending sweep's rather
+than a sweep's — *"published ratings are defensible, not about prediction"* —
+and there was no ship/no-ship RPS gate to move.
+
+## The question
+
+The site shows what the model said before kick-off. It says nothing about
+whether the result matched the game. Given the chances both sides actually
+created, how likely was the result that happened?
+
+Same-match xG into the existing Dixon-Coles matrix, outcome probabilities out.
+It is a **retrodiction**: it reads the match's own xG and so could never have
+been computed beforehand.
+
+## What was run
+
+21,933 matches, 2014-08-08 to 2026-10-19, all five leagues, home perspective.
+7,306 further matches are excluded because Understat's shot data starts in
+2014/15. `rho` is the serving model's, −0.056735.
+
+## Results
+
+| | RPS | points at the result |
+|---|---|---|
+| retrodiction, xG | **0.1641** | **60.3%** |
+| retrodiction, npxG | 0.1704 | 58.9% |
+| the model, before kick-off | 0.1992 | 53.0% |
+| base rate | 0.2297 | 44.2% |
+
+**Penalties stay in.** The xG/npxG gap of 0.0063 is **12.6× the 0.0005
+measurement floor**, so this is measured rather than editorial — and a penalty
+is the clearest chance in football, so excluding it would make a 1-0 penalty
+win read as a near-total fluke.
+
+### Calibration, pooled
+
+| band | n | said | happened | gap |
+|---|---|---|---|---|
+| 0.0–0.1 | 8,230 | 0.055 | 0.045 | −0.010 |
+| 0.1–0.2 | 12,469 | 0.154 | 0.148 | −0.006 |
+| 0.2–0.3 | 15,503 | 0.248 | 0.252 | +0.005 |
+| 0.3–0.4 | 9,279 | 0.345 | 0.334 | −0.011 |
+| 0.4–0.5 | 5,917 | 0.447 | 0.449 | +0.001 |
+| 0.5–0.6 | 4,612 | 0.548 | 0.546 | −0.002 |
+| 0.6–0.7 | 3,668 | 0.648 | 0.659 | +0.011 |
+| 0.7–0.8 | 3,060 | 0.748 | 0.772 | +0.024 |
+| 0.8–0.9 | 2,099 | 0.846 | 0.874 | +0.029 |
+| 0.9–1.0 | 962 | 0.936 | 0.951 | +0.015 |
+
+### Calibration conditional on the half-time state — the finding that matters
+
+The pooled table above is **misleading on its own**, and reading only it was
+the first mistake made here. Half-time scores joined from `data/raw/*.csv`
+(21,930 of 21,933 matched), 0.1–0.2 band — the band where the feature's claim
+lives:
+
+| subset | n | said | happened | gap |
+|---|---|---|---|---|
+| all | 21,930 | 0.154 | 0.148 | −0.006 |
+| level at half time | 8,963 | 0.154 | 0.174 | **+0.019** |
+| a lead at half time | 12,967 | 0.154 | 0.132 | **−0.022** |
+| 2+ lead at half time | 3,677 | 0.152 | **0.066** | **−0.087** |
+
+The pooled figure is good because the two halves cancel. In a match already two
+goals apart at half time the retrodiction calls a result ~15% likely that
+happens ~6.6% of the time — it **overstates how fluky those results were**, by
+four to nine points. That is state dependence with a sign and a magnitude: a
+side two goals up stops needing chances, so its xG understates it.
+
+**What this does and does not support.** The half-time score is itself partly a
+function of the result, so part of the degradation is mechanical conditioning
+rather than bias. The load-bearing finding is the **monotone ordering and the
+sign flip**, not the absolute gaps.
+
+**Two measurements were run and discarded**: calibration split by final margin
+and by total goals. Both condition directly on the outcome, which makes the
+gaps (up to 0.35) meaningless. They are recorded here because they were run,
+not because they show anything.
+
+The clean in-match state change does not break it. Red card: n=3,827, RPS
+0.1647, max calibration gap 0.046. No red card: n=18,106, RPS 0.1640, max gap
+0.030.
+
+### Does the model's rho belong here?
+
+It was fitted against the model's pre-match rates, not against same-match xG,
+and `# Does every league want the same Dixon-Coles rho?` above already shows
+rho trends with scoring level. Measured max |change| in the probability of the
+observed result, across 21,933 matches:
+
+| rho | max change | mean |
+|---|---|---|
+| 0 | 0.0154 | 0.0062 |
+| −0.10 | 0.0117 | 0.0047 |
+| −0.0779 (MLE refit on same-match xG) | 0.0057 | 0.0023 |
+
+The whole objection is worth at most 1.5 points anywhere in the plausible
+range. The serving model's rho is used; the refit is reported as a sensitivity
+and deliberately not adopted, since fitting it on the scorelines being judged
+would make the published number in-sample.
+
+## What the page shows, and what it does not
+
+Published: the three probabilities, the chances that produced them, and the
+probability of the result that happened — floored at `<1%`, because three
+matches of 21,933 fall below that and the lowest calibration band is 0–0.1, so
+there is no measurement behind a smaller number.
+
+**Not published: the RPS ladder.** 0.1641 against the model's 0.1992 on a match
+card reads as "the xG model is better, so why is it not the model?" — which
+implies a factor the prediction does not use, the same reason head-to-head
+records are not shown.
+
+One match in 21,933 is gated out entirely: Bastia 0-3 Lyon, 2017-04-16,
+abandoned after crowd trouble and awarded, both sides on 0.00 xG. The gate is a
+floor on combined xG at 0.1; the 0.1% quantile of that quantity is 0.431, so it
+catches the degenerate case and nothing genuine.
+
+## Limitations
+
+- xG is a model, not ground truth.
+- Penalties are included and are Bernoulli, not Poisson, so their variance is
+  misspecified.
+- An own goal carries ~0 xG, so an own-goal match reads as flukier than it was.
+- State dependence, quantified above.
+- The xG feed lags the results feed by a day or two, so the newest matches on
+  the page carry no retrodiction at all. The card says so rather than leaving a
+  gap.
