@@ -1070,12 +1070,125 @@ def attach_fifa(players: pd.DataFrame, fifa: pd.DataFrame) -> pd.DataFrame:
     # Moisés Caicedo has no EA entry, a season position of M and a career
     # position of D, so the career value made him a centre-back rated 90 and
     # inflated Chelsea's defence rating.
+    merged = _carry_role_across_seasons(merged)
+
     fallback = merged["position_group"]
     if "season_position" in merged.columns:
         fallback = merged["season_position"].fillna(fallback)
     merged["role"] = merged["role"].fillna(fallback.map(FALLBACK_ROLE))
     merged = _settle_reordered_roles(merged)
     return merged.drop(columns=["_norm"])
+
+
+#: How many seasons a carried role may travel. One, measured: see
+#: :func:`_carry_role_across_seasons`. Raising it reaches across genuine
+#: position conversions, which is the failure this is here to avoid, and
+#: lowering it to zero turns the rule off.
+MAX_SEASONS_AWAY = 1
+
+
+def _carry_role_across_seasons(merged: pd.DataFrame) -> pd.DataFrame:
+    """A player missing from one edition keeps the role EA gave him in another.
+
+    An edition can simply not carry a player who played in the big five that
+    season. Giuliano Simeone is in the 2526 export at `RM, ST, LM, RW` -- an
+    81-rated right winger -- and is **absent from 2627 entirely**. Without this
+    his 2026/27 role came from Understat's season label, which is `D M S`
+    because wingers track back, and :data:`FALLBACK_ROLE` turns a `D` into a
+    *centre back*. So an Atlético winger was published as a centre back and
+    ranked against centre backs.
+
+    The player's own EA role from the nearest season is better evidence than
+    Understat's three letters, and it is the same principle as
+    :func:`_match_across_editions`: a player identified in one edition is still
+    that player in the next. Earlier seasons are preferred over later ones at
+    equal distance, because a role that has changed has changed *forward*.
+
+    **Only from an adjacent season**, which is the whole difference between a
+    correction and a new error. Makoto Hasebe has no EA entry from 2014/15 to
+    2022/23 and one in 2023/24, by which time he had converted from midfielder
+    to libero: without :data:`MAX_SEASONS_AWAY` the rule reached nine seasons
+    forward and relabelled his entire Frankfurt career as a centre back, which
+    moved his 2014/15 rating by twelve points. One season either side is
+    contemporaneous evidence about the same player; five years later is a
+    different one. The cap costs 493 of 1,628 reachable rows and removes the
+    whole tail that produced the Hasebe case.
+
+    Narrow by construction otherwise -- it only reaches rows EA has no entry
+    for at all, 2,941 of 34,856 player-seasons, and lands on 631 of them. The
+    largest group is 147 players Understat files as `D` and EA calls full
+    backs, a disagreement the matched seasons already resolve EA's way (see
+    :data:`COMPATIBLE_ROLES`, where it is 1,073 player-seasons and "nearly all
+    correct"); this resolves it the same way when the match is missing.
+
+    Measured over the whole file, next-season validity does not move: `atk>GF`
+    0.7385 to 0.7377, `def>GA` -0.5281 to -0.5289, `ovr>pts` 0.7558 either
+    way -- all inside the 0.003 floor -- and walk-forward RPS is unchanged. It
+    is a correctness fix, not an improvement, and is not sold as one.
+
+    **What it cannot fix.** A carried role is only as good as the match it came
+    from. Where the matcher put the wrong person behind a name in one season,
+    this spreads that role to the neighbouring one; three of the 631 cross from
+    an Understat `D` to a forward role, which is the shape that failure takes.
+    It does not create the error, and the alternative -- a boundary applied to
+    carried rows and not to matched ones -- would make two seasons of the same
+    player disagree for no reason a reader could follow.
+
+    The one boundary still enforced is :func:`contradicts_position`'s: a
+    carried outfield role is refused for a season Understat files as a
+    goalkeeper, and the reverse, because nobody is both and that mismatch takes
+    a club's keeper line away.
+    """
+    if not {"Player", "Season", "role"} <= set(merged.columns):
+        return merged
+
+    known = merged["role"].notna()
+    if not known.any() or known.all():
+        return merged
+
+    order = {season: i for i, season in enumerate(sorted(merged["Season"].astype(str).unique()))}
+    roles: dict[str, dict[int, str]] = {}
+    for player, season, role in zip(
+        merged.loc[known, "Player"].astype(str),
+        merged.loc[known, "Season"].astype(str),
+        merged.loc[known, "role"],
+        strict=True,
+    ):
+        roles.setdefault(player, {}).setdefault(order[season], str(role))
+
+    group = merged["position_group"]
+    if "season_position" in merged.columns:
+        group = merged["season_position"].fillna(group)
+
+    filled: list[str | None] = []
+    for player, season, position in zip(
+        merged.loc[~known, "Player"].astype(str),
+        merged.loc[~known, "Season"].astype(str),
+        group[~known],
+        strict=True,
+    ):
+        seen = roles.get(player)
+        if not seen:
+            filled.append(None)
+            continue
+        here = order[season]
+        # Nearest season, earlier first at equal distance, and never further
+        # than MAX_SEASONS_AWAY -- see the docstring on Hasebe.
+        nearest = min(seen, key=lambda s: (abs(s - here), s > here))
+        if abs(nearest - here) > MAX_SEASONS_AWAY:
+            filled.append(None)
+            continue
+        role = seen[nearest]
+        filled.append(None if contradicts_position(position, role) else role)
+
+    carried = pd.Series(filled, index=merged.index[~known], dtype="object")
+    merged = merged.copy()
+    merged.loc[~known, "role"] = carried
+    logger.info(
+        "Carried an EA role across seasons for %d player-season(s) EA does not list",
+        int(carried.notna().sum()),
+    )
+    return merged
 
 
 def _settle_reordered_roles(merged: pd.DataFrame) -> pd.DataFrame:

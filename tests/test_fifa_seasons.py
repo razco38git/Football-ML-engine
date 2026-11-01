@@ -1089,3 +1089,150 @@ def test_a_single_name_at_the_wrong_club_is_refused():
 
     out = attach_fifa(players, export).set_index("Player")
     assert pd.isna(out.at["Fabián", "fifa_overall"])
+
+
+def test_an_edition_missing_a_player_keeps_his_role_from_another():
+    """Giuliano Simeone is in the 2526 export and absent from 2627 entirely.
+
+    Understat's 2026/27 label for him is ``D M S`` -- wingers track back -- and
+    `FALLBACK_ROLE` turns a `D` into a centre back, so an Atletico winger was
+    published as one and ranked against them.
+    """
+    export = _export(
+        [
+            {
+                "fifa_name": "giuliano simeone",
+                "fifa_overall": 81.0,
+                "Season": "2526",
+                "role": "AMW",
+            },
+            {"fifa_name": "someone else", "fifa_overall": 70.0, "Season": "2627"},
+        ]
+    )
+    players = pd.DataFrame(
+        {
+            "Player": ["giuliano simeone", "giuliano simeone"],
+            "Season": ["2526", "2627"],
+            "season_position": ["D", "D"],
+            "position_group": ["D", "D"],
+        }
+    )
+
+    roles = attach_fifa(players, export).set_index("Season")["role"]
+
+    assert roles["2526"] == "AMW"
+    assert roles["2627"] == "AMW"
+
+
+def test_the_nearest_season_wins_and_earlier_breaks_the_tie():
+    """A role that has changed has changed forward, so earlier is the safer read."""
+    export = _export(
+        [
+            {
+                "fifa_name": "two sided",
+                "fifa_overall": 70.0,
+                "Season": "2425",
+                "role": "FB",
+            },
+            {
+                "fifa_name": "two sided",
+                "fifa_overall": 70.0,
+                "Season": "2627",
+                "role": "AMW",
+            },
+        ]
+    )
+    players = pd.DataFrame(
+        {
+            "Player": ["two sided"] * 3,
+            "Season": ["2425", "2526", "2627"],
+            "season_position": ["D", "D", "F"],
+            "position_group": ["D", "D", "D"],
+        }
+    )
+
+    roles = attach_fifa(players, export).set_index("Season")["role"]
+
+    assert roles["2526"] == "FB"
+
+
+def test_a_carried_role_cannot_cross_the_goalkeeper_boundary():
+    """Nobody is both, and that mismatch costs a club its whole keeper line."""
+    export = _export(
+        [
+            {
+                "fifa_name": "the keeper",
+                "fifa_overall": 70.0,
+                "Season": "2526",
+                "role": "GK",
+            },
+            {"fifa_name": "someone else", "fifa_overall": 70.0, "Season": "2627"},
+        ]
+    )
+    players = pd.DataFrame(
+        {
+            "Player": ["the keeper", "the keeper"],
+            "Season": ["2526", "2627"],
+            # Understat says this season he was an outfielder, which contradicts
+            # the carried role, so Understat's own fallback is used instead.
+            "season_position": ["GK", "F"],
+            "position_group": ["GK", "GK"],
+        }
+    )
+
+    roles = attach_fifa(players, export).set_index("Season")["role"]
+
+    assert roles["2627"] == "FWD"
+
+
+def test_a_player_ea_never_lists_still_falls_back_to_understat():
+    export = _export(
+        [{"fifa_name": "someone else", "fifa_overall": 70.0, "Season": "2627"}]
+    )
+    players = pd.DataFrame(
+        {
+            "Player": ["never in ea"],
+            "Season": ["2627"],
+            "season_position": ["M"],
+            "position_group": ["M"],
+        }
+    )
+
+    assert attach_fifa(players, export)["role"].iloc[0] == "MID"
+
+
+def test_a_role_does_not_travel_across_a_career(tmp_path) -> None:
+    """Makoto Hasebe converted from midfielder to libero late at Frankfurt.
+
+    EA carries him in one edition, by which time he is a centre back. Reaching
+    that far back relabels nine seasons of a midfielder and moved his 2014/15
+    rating by twelve points, which is a worse error than the one this rule
+    exists to fix.
+    """
+    export = _export(
+        [
+            {
+                "fifa_name": "makoto hasebe",
+                "fifa_overall": 70.0,
+                "Season": "2324",
+                "role": "CB",
+            },
+            {"fifa_name": "someone else", "fifa_overall": 70.0, "Season": "1415"},
+            {"fifa_name": "someone else", "fifa_overall": 70.0, "Season": "2223"},
+        ]
+    )
+    players = pd.DataFrame(
+        {
+            "Player": ["makoto hasebe"] * 3,
+            "Season": ["1415", "2223", "2324"],
+            "season_position": ["M", "M", "D"],
+            "position_group": ["M", "M", "M"],
+        }
+    )
+
+    roles = attach_fifa(players, export).set_index("Season")["role"]
+
+    # Nine seasons away: Understat's own label stands.
+    assert roles["1415"] == "MID"
+    # One season away: EA's is better evidence.
+    assert roles["2223"] == "CB"
