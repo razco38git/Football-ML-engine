@@ -475,11 +475,28 @@ export interface TeamStrength {
   /** eleven | best_n | squad */
   method: string;
   n_players: number;
-  strength_overall: number;
+  /**
+   * The measured rating: the players who actually turned out for this club
+   * this season, rated on what they did. `null` until the club has eleven
+   * players past the minutes gate, which is most of the way into a season.
+   */
+  strength_overall: number | null;
   strength_goalkeeper: number | null;
   strength_defence: number | null;
   strength_midfield: number | null;
   strength_attack: number | null;
+  /**
+   * The pre-season rating: the squad EA listed in September, each player
+   * carrying his rating from the season before. Exists from the first day of
+   * a season; measurably worse than the column above wherever both exist.
+   */
+  squad_overall: number | null;
+  squad_goalkeeper: number | null;
+  squad_defence: number | null;
+  squad_midfield: number | null;
+  squad_attack: number | null;
+  /** How many of the fifteen carried a rating of ours rather than EA's alone. */
+  squad_from_history: number | null;
 }
 
 export interface TeamStrengthPage {
@@ -488,6 +505,8 @@ export interface TeamStrengthPage {
   seasons: string[];
   /** The season these rows are from. */
   season: string | null;
+  /** `measured` | `pre-season` -- which rating ordered the rows. */
+  ordered_by: string;
 }
 
 /** Team ratings built from player ratings, strongest first. */

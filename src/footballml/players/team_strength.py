@@ -21,6 +21,35 @@ Three methods are offered, because they answer slightly different questions:
 ``best_n``
     The N highest-rated players regardless of minutes. Describes the talent
     available rather than what gets used.
+
+Whose squad this is, and the two things measured about it
+---------------------------------------------------------
+
+**The squad is the one that turned out.** A rating for (club, season `S`) is
+built from the players Understat files under that club in `S`, so it follows
+transfers without being asked to: Barcelona 2021/22 contains no Messi, PSG's
+does, and Barcelona's even carries Aubameyang, who signed in January. What is
+stale is the *feature*, which joins `S`'s rating onto `S+1`'s matches --
+required by `tests/test_strength_leakage.py` and the reason a promoted club's
+strength feature is `NaN`.
+
+**Dropping transferred players was measured and rejected.** The rejection
+`docs/ARCHITECTURE.md` lists and had nowhere to point:
+
+    variant                         atk>GF   def>GA   ovr>pts
+    all rated players (this)        0.6593   -0.4390   0.6743
+    leavers dropped                 0.6539   -0.4398   0.6634
+
+It removes information and adds none: the fifteen carried forward average
+71.56 and the subset who actually stay average 71.80, so leavers are not
+systematically worse and dropping them is pure variance.
+
+**Rating EA's September roster instead was measured too**, and it costs
+0.05-0.08 on all three -- almost entirely because it must use last season's
+player ratings, not because EA's squad list is wrong. It ships as a second
+published column rather than a replacement; see
+:mod:`footballml.players.squad_rating`. Both experiments are written up in
+`EXPERIMENTS.md`, "Does the published team rating need EA's squad list?".
 """
 
 from __future__ import annotations

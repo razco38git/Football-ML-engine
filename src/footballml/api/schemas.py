@@ -323,11 +323,24 @@ class PlayerPage(BaseModel):
 
 
 class TeamStrength(BaseModel):
-    """A team's rating, built from its players.
+    """A team's rating, built from its players -- twice, two different ways.
 
     ``method`` records how the squad was reduced: ``eleven`` is the predicted
     starting eleven (highest-minute player per formation slot), ``best_n`` the
     top-rated N regardless of minutes, ``squad`` everyone weighted by minutes.
+
+    The ``strength_*`` numbers are the **measured** rating: the players who
+    actually turned out for this club this season, rated on what they did. The
+    ``squad_*`` numbers are the **pre-season** rating: the squad EA listed in
+    September, each player carrying his rating from the season before.
+
+    Both are published because each covers the other's gap, and the honest
+    framing is in :mod:`footballml.players.squad_rating`. The measured one is
+    better at everything it can do -- it wins all three validity correlations
+    by far more than their 0.003 floor -- but it does not exist until a club
+    has eleven players past the 450-minute gate, which is most of the way into
+    a season. So ``strength_*`` is `None` for almost every club in the season
+    in progress, and ``squad_*`` is `None` only where EA has no squad to read.
     """
 
     team: str
@@ -335,11 +348,22 @@ class TeamStrength(BaseModel):
     season: str
     method: str
     n_players: int
-    strength_overall: float
+    strength_overall: float | None = None
     strength_goalkeeper: float | None = None
     strength_defence: float | None = None
     strength_midfield: float | None = None
     strength_attack: float | None = None
+
+    squad_overall: float | None = None
+    squad_goalkeeper: float | None = None
+    squad_defence: float | None = None
+    squad_midfield: float | None = None
+    squad_attack: float | None = None
+    #: How many of the fifteen players behind ``squad_overall`` carried a
+    #: rating of ours rather than EA's alone. Low for a promoted side, which is
+    #: the case the pre-season rating exists to cover and the case to read it
+    #: most carefully in.
+    squad_from_history: int | None = None
 
 
 class TeamStrengthPage(BaseModel):
@@ -355,6 +379,11 @@ class TeamStrengthPage(BaseModel):
     seasons: list[str] = Field(default_factory=list)
     #: The season these rows are from.
     season: str | None = None
+    #: Which rating ordered the rows: ``measured`` normally, ``pre-season``
+    #: for a season too young to have measured ratings for most of its clubs.
+    #: The page says which, because a table silently ordered by a projection
+    #: reads as a measurement.
+    ordered_by: str = "measured"
 
 
 class LeagueStrength(BaseModel):

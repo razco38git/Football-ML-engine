@@ -2494,3 +2494,169 @@ catches the degenerate case and nothing genuine.
 - The xG feed lags the results feed by a day or two, so the newest matches on
   the page carry no retrodiction at all. The card says so rather than leaving a
   gap.
+
+# Does the published team rating need EA's squad list?
+
+## Why, and the premise that turned out to be false
+
+The worry, as it was put: *"imagine saying that Barcelona still have Messi when
+in reality he moved to PSG, or Real Madrid without Cristiano Ronaldo."* The
+published team rating is a squad rating, the squad changes every summer, and
+nothing on the page said which summer it described.
+
+**It describes the right one.** `team_strength.csv` is built from the players
+who turned out for that club *in that season*, and Understat files a player
+under the club he actually played for, so the roster behind a published rating
+is already correct:
+
+| club-season | top of the rated squad |
+|---|---|
+| Barcelona 2021/22 | Jordi Alba 91, Pique 81, ter Stegen 81, **Aubameyang 81** |
+| Paris Saint-Germain 2021/22 | Mbappe 92, **Messi 90**, Neymar 90 |
+| Real Madrid 2024/25 | **Mbappe 93**, Modric 87, Vinicius 87 |
+
+Messi is absent from Barcelona 2021/22 and present at PSG. Ronaldo sits under
+Manchester United in 2021/22. And Barcelona 2021/22 carries Aubameyang, who
+signed in *January* -- so the published rating is more current than any
+September roster could be.
+
+What is stale is the **model feature**, which joins season `S`'s rating onto
+season `S+1`'s matches. That is not a defect: `tests/test_strength_leakage.py::
+test_match_never_sees_its_own_season` requires it, and it is why a promoted
+club's strength feature is `NaN`.
+
+So the question this section actually answers is the one left standing: an EA
+edition is a per-season roster we are not using -- what would it buy?
+
+## What was built
+
+`footballml.players.ea_squads` resolves each club-season to its EA club label
+from the players we have already matched one at a time, because EA renames
+clubs between editions (`Paris SG` to `Paris Saint-Germain` and back) and
+`config/team_aliases.yaml` carries errors that would hand us the wrong squad
+(`Falkirk -> Swansea`; `FC Barcelona B -> Barcelona`). Three rules, each from a
+failure measured without it:
+
+- **History first.** A plurality vote alone resolved PSG 26/27 to
+  `Stade Rennais FC` 7 against `Paris SG` 6, wrecking both squads.
+- **A vote needs three players.** Spezia 2020/21 has 22 rated players scattered
+  one vote each *because Spezia is not in the 2021 edition at all*, and the
+  naive rule rated its squad as Milan's.
+- **A label belongs to one club.** The history rule's own fallback reintroduced
+  that collision from the other side.
+
+Audit over 1,266 big-five club-seasons: **1,264 resolved** (928 by history, 336
+by vote), **0** labels claimed by two clubs, **0** reserve sides resolved, squad
+sizes median 30 (IQR 27-33). The two failures are Roma and Spezia 2020/21, both
+genuinely absent from that export. Six club-seasons are inflated by bare-name
+collisions between real clubs (`Everton` 2022/23 holds 57 players, Everton FC
+plus Everton de Vina del Mar); they are left alone because the contamination
+does not reach the selection -- the best-fifteen cut-off sits at 75-81 overall
+while the Chilean squad tops out at 73.
+
+`footballml.players.squad_rating` then rates that roster: a prior rated season
+where one exists, otherwise EA's `overall` read off the published
+`fifa_on_our_scale` curve for that `(role, season)`; weighted by the player's
+*previous* season minutes; aggregated by `team_strength`'s own `best_n`
+selection and `OVERALL_LINES` weighting, so the two columns differ by their
+roster and by nothing else.
+
+## Results
+
+Next-season validity, on the 980 club-seasons every arm covers. Two factors,
+crossed: whose roster, and how fresh the player ratings are.
+
+| arm | roster | player ratings | atk>GF | def>GA | ovr>pts |
+|---|---|---|---|---|---|
+| **A** (shipped) | ours -- who turned out | same season | **0.7440** | **-0.5417** | **0.7726** |
+| C | EA's September squad | same season | 0.7371 | -0.5263 | 0.7627 |
+| B (published as `PRE`) | EA's September squad | season before | 0.6971 | -0.4752 | 0.7211 |
+| F | ours -- who turned out | season before | 0.6926 | -0.4649 | 0.7128 |
+
+Read down the pairs and the decomposition is unambiguous:
+
+- **Swapping the roster costs almost nothing.** A to C is -0.007 / -0.015 / -0.010.
+- **Swapping to last season's ratings costs everything.** A to F is -0.051 /
+  -0.077 / -0.060, twenty times the measurement floor of 0.003.
+- EA's squad list is if anything the *better* roster once both arms are stale:
+  B beats F on all three.
+
+So the pre-season rating is weaker for the reason a forecast is always weaker
+than a measurement, and **not** because EA's squad list is wrong. Where both
+exist the two agree closely: correlation 0.947, mean gap -0.14 points, quartiles
+-1.3 to +1.1.
+
+### What it buys: the season in progress
+
+| season | pre-season rating | measured rating |
+|---|---|---|
+| 2024/25 | 96 clubs | 96 clubs |
+| 2025/26 | 96 clubs | 96 clubs |
+| **2026/27** | **96 clubs** | **18 clubs** |
+
+A club needs eleven players past the 450-minute gate before `team_strength`
+will rate it (`MIN_RATED_PLAYERS`), which is most of the way into a season.
+Eight weeks in, the measured rating covers 18 of 96 clubs; the pre-season one
+covers all 96 from matchweek one. That, not transfer correctness, is what this
+work is for.
+
+## Decision: published as a second column, never as a replacement
+
+- It goes on the Team Strength page as `PRE`, beside `OVR`, with the page
+  stating that it is a September snapshot, that it misses January transfers,
+  and what it scores on the three correlations.
+- A row shows one rating or the other, never a mix of their lines: the two are
+  built from different squads, so a defence from one beside an attack from the
+  other would describe a team that never existed.
+- It orders the table **only** when the measured rating covers less than
+  `SEASON_COVERAGE` (75%) of the season's clubs, and the page says so when it
+  does. A table ordered by a projection and presented as a measurement is the
+  one failure here a reader could not detect.
+- **No model feature.** Removing squad strength from the model entirely costs
+  +0.00015 RPS [-0.00001, +0.00032] over 20,013 matches, which does not clear
+  zero, so there is no prediction to be gained. The hard-gate conditions were
+  checked and hold: `team_strength.csv` byte-identical
+  (`8f70cab7a30b8a68399ea2f20e25c980`), the feature table byte-identical at
+  29,324 x 243, and walk-forward RPS unchanged.
+
+## Prior art, finally recorded
+
+`docs/ARCHITECTURE.md` lists *"dropping transferred players from squad
+strength"* among the measured-and-rejected changes and promises each rejection
+is recorded beside the thing it concerns. **It was not** -- not in
+`team_strength.py`, not here, not in git history. The numbers, so nobody re-runs
+it:
+
+| variant | atk>GF | def>GA | ovr>pts |
+|---|---|---|---|
+| all rated players (shipped) | 0.6593 | -0.4390 | 0.6743 |
+| leavers dropped | 0.6539 | -0.4398 | 0.6634 |
+
+It failed because dropping leavers only removes information: the fifteen
+carried forward average **71.56** and the subset who actually stay average
+**71.80**, a difference of -0.24, so leavers are not systematically worse and
+removing them is pure variance. The arrivals were the untested half -- **2.9**
+traceable arrivals into a top fifteen per team-season, rated **70.11** at their
+old club against **71.62** for the squad they join, mean -1.51 but standard
+deviation 4.25 and range -20 to +10.7. Arm C above is that half tested: the
+arrivals are worth -0.010 on `ovr>pts`, not the gain the spread suggested.
+
+## Limitations
+
+- **A September snapshot.** Every January transfer is invisible to the `PRE`
+  column, and the measured column is the one that catches them.
+- A player with no prior rated season -- a youth player, a signing from outside
+  the big five, anyone under the minutes gate -- is rated on EA's opinion alone,
+  mapped through our scale. That is 4 of the 15 on average, and the published
+  `squad_from_history` says how many for each club so a reader can discount a
+  promoted side's number appropriately.
+- The EA curve is **clamped**, not extrapolated: a 95-rated player in a
+  `(role, season)` pool topping out at 91 is rated as a 91. Our own data has
+  nothing to say above its own range.
+- Two club-seasons have no `PRE` rating at all, and the honest reason is that
+  EA's 2021 export has no Roma and no Spezia.
+- The arms above are one data vintage. The squad-size sweep's own replication
+  failure says the *ordering* of correlations this close can move between
+  vintages; the gaps here are 0.05-0.08, which is twenty times that
+  sensitivity, so the decomposition is safe even though a 0.007 difference in
+  it would not be.

@@ -12,6 +12,21 @@ const LINES: { key: keyof TeamStrength; label: string }[] = [
   { key: 'strength_attack', label: 'ATT' },
 ];
 
+/**
+ * The same four lines from the pre-season rating.
+ *
+ * A row shows one or the other, never a mix: the two are built from different
+ * squads, so a defence from the measured rating beside an attack from the
+ * pre-season one would be a team that never existed. Which one a row is
+ * showing is on the row, next to the overall.
+ */
+const PRE_LINES: { key: keyof TeamStrength; label: string }[] = [
+  { key: 'squad_goalkeeper', label: 'GK' },
+  { key: 'squad_defence', label: 'DEF' },
+  { key: 'squad_midfield', label: 'MID' },
+  { key: 'squad_attack', label: 'ATT' },
+];
+
 function Badge({ value, size = 34 }: { value: number | null; size?: number }) {
   if (value == null) {
     return (
@@ -207,7 +222,10 @@ export default function TeamStrength() {
   );
 
   const rows = data?.teams ?? [];
-  const best = rows[0]?.strength_overall ?? 100;
+  const preSeasonOrder = data?.ordered_by === 'pre-season';
+  const value = (t: TeamStrength) =>
+    preSeasonOrder ? t.squad_overall : t.strength_overall;
+  const best = (rows.length > 0 ? value(rows[0]) : null) ?? 100;
   // A squad is rated from the season's own players, so an earlier season shows
   // that season's team -- which is the point of being able to pick one, and
   // worth saying out loud rather than leaving the reader to infer it.
@@ -222,9 +240,19 @@ export default function TeamStrength() {
           Team Strength
         </h2>
         <p className="mt-1 text-sm" style={{ color: 'var(--muted-foreground)' }}>
-          Built from the likely starting eleven — the highest-minute player in each formation
-          slot, rated and weighted by line. Click a team to see the squad behind it, or a
-          league to filter to it.
+          Built from the top fifteen players by rating, weighted by line. Click a team to see
+          the squad behind it, or a league to filter to it.
+        </p>
+        <p className="mt-2 text-xs leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
+          Two ratings, and they are not interchangeable.{' '}
+          <strong style={{ color: 'var(--foreground)' }}>OVR</strong> is measured: the players who
+          actually turned out, rated on what they did.{' '}
+          <strong style={{ color: 'var(--foreground)' }}>PRE</strong> is the pre-season squad EA
+          listed in September, each player carrying last season&rsquo;s rating — so it exists from
+          matchweek one, misses every January transfer, and is measurably the weaker of the two
+          wherever both exist (it predicts next season&rsquo;s points at 0.72 against 0.77). We
+          measured why: swapping to EA&rsquo;s squad list costs almost nothing, and the whole gap
+          is last season&rsquo;s ratings being last season&rsquo;s.
         </p>
       </div>
 
@@ -266,6 +294,18 @@ export default function TeamStrength() {
         )}
       </div>
 
+      {preSeasonOrder && rows.length > 0 && (
+        <div
+          className="rounded-xl p-3 mb-4 text-xs leading-relaxed"
+          style={{ background: 'rgba(167,139,250,0.08)', border: '1px solid rgba(167,139,250,0.25)', color: 'var(--muted-foreground)' }}
+        >
+          Ordered by the <strong style={{ color: '#a78bfa' }}>pre-season</strong> rating, because
+          this season is too young for the measured one: a club needs eleven players past the
+          450-minute gate before it gets rated at all. Expect this table to re-order as the
+          measured column fills in.
+        </div>
+      )}
+
       {error && (
         <div className="rounded-xl p-6 text-center" style={{ background: 'rgba(244,67,54,0.08)', border: '1px solid rgba(244,67,54,0.25)' }}>
           <div className="text-sm mb-3" style={{ color: '#f44336' }}>{error}</div>
@@ -287,7 +327,13 @@ export default function TeamStrength() {
 
       {data && (
         <div className="flex flex-col gap-2">
-          {rows.map((t, i) => (
+          {rows.map((t, i) => {
+            // One rating per row. Measured when it exists, pre-season when it
+            // does not -- which is every club early in a season.
+            const usePre = t.strength_overall == null && t.squad_overall != null;
+            const lines = usePre ? PRE_LINES : LINES;
+            const overall = usePre ? t.squad_overall : t.strength_overall;
+            return (
             <div
               key={`${t.team}-${i}`}
               onClick={() => setSelected(t)}
@@ -318,28 +364,46 @@ export default function TeamStrength() {
                     <div
                       className="h-full rounded-full"
                       style={{
-                        width: `${(t.strength_overall / best) * 100}%`,
-                        background: 'linear-gradient(90deg, #00e676, #3b82f6)',
+                        width: `${((value(t) ?? overall ?? 0) / best) * 100}%`,
+                        background: usePre
+                          ? 'linear-gradient(90deg, #a78bfa, #3b82f6)'
+                          : 'linear-gradient(90deg, #00e676, #3b82f6)',
                       }}
                     />
                   </div>
                 </div>
 
                 <div className="flex items-center gap-3 flex-shrink-0">
-                  {LINES.map(line => (
+                  {lines.map(line => (
                     <div key={String(line.key)} className="flex flex-col items-center gap-0.5">
                       <Badge value={t[line.key] as number | null} size={30} />
                       <span style={{ fontSize: 9, color: 'var(--muted-foreground)' }}>{line.label}</span>
                     </div>
                   ))}
                   <div className="flex flex-col items-center gap-0.5 ml-1">
-                    <Badge value={t.strength_overall} size={40} />
-                    <span style={{ fontSize: 9, color: 'var(--muted-foreground)' }}>OVR</span>
+                    <Badge value={overall} size={40} />
+                    <span
+                      style={{ fontSize: 9, color: usePre ? '#a78bfa' : 'var(--muted-foreground)' }}
+                      title={usePre
+                        ? 'Pre-season: September squad, last season’s ratings'
+                        : 'Measured: the players who actually turned out'}
+                    >
+                      {usePre ? 'PRE' : 'OVR'}
+                    </span>
                   </div>
+                  {/* Both, where both exist, so the two can be compared on one
+                      row rather than on two different pages. */}
+                  {!usePre && t.squad_overall != null && (
+                    <div className="flex flex-col items-center gap-0.5" style={{ opacity: 0.55 }}>
+                      <Badge value={t.squad_overall} size={30} />
+                      <span style={{ fontSize: 9, color: '#a78bfa' }}>PRE</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

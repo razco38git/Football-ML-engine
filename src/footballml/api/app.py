@@ -144,6 +144,12 @@ class State:
     form_index: dict = field(default_factory=dict)
     players: pd.DataFrame = field(default_factory=pd.DataFrame)
     teams: pd.DataFrame = field(default_factory=pd.DataFrame)
+    #: The pre-season squad rating, from `pipelines.build_squad_strength`. A
+    #: second column beside `teams`, never a substitute: it is measurably worse
+    #: on all three validity correlations and exists because it covers the
+    #: season in progress, which the measured rating cannot until about half of
+    #: it has been played.
+    squads: pd.DataFrame = field(default_factory=pd.DataFrame)
     backtest: pd.DataFrame = field(default_factory=pd.DataFrame)
 
     #: Each played match's own xG, keyed `(date, home, away)`.
@@ -311,6 +317,17 @@ def _load_state(startup: bool = False) -> dict[str, int]:
         state.teams = pd.read_csv(teams_path)
         state.teams["Season"] = state.teams["Season"].astype(str)
         logger.info("Loaded %d team-seasons", len(state.teams))
+
+    squads_path = PROCESSED_DIR / "squad_strength.csv"
+    if squads_path.exists():
+        state.squads = pd.read_csv(squads_path)
+        state.squads["Season"] = state.squads["Season"].astype(str)
+        logger.info("Loaded %d pre-season squad ratings", len(state.squads))
+    else:
+        logger.info(
+            "No pre-season squad ratings; run "
+            "`python -m pipelines.build_squad_strength`"
+        )
 
     european_path = PROCESSED_DIR / "european_predictions.csv"
     if european_path.exists():
@@ -1768,6 +1785,57 @@ def _publishable_seasons(teams: pd.DataFrame) -> list[str]:
     ]
 
 
+def _team_rows(season: str | None) -> pd.DataFrame:
+    """Both ratings for one season, outer-joined on the club.
+
+    An outer join rather than a left one, because the two ratings cover
+    different clubs on purpose. The measured rating has no row for a club with
+    fewer than eleven players past the minutes gate -- 78 of 96 clubs five
+    weeks into a season -- and the pre-season rating has none for a club EA's
+    edition does not carry.
+    """
+    keys = ["League", "Season", "Team"]
+    measured = state.teams
+    if not measured.empty:
+        measured = measured[measured["Season"].astype(str) == str(season)]
+    pre = state.squads
+    if not pre.empty:
+        pre = pre[pre["Season"].astype(str) == str(season)]
+        pre = pre.rename(
+            columns={"n_from_history": "squad_from_history", "n_players": "squad_n_players"}
+        )
+        pre = pre.drop(columns=["ea_label"], errors="ignore")
+
+    if measured.empty:
+        return pre.rename(columns={"squad_n_players": "n_players"})
+    if pre.empty:
+        return measured
+    joined = measured.merge(pre, on=keys, how="outer")
+    if "squad_n_players" in joined.columns:
+        # `n_players` describes whichever rating the row is showing, so a club
+        # with no measured rating reports the fifteen behind its pre-season one
+        # rather than a zero that reads as "no players".
+        joined["n_players"] = joined["n_players"].fillna(joined["squad_n_players"])
+        joined = joined.drop(columns=["squad_n_players"])
+    return joined
+
+
+def _ordering(rows: pd.DataFrame) -> str:
+    """Which rating orders the table: the measured one unless it is too thin.
+
+    Reuses :data:`SEASON_COVERAGE` rather than inventing a second threshold.
+    Below it the measured column exists for a handful of clubs and ordering by
+    it would bury the rest of the league in arrival order, so the pre-season
+    column orders instead -- and the page is told, because a table ordered by
+    a projection and presented as a measurement is the one failure here that
+    a reader could not detect.
+    """
+    if "strength_overall" not in rows.columns or rows.empty:
+        return "pre-season"
+    share = float(rows["strength_overall"].notna().mean())
+    return "measured" if share >= SEASON_COVERAGE else "pre-season"
+
+
 @app.get("/teams", response_model=TeamStrengthPage)
 def teams(
     league: str | None = Query(None, description="Division code, e.g. E0"),
@@ -1775,26 +1843,38 @@ def teams(
     limit: int = Query(100, le=200),
 ) -> TeamStrengthPage:
     """Team ratings built from player ratings, strongest first."""
-    if state.teams.empty:
+    if state.teams.empty and state.squads.empty:
         raise HTTPException(
             404, "No team ratings loaded. Run `python -m pipelines.build_players`."
         )
 
-    seasons = _publishable_seasons(state.teams)
+    # Over both ratings: the season in progress is publishable on the
+    # pre-season column alone, which is the case that column exists for.
+    offered = state.teams if state.squads.empty else pd.concat(
+        [state.teams[["League", "Season", "Team"]], state.squads[["League", "Season", "Team"]]]
+    ).drop_duplicates()
+    seasons = _publishable_seasons(offered)
     # An explicit `season=` is still honoured, including one held back below:
     # the rows are real, they are only too thin to put in front of someone who
     # did not ask for them.
     shown = season or (seasons[0] if seasons else None)
-    rows = state.teams
-    rows = rows[rows["Season"].astype(str) == str(shown)]
-    if league:
+    rows = _team_rows(shown)
+    if league and not rows.empty:
         rows = rows[rows["League"] == league]
 
-    rows = rows.sort_values("strength_overall", ascending=False).head(limit)
+    ordered_by = _ordering(rows)
+    sort_on = "strength_overall" if ordered_by == "measured" else "squad_overall"
+    if sort_on in rows.columns:
+        rows = rows.sort_values(sort_on, ascending=False, na_position="last")
+    rows = rows.head(limit)
 
     def num(row: pd.Series, column: str) -> float | None:
         value = row.get(column)
-        return None if pd.isna(value) else round(float(value), 1)
+        return None if value is None or pd.isna(value) else round(float(value), 1)
+
+    def count(row: pd.Series, column: str) -> int | None:
+        value = row.get(column)
+        return None if value is None or pd.isna(value) else int(value)
 
     return TeamStrengthPage(
         teams=[
@@ -1802,18 +1882,25 @@ def teams(
                 team=str(r["Team"]),
                 league=str(r["League"]),
                 season=str(r["Season"]),
-                method=str(r.get("method", "eleven")),
-                n_players=int(r.get("n_players", 0)),
-                strength_overall=round(float(r["strength_overall"]), 1),
+                method=str(r.get("method") if isinstance(r.get("method"), str) else "best_n"),
+                n_players=count(r, "n_players") or 0,
+                strength_overall=num(r, "strength_overall"),
                 strength_goalkeeper=num(r, "strength_goalkeeper"),
                 strength_defence=num(r, "strength_defence"),
                 strength_midfield=num(r, "strength_midfield"),
                 strength_attack=num(r, "strength_attack"),
+                squad_overall=num(r, "squad_overall"),
+                squad_goalkeeper=num(r, "squad_goalkeeper"),
+                squad_defence=num(r, "squad_defence"),
+                squad_midfield=num(r, "squad_midfield"),
+                squad_attack=num(r, "squad_attack"),
+                squad_from_history=count(r, "squad_from_history"),
             )
             for _, r in rows.iterrows()
         ],
         seasons=seasons,
         season=str(shown) if shown is not None else None,
+        ordered_by=ordered_by,
     )
 
 
