@@ -19,7 +19,7 @@ kept out.
 | Stage | Where | Produces |
 |---|---|---|
 | Ingest | `src/footballml/ingest/` | match results, xG, player stats |
-| Player ratings | `src/footballml/players/` | `player_ratings.csv`, `team_strength.csv` |
+| Player ratings | `src/footballml/players/` | `player_ratings.csv`, `team_strength.csv`, `squad_strength.csv` |
 | Features | `src/footballml/features/` | one row per match, pre-kickoff only |
 | Model | `src/footballml/models/` | a versioned artifact in `models/` |
 | Serve | `src/footballml/api/` + `web/` | the site |
@@ -160,7 +160,7 @@ Three things worth knowing:
 | **What If** | What if these two played tomorrow? | `/predict`, the one live-inference path |
 | **Player Ratings** | How good was this player that season | `player_ratings.csv` |
 | **Player Similarity** | Who plays like him | cosine distance over two vectors: EA's six attributes, and our sub-ratings |
-| **Team Strength** | How good is this squad | `team_strength.csv` |
+| **Team Strength** | How good is this squad | `team_strength.csv`, and `squad_strength.csv` beside it |
 | **Projected Tables** | Where will everyone finish | Monte Carlo over the model's scoreline grids |
 | **Prediction Accuracy** | Were we right | the live store, plus the walk-forward backtest |
 

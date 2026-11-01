@@ -158,9 +158,13 @@ function SquadPanel({ team, onClose }: { team: TeamStrength; onClose: () => void
               <div className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
                 {LEAGUE_NAMES[team.league] ?? team.league} · {team.season.slice(0, 2)}/{team.season.slice(2)}
                 {' · '}built from {team.n_players} players
+                {team.strength_overall == null && team.squad_overall != null
+                  && team.squad_from_history != null
+                  ? ` · ${team.squad_from_history} of them rated by us`
+                  : ''}
               </div>
             </div>
-            <Badge value={team.strength_overall} size={54} />
+            <Badge value={team.strength_overall ?? team.squad_overall} size={54} />
           </div>
         </div>
 
@@ -170,6 +174,22 @@ function SquadPanel({ team, onClose }: { team: TeamStrength; onClose: () => void
           <div className="text-xs font-display font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--muted-foreground)' }}>
             Squad by minutes played
           </div>
+
+          {/* The two can disagree about who is in the squad, and saying so is
+              the only honest option: this list is our rated players, and a
+              pre-season rating was built from EA's September roster instead.
+              Early in a season that list is nearly empty, which is exactly why
+              the rating above it had to come from somewhere else. */}
+          {team.strength_overall == null && team.squad_overall != null && (
+            <div className="text-xs mb-3 leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
+              The {team.squad_overall.toFixed(0)} above is the{' '}
+              <strong style={{ color: '#a78bfa' }}>pre-season</strong> rating, built from
+              EA&rsquo;s September squad with last season&rsquo;s ratings. The list below is
+              something else: the players who have passed 450 minutes for this club{' '}
+              <em>this</em> season and so have a rating of their own yet. It will be short, and
+              it fills up as the season does.
+            </div>
+          )}
 
           {loading && (
             <div className="text-sm py-6 text-center" style={{ color: 'var(--muted-foreground)' }}>Loading…</div>
