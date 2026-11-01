@@ -32,19 +32,73 @@ function Chance({ value, color }: { value: number; color: string }) {
   return <span style={{ color, fontWeight: 600 }}>{pct(value)}</span>;
 }
 
-function Row({ t, position, teams }: { t: ProjectedTeam; position: number; teams: number }) {
+/**
+ * Form, who it came against, and whether the results match the chances.
+ *
+ * A second line rather than three more columns: the row already carries eight,
+ * and these three only mean anything read together. Form on its own is the
+ * number every table on the internet shows and the least informative of the
+ * three — five wins over the bottom five is a different run from five over the
+ * top five, and the points column cannot tell them apart.
+ */
+function FormLine({ t, window }: { t: ProjectedTeam; window: number }) {
+  if (t.form_points == null || t.form_played == null || t.form_played === 0) return null;
+
+  const max = t.form_played * 3;
+  const hot = t.points_over_expected != null && t.points_over_expected > 0;
+  const harder =
+    t.form_opponent_elo != null &&
+    t.league_mean_elo != null &&
+    t.form_opponent_elo > t.league_mean_elo;
+
+  return (
+    <div
+      className="flex flex-wrap items-baseline gap-x-4 gap-y-1 px-4 pb-2.5"
+      style={{ fontSize: 11, color: 'var(--muted-foreground)' }}
+    >
+      <span>
+        last {t.form_played === window ? window : t.form_played}:{' '}
+        <strong className="font-data" style={{ color: 'var(--foreground)' }}>
+          {t.form_points}/{max}
+        </strong>{' '}
+        pts
+      </span>
+      {t.form_opponent_elo != null && t.league_mean_elo != null && (
+        <span>
+          against{' '}
+          <strong className="font-data" style={{ color: harder ? '#f59e0b' : 'var(--foreground)' }}>
+            {t.form_opponent_elo.toFixed(0)}
+          </strong>{' '}
+          Elo, league {t.league_mean_elo.toFixed(0)}
+        </span>
+      )}
+      {t.points_over_expected != null && (
+        <span>
+          <strong className="font-data" style={{ color: hot ? '#00e676' : '#f44336' }}>
+            {hot ? '+' : '−'}
+            {Math.abs(t.points_over_expected).toFixed(1)}
+          </strong>{' '}
+          vs the chances
+          {t.xg_matches != null && t.xg_matches < t.played ? ` (${t.xg_matches} of ${t.played} scored)` : ''}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function Row({ t, position, teams, window }: { t: ProjectedTeam; position: number; teams: number; window: number }) {
   // The band is the point of the row: at this stage of a season it is routinely
   // twenty points wide, which is the honest picture.
   const span = t.points_high - t.points_low;
 
   return (
     <div
-      className="grid items-center gap-3 px-4 py-2.5 rounded-lg"
-      style={{
-        gridTemplateColumns: '32px 1fr 58px 96px 116px 60px 60px 60px',
-        background: 'var(--card)',
-        border: '1px solid var(--border)',
-      }}
+      className="rounded-lg"
+      style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+    >
+    <div
+      className="grid items-center gap-3 px-4 py-2.5"
+      style={{ gridTemplateColumns: '32px 1fr 58px 96px 116px 60px 60px 60px' }}
     >
       <span className="font-data text-sm" style={{ color: 'var(--muted-foreground)' }}>
         {position}
@@ -83,6 +137,8 @@ function Row({ t, position, teams }: { t: ProjectedTeam; position: number; teams
       <span className="text-xs text-right">
         <Chance value={t.relegation_pct} color="#f44336" />
       </span>
+    </div>
+    <FormLine t={t} window={window} />
     </div>
   );
 }
@@ -140,6 +196,26 @@ export default function SeasonProjection() {
         Read the range, not the single number.
       </div>
 
+      {/* The three numbers on each row's second line, explained once rather
+          than guessed at twenty times. */}
+      <div
+        className="rounded-xl p-4 mb-5 text-xs leading-relaxed"
+        style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--muted-foreground)' }}
+      >
+        <strong style={{ color: 'var(--foreground)' }}>Reading the grey line under each row.</strong>{' '}
+        Three numbers that a league table hides, and they are only worth anything together.{' '}
+        <strong style={{ color: 'var(--foreground)' }}>Form</strong> is points from the last{' '}
+        {data?.form_matches ?? 5} matches.{' '}
+        <strong style={{ color: 'var(--foreground)' }}>Elo</strong> is the mean rating those
+        opponents carried into those matches, beside the league&rsquo;s own mean &mdash; a run
+        against the top half is not the same run, and the points alone cannot tell you which it
+        was. <strong style={{ color: 'var(--foreground)' }}>Vs the chances</strong> scores every
+        match this season against its own xG, through the same Poisson the match cards use, and
+        compares the points those chances were worth with the points actually taken. Ahead of
+        your chances is usually temporary; the model does not read this column, so it is a
+        description rather than a forecast.
+      </div>
+
       {loading && !data && (
         <div className="text-center py-16 text-sm" style={{ color: 'var(--muted-foreground)' }}>
           Loading projection…
@@ -173,7 +249,13 @@ export default function SeasonProjection() {
 
           <div className="flex flex-col gap-1.5">
             {data.teams.map((t, i) => (
-              <Row key={t.team} t={t} position={i + 1} teams={data.teams.length} />
+              <Row
+                key={t.team}
+                t={t}
+                position={i + 1}
+                teams={data.teams.length}
+                window={data.form_matches}
+              />
             ))}
           </div>
         </>

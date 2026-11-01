@@ -142,6 +142,39 @@ export interface AgainstTheRun {
   prob_actual: number;
 }
 
+/** How one line of the pitch tracks what a club does the *following* season. */
+export interface LineValidity {
+  line: string;
+  label: string;
+  vs_points: number;
+  vs_goals_for: number;
+  /** Negative by design: a better side concedes fewer. */
+  vs_goals_against: number;
+  n: number;
+}
+
+/** What one player is worth — to a club's rating, and to the model. */
+export interface OnePlayerInsight {
+  median_drop: number;
+  q1_drop: number;
+  q3_drop: number;
+  max_drop: number;
+  max_team: string;
+  max_season: string;
+  n: number;
+  /** Recorded ablation: RPS cost of removing squad strength from the model. */
+  squad_rps_delta: number;
+  squad_rps_low: number;
+  squad_rps_high: number;
+  squad_rps_matches: number;
+}
+
+export interface RatingInsights {
+  lines: LineValidity[];
+  overall: LineValidity | null;
+  one_player: OnePlayerInsight | null;
+}
+
 export interface Retrodiction {
   /** The chances each side created, as xG. Penalties included. */
   xg_home: number;
@@ -243,6 +276,9 @@ export const api = {
     if (league && league !== 'All') params.set('league', league);
     return get<AgainstTheRun[]>(`/insights/against-the-run?${params}`);
   },
+
+  /** Two measured answers: which line matters, and what one player is worth. */
+  ratingInsights: () => get<RatingInsights>('/insights/ratings'),
 
   /** Settled matches: prediction beside the real score. */
   history: (source: 'live' | 'backtest', league?: string, limit = 50) =>
@@ -505,7 +541,7 @@ export interface TeamStrengthPage {
   seasons: string[];
   /** The season these rows are from. */
   season: string | null;
-  /** `measured` | `pre-season` -- which rating ordered the rows. */
+  /** `measured` | `pre-season` — which rating ordered the rows. */
   ordered_by: string;
 }
 
@@ -707,6 +743,18 @@ export interface ProjectedTeam {
   title_pct: number;
   top_four_pct: number;
   relegation_pct: number;
+
+  /** Points from the last `SeasonProjection.form_matches`, and how many there were. */
+  form_points: number | null;
+  form_played: number | null;
+  /** Mean pre-match Elo of those opponents, against the league's own mean. */
+  form_opponent_elo: number | null;
+  league_mean_elo: number | null;
+  /** Points the chances were worth, and the gap to the points actually taken. */
+  expected_points: number | null;
+  points_over_expected: number | null;
+  /** Played matches that carried xG; the feed lags results by a day or two. */
+  xg_matches: number | null;
 }
 
 export interface SeasonProjection {
@@ -715,6 +763,8 @@ export interface SeasonProjection {
   /** Matches still to play — the basis for reading the table sceptically. */
   remaining: number;
   played: number;
+  /** How long the form window is, so the page labels the API's own number. */
+  form_matches: number;
   teams: ProjectedTeam[];
 }
 

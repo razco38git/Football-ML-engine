@@ -16,7 +16,8 @@ half-finish::
 Order is not arbitrary:
 
 1. ``build_dataset`` fetches results. Everything below reads them.
-2. ``build_players`` rebuilds player ratings and ``team_strength.csv``.
+2. ``build_players`` rebuilds player ratings and ``team_strength.csv``, and
+   ``build_squad_strength`` the published extras beside them.
 3. ``train`` retrains on the new matches -- and reads the strength file, so it
    must come after step 2.
 4. ``score_upcoming`` settles predictions whose matches were played, then
@@ -93,6 +94,16 @@ STEPS: tuple[Step, ...] = (
         "build_players",
         ("--start-season", "1415"),
         "rebuild player ratings and team strength",
+    ),
+    # Published numbers only -- the model never reads either file it writes, so
+    # a failure here costs a stale second column on one page and must not stop
+    # the retrain. Straight after `build_players` because it reads nothing else
+    # and the two should never describe different vintages of the ratings.
+    Step(
+        "build_squad_strength",
+        (),
+        "rebuild the pre-season squad rating and the rating insights",
+        required=False,
     ),
     Step("train", (), "retrain on the new matches"),
     Step("score_upcoming", (), "settle played predictions, forecast the next round"),

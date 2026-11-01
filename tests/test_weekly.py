@@ -177,13 +177,24 @@ def test_an_optional_step_failing_does_not_stop_the_refresh(monkeypatch, tmp_pat
 
 
 def test_only_the_reporting_and_european_steps_are_optional() -> None:
-    """Required steps build the dataset and the model the site serves. Optional
-    ones refine a correction that applies to European ties, or re-score the
-    walk-forward history -- neither of which the site needs in order to be
-    correct, and neither of which may cost the reload when it fails."""
+    """Required steps build the dataset and the model the site serves.
+
+    Optional ones refine a correction that applies to European ties, re-score
+    the walk-forward history, or rebuild a *published* number the model never
+    reads -- none of which the site needs in order to be correct, and none of
+    which may cost the reload when it fails.
+
+    An inventory rather than a rule, deliberately: adding a step here is a
+    decision about what a failure is allowed to cost, so it should have to be
+    made twice.
+    """
     optional = {s.name for s in weekly.STEPS if not s.required}
     assert optional == {
-        "backtest", "fetch_european", "validate_european", "fit_league_adjustment",
+        "backtest",
+        "build_squad_strength",
+        "fetch_european",
+        "validate_european",
+        "fit_league_adjustment",
     }
 
 

@@ -1,4 +1,4 @@
-import { api, competitionLabel, type Prediction } from '../api/client';
+import { api, competitionLabel, seasonLabel, type Prediction } from '../api/client';
 import { confidence, formatDate, pct, teamColor, verdict } from '../api/display';
 import { useAsync } from '../api/hooks';
 
@@ -111,6 +111,131 @@ function Figure({ label, value, color }: { label: string; value: string; color?:
         {value}
       </span>
     </span>
+  );
+}
+
+/**
+ * Two questions about the ratings, answered with measurements rather than prose.
+ *
+ * These are not weekly rows and do not belong beside the fixture cards: they
+ * are properties of the project, they change only when the data does, and each
+ * one is the answer to a question a reader actually asked. They sit below the
+ * fixture zone for that reason.
+ *
+ * Both answers are deflationary, and that is why they are worth publishing. A
+ * site that shows player ratings and match probabilities invites the inference
+ * that the two are closely connected. They are not, and the numbers say so.
+ */
+function InsightsZone() {
+  const { data } = useAsync(() => api.ratingInsights(), []);
+  if (!data) return null;
+
+  const { lines, overall, one_player: player } = data;
+  // The lines ranked by what a reader means by "matters": next season's points.
+  const ranked = [...lines].sort((a, b) => b.vs_points - a.vs_points);
+  const scale = Math.max(...ranked.map(l => l.vs_points), overall?.vs_points ?? 0, 0.001);
+
+  return (
+    <div className="mt-8">
+      <h3 className="font-display font-bold text-xl mb-1" style={{ color: 'var(--foreground)' }}>
+        Insights
+      </h3>
+      <p className="text-sm mb-4" style={{ color: 'var(--muted-foreground)' }}>
+        Questions worth asking of a rating system, answered on this one&rsquo;s own numbers.
+        Both answers are smaller than they sound.
+      </p>
+
+      <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))' }}>
+        {player && (
+          <Card
+            title="Can one player decide a match?"
+            blurb="Two measurements, and they point the same way. First: take each club's single highest-rated player out and rebuild the rating from the next fifteen. Second: take the squad rating away from the model entirely and re-run the whole walk-forward backtest."
+          >
+            <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
+              <Figure
+                label="a club's rating loses, median"
+                value={`${player.median_drop.toFixed(2)} pts`}
+                color="#00e676"
+              />
+              <Figure
+                label="middle half of clubs"
+                value={`${player.q1_drop.toFixed(2)}–${player.q3_drop.toFixed(2)}`}
+              />
+              <Figure
+                label={`most, ${player.max_team} ${seasonLabel(player.max_season)}`}
+                value={`${player.max_drop.toFixed(2)} pts`}
+                color="#f59e0b"
+              />
+            </div>
+            <div className="text-xs leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
+              On a 0&ndash;99 scale, across {player.n.toLocaleString()} club-seasons. Losing the
+              best player in the squad moves the team rating by about a point &mdash; and the model
+              barely reads the team rating at all: removing squad strength from it costs{' '}
+              <strong style={{ color: 'var(--foreground)' }}>
+                {player.squad_rps_delta >= 0 ? '+' : '−'}
+                {Math.abs(player.squad_rps_delta).toFixed(5)} RPS
+              </strong>{' '}
+              [{player.squad_rps_low.toFixed(5)}, {player.squad_rps_high.toFixed(5)}] over{' '}
+              {player.squad_rps_matches.toLocaleString()} matches, an interval that includes zero.
+              So: on these numbers, no. Form, home advantage and Elo decide a prediction, and one
+              player reaches none of them.
+            </div>
+          </Card>
+        )}
+
+        {ranked.length > 0 && (
+          <Card
+            title="Is there a position that matters more?"
+            blurb="Each line's rating against the points that club takes the following season — next season, not this one, because that is the only direction a rating is ever read in, and a same-season figure would flatter a rating built from those results."
+          >
+            <div className="flex flex-col gap-2">
+              {[...ranked, ...(overall ? [overall] : [])].map(line => {
+                const isOverall = line.line === 'overall';
+                return (
+                  <div key={line.line} className="flex items-center gap-3">
+                    <span
+                      className="text-xs w-32 flex-shrink-0"
+                      style={{
+                        color: isOverall ? 'var(--foreground)' : 'var(--muted-foreground)',
+                        fontWeight: isOverall ? 700 : 400,
+                      }}
+                    >
+                      {line.label}
+                    </span>
+                    <div className="flex-1 h-2 rounded-full" style={{ background: 'var(--secondary)' }}>
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${(line.vs_points / scale) * 100}%`,
+                          background: isOverall ? '#a78bfa' : 'linear-gradient(90deg, #00e676, #3b82f6)',
+                        }}
+                      />
+                    </div>
+                    <span
+                      className="font-data text-xs w-12 text-right flex-shrink-0"
+                      style={{ color: 'var(--foreground)' }}
+                    >
+                      {line.vs_points.toFixed(2)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="text-xs leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
+              The attack leads, narrowly, and the goalkeeper trails &mdash; but{' '}
+              <strong style={{ color: 'var(--foreground)' }}>no single line beats the four together</strong>,
+              which is the real answer. Each line is also best at predicting its own job: the attack
+              tracks next season&rsquo;s goals scored at{' '}
+              {ranked.find(l => l.line === 'attack')?.vs_goals_for.toFixed(2) ?? '—'} and the
+              defence tracks goals conceded at{' '}
+              {ranked.find(l => l.line === 'defence')?.vs_goals_against.toFixed(2) ?? '—'}. Measured
+              over {ranked[0].n.toLocaleString()} club-seasons; a difference under 0.003 is below
+              what this data can resolve.
+            </div>
+          </Card>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -246,6 +371,8 @@ export default function Discover() {
           </Card>
         )}
       </div>
+
+      <InsightsZone />
 
       <p className="text-xs mt-5 leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
         No &ldquo;biggest risers&rdquo; list, deliberately: player ratings are

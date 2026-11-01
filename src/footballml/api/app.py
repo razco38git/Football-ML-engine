@@ -46,14 +46,17 @@ from footballml.api.schemas import (
     Health,
     LeagueStrength,
     LikelyScore,
+    LineValidity,
     MatchResult,
     MatchResultPage,
     ModelInfo,
+    OnePlayerInsight,
     PlayerPage,
     PlayerRating,
     Prediction,
     PredictRequest,
     ProjectedTeam,
+    RatingInsights,
     Retrodiction,
     SeasonProjection,
     SimilarPlayer,
@@ -72,6 +75,7 @@ from footballml.data import (
 from footballml.entities import load_aliases
 from footballml.features.build import (
     LEAGUE_CODES,
+    _next_season,
     add_team_strength,
     build_match_features,
     build_upcoming_features,
@@ -201,6 +205,9 @@ class State:
     # answer only changes when the fixture list does.
     _upcoming: list[Prediction] | None = None
     _upcoming_at: datetime | None = None
+    #: Cached on first request, not at load: it aggregates 24,000 player-seasons
+    #: twice and nothing on the site needs it until somebody opens Discover.
+    _rating_insights: RatingInsights | None = None
 
     @property
     def upcoming_is_stale(self) -> bool:
@@ -397,6 +404,7 @@ def _load_state(startup: bool = False) -> dict[str, int]:
     # describes the previous model, so drop it.
     state._upcoming = None
     state._upcoming_at = None
+    state._rating_insights = None
 
     logger.info("Loaded %d matches, %d teams", len(state.features), len(state.form_index))
     return {
@@ -660,6 +668,128 @@ def _to_predictions(
     return out
 
 
+
+#: Matches in the form window on the projected table.
+#:
+#: Five is what a football reader means by "recent form", and it is short
+#: enough that a club which has turned a corner shows it. It is also short
+#: enough to be mostly noise, which is why the opponent quality beside it is
+#: not optional: five wins against the bottom five is a different thing from
+#: five wins against the top five, and the points column cannot tell them
+#: apart.
+FORM_MATCHES = 5
+
+
+def _match_elo() -> pd.DataFrame:
+    """Pre-match Elo for both sides of every match, from the feature table.
+
+    Pre-match, not current: these are the ratings the model was handed before
+    kick-off, so a club's recent opponents are described as they stood at the
+    time rather than as they stand after the result.
+    """
+    features = state.features
+    needed = {"Date", "HomeTeam", "AwayTeam", "home_elo", "away_elo"}
+    if features.empty or not needed <= set(features.columns):
+        return pd.DataFrame()
+    out = features[list(needed)].copy()
+    out["Date"] = pd.to_datetime(out["Date"])
+    return out
+
+
+def _season_form(league: str, season: str) -> pd.DataFrame:
+    """Recent form, the quality it was taken against, and results against xG.
+
+    Three columns a league table does not carry, and each one answers a
+    question the table provokes:
+
+    - **Form.** Points from the last :data:`FORM_MATCHES`, which is what a
+      reader means by a club being on a run.
+    - **Who they played.** The mean pre-match Elo of those opponents, against
+      the league's own mean. A run against the bottom half is not the same run.
+    - **Results against performance.** Points taken, against the points the
+      chances in those same matches were worth. Each played match is scored
+      against its own xG through the same Poisson-with-rho the match cards use,
+      which gives a win, draw and loss probability and so an expected points
+      value; summing them says whether a club is ahead of its chances or behind
+      them. A side eight points ahead of its xG is usually a side whose next
+      ten matches disappoint.
+
+    Returns one row per club, empty if the league-season has no played matches.
+    """
+    tmh = state.tmh
+    if tmh.empty:
+        return pd.DataFrame()
+
+    rows = tmh[
+        (tmh["League"] == league) & (tmh["Season"].astype(str) == str(season))
+    ].copy()
+    rows = rows.dropna(subset=["GoalsFor", "GoalsAgainst"])
+    if rows.empty:
+        return pd.DataFrame()
+
+    rows["Date"] = pd.to_datetime(rows["Date"])
+    won = (rows["GoalsFor"] > rows["GoalsAgainst"]).astype(int) * 3
+    drawn = (rows["GoalsFor"] == rows["GoalsAgainst"]).astype(int)
+    rows["match_points"] = won + drawn
+    at_home = rows["Venue"].astype(str).str.lower() == "home"
+
+    # Opponent's pre-match Elo: the away rating when we were at home.
+    elo = _match_elo()
+    if not elo.empty:
+        home_side = rows[at_home].merge(
+            elo.rename(columns={"HomeTeam": "Team", "AwayTeam": "Opponent"}),
+            on=["Date", "Team", "Opponent"],
+            how="left",
+        )
+        away_side = rows[~at_home].merge(
+            elo.rename(columns={"AwayTeam": "Team", "HomeTeam": "Opponent"}),
+            on=["Date", "Team", "Opponent"],
+            how="left",
+        )
+        home_side["opponent_elo"] = home_side["away_elo"]
+        away_side["opponent_elo"] = away_side["home_elo"]
+        rows = pd.concat([home_side, away_side], ignore_index=True)
+    else:
+        rows["opponent_elo"] = pd.NA
+
+    # Expected points from the chances in each match.
+    scored = state.retrodicted
+    if not scored.empty and {"prob_home", "prob_draw", "prob_away"} <= set(scored.columns):
+        keyed = scored.assign(Date=pd.to_datetime(scored["Date"]))
+        home_xp = keyed.rename(columns={"HomeTeam": "Team", "AwayTeam": "Opponent"})
+        home_xp["expected"] = 3 * home_xp["prob_home"] + home_xp["prob_draw"]
+        away_xp = keyed.rename(columns={"AwayTeam": "Team", "HomeTeam": "Opponent"})
+        away_xp["expected"] = 3 * away_xp["prob_away"] + away_xp["prob_draw"]
+        expectations = pd.concat(
+            [home_xp[["Date", "Team", "Opponent", "expected"]],
+             away_xp[["Date", "Team", "Opponent", "expected"]]],
+            ignore_index=True,
+        )
+        rows = rows.merge(expectations, on=["Date", "Team", "Opponent"], how="left")
+    else:
+        rows["expected"] = pd.NA
+
+    rows = rows.sort_values("Date")
+    recent = rows.groupby("Team", observed=True).tail(FORM_MATCHES)
+
+    form = recent.groupby("Team", observed=True).agg(
+        form_points=("match_points", "sum"),
+        form_matches=("match_points", "size"),
+        form_opponent_elo=("opponent_elo", "mean"),
+    )
+    season_totals = rows.groupby("Team", observed=True).agg(
+        expected_points=("expected", "sum"),
+        xg_matches=("expected", "count"),
+        points_taken=("match_points", "sum"),
+    )
+    out = form.join(season_totals).reset_index()
+
+    # The league's own mean, so "played hard opponents" is a comparison rather
+    # than a bare Elo number nobody can place.
+    mean_elo = rows["opponent_elo"].astype("Float64").mean()
+    out["league_mean_elo"] = float(mean_elo) if pd.notna(mean_elo) else None
+    return out
+
 @app.get("/projections", response_model=SeasonProjection)
 def projections(league: str = Query(..., description="Division code, e.g. E0")) -> SeasonProjection:
     """Projected final table, from simulating every remaining fixture.
@@ -679,11 +809,29 @@ def projections(league: str = Query(..., description="Division code, e.g. E0")) 
         raise HTTPException(404, f"No projection for {league}")
 
     rows = rows.sort_values("projected_points", ascending=False)
+    season = str(rows["Season"].iloc[0])
+
+    # Form, opponent quality and results-against-chances, joined on. A left
+    # join: a club with no played matches yet simply has no form, and the page
+    # shows nothing rather than a zero that reads as five defeats.
+    form = _season_form(league, season)
+    if not form.empty:
+        rows = rows.merge(form, on="Team", how="left")
+
+    def num(row: pd.Series, column: str, places: int = 1) -> float | None:
+        value = row.get(column)
+        return None if value is None or pd.isna(value) else round(float(value), places)
+
+    def whole(row: pd.Series, column: str) -> int | None:
+        value = row.get(column)
+        return None if value is None or pd.isna(value) else int(value)
+
     return SeasonProjection(
         league=league,
-        season=str(rows["Season"].iloc[0]),
+        season=season,
         remaining=int(rows["remaining"].iloc[0]),
         played=int(rows["played"].sum() // 2),
+        form_matches=FORM_MATCHES,
         teams=[
             ProjectedTeam(
                 team=r["Team"],
@@ -697,6 +845,17 @@ def projections(league: str = Query(..., description="Division code, e.g. E0")) 
                 title_pct=round(float(r["title_pct"]), 4),
                 top_four_pct=round(float(r["top_four_pct"]), 4),
                 relegation_pct=round(float(r["relegation_pct"]), 4),
+                form_points=whole(r, "form_points"),
+                form_played=whole(r, "form_matches"),
+                form_opponent_elo=num(r, "form_opponent_elo"),
+                league_mean_elo=num(r, "league_mean_elo"),
+                expected_points=num(r, "expected_points"),
+                points_over_expected=(
+                    None
+                    if num(r, "expected_points") is None
+                    else round(float(r["points"]) - float(r["expected_points"]), 1)
+                ),
+                xg_matches=whole(r, "xg_matches"),
             )
             for _, r in rows.iterrows()
         ],
@@ -794,6 +953,158 @@ def against_the_run(
         for r in rows.nsmallest(limit, "prob_actual").itertuples()
     ]
 
+
+
+#: The recorded leave-one-family-out result for squad strength: what the model
+#: loses when the twelve strength features are taken away entirely.
+#:
+#: Not recomputed per request -- reproducing it means a full walk-forward run.
+#: Positive means the model is worse without it, and the interval includes
+#: zero, which is the whole point of publishing it next to a question about
+#: whether one player matters.
+SQUAD_ABLATION = {
+    "delta": 0.00015,
+    "low": -0.00001,
+    "high": 0.00032,
+    "matches": 20013,
+}
+
+#: Display names for the lines, so the UI does not have to know them.
+_LINE_LABELS = {
+    "goalkeeper": "Goalkeeper",
+    "defence": "Defence",
+    "midfield": "Midfield",
+    "attack": "Attack",
+    "overall": "The whole squad",
+}
+
+
+def _season_points(tmh: pd.DataFrame) -> pd.DataFrame:
+    """Goals for, goals against and points per club-season.
+
+    Points are derived from the goals rather than read from `Result`, so the
+    figure does not depend on how that column happens to be encoded. Seasons
+    shorter than `MIN_SEASON_MATCHES` are dropped: a points *total* from a
+    season still in progress is not comparable with a finished one.
+    """
+    frame = tmh.assign(Season=tmh["Season"].astype(str))
+    won = (frame["GoalsFor"] > frame["GoalsAgainst"]).astype(int) * 3
+    drawn = (frame["GoalsFor"] == frame["GoalsAgainst"]).astype(int)
+    frame = frame.assign(points=won + drawn)
+    grouped = (
+        frame.groupby(["League", "Season", "Team"], observed=True)
+        .agg(
+            gf=("GoalsFor", "mean"),
+            ga=("GoalsAgainst", "mean"),
+            pts=("points", "sum"),
+            played=("GoalsFor", "size"),
+        )
+        .reset_index()
+    )
+    return grouped[grouped["played"] >= MIN_SEASON_MATCHES]
+
+
+#: A club's season must be at least this long before its points total counts.
+#: The big five play 34 or 38.
+MIN_SEASON_MATCHES = 20
+
+#: Fewest club-seasons behind a published correlation. A number read off a
+#: handful of clubs would be worse than no number.
+MIN_CORRELATION_ROWS = 50
+
+
+def _line_validity(strength: pd.DataFrame, outcomes: pd.DataFrame) -> list[LineValidity]:
+    """Each line against what the club does the following season."""
+    joined = strength.assign(_next=strength["Season"].astype(str).map(_next_season))
+    merged = joined.merge(
+        outcomes.rename(columns={"Season": "_next"}),
+        on=["League", "Team", "_next"],
+        how="inner",
+    )
+
+    out: list[LineValidity] = []
+    for line, label in _LINE_LABELS.items():
+        column = f"strength_{line}"
+        if column not in merged.columns:
+            continue
+        block = merged[merged[column].notna()]
+        if len(block) < MIN_CORRELATION_ROWS:
+            continue
+        out.append(
+            LineValidity(
+                line=line,
+                label=label,
+                vs_points=round(float(block[column].corr(block["pts"])), 4),
+                vs_goals_for=round(float(block[column].corr(block["gf"])), 4),
+                vs_goals_against=round(float(block[column].corr(block["ga"])), 4),
+                n=len(block),
+            )
+        )
+    return out
+
+
+def _one_player() -> OnePlayerInsight | None:
+    """What a club loses when its single best player is taken out of it.
+
+    Read from `data/processed/rating_insights.json`, written by
+    `pipelines.build_squad_strength`. Computing it means aggregating 24,000
+    player-seasons **twice** -- 28 seconds, measured -- and the answer changes
+    only when the ratings are rebuilt, so it is precomputed for the same reason
+    the projected table is: repeating that per visitor is wasteful for a number
+    that moves once a week.
+
+    Returns `None` when the file is absent, so the card is left off the page
+    rather than the endpoint failing.
+    """
+    path = PROCESSED_DIR / "rating_insights.json"
+    if not path.exists():
+        logger.info(
+            "No %s; run `python -m pipelines.build_squad_strength`", path.name
+        )
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))["one_player"]
+    except (OSError, ValueError, KeyError):
+        logger.warning("%s is unreadable; the one-player card is left off", path.name)
+        return None
+
+    return OnePlayerInsight(
+        **payload,
+        squad_rps_delta=SQUAD_ABLATION["delta"],
+        squad_rps_low=SQUAD_ABLATION["low"],
+        squad_rps_high=SQUAD_ABLATION["high"],
+        squad_rps_matches=int(SQUAD_ABLATION["matches"]),
+    )
+
+
+@app.get("/insights/ratings", response_model=RatingInsights)
+def rating_insights() -> RatingInsights:
+    """Two questions about the ratings, answered with this project's own numbers.
+
+    *Is there a position that matters more?* Each line against what the club
+    does the following season. *Can one player decide it?* What a club's rating
+    loses when its best player is removed, beside what the model loses when the
+    whole squad rating is removed.
+
+    The second pair is the honest answer and is deliberately published
+    together: a club's rating moves by about a point when its best player goes,
+    and the model barely moves when the entire rating goes.
+    """
+    if state.teams.empty or state.tmh.empty:
+        raise HTTPException(
+            404,
+            "No team ratings loaded. Run `python -m pipelines.build_players`.",
+        )
+
+    if state._rating_insights is None:
+        outcomes = _season_points(state.tmh)
+        lines = _line_validity(state.teams, outcomes)
+        state._rating_insights = RatingInsights(
+            lines=[line for line in lines if line.line != "overall"],
+            overall=next((line for line in lines if line.line == "overall"), None),
+            one_player=_one_player(),
+        )
+    return state._rating_insights
 
 @app.get("/leagues")
 def leagues() -> dict[str, str]:
@@ -2336,6 +2647,13 @@ def _retrodict_all(tmh: pd.DataFrame) -> pd.DataFrame:
             "xg_home": home["xGFor"].to_numpy(dtype=float),
             "xg_away": home["xGAgainst"].to_numpy(dtype=float),
             "prob_actual": probs[np.arange(len(home)), column],
+            # All three, not only the one that happened: the projected table
+            # turns these into expected points, which needs the distribution
+            # rather than the realised outcome. Free -- `outcome_probs` has
+            # already computed them.
+            "prob_home": probs[:, 0],
+            "prob_draw": probs[:, 1],
+            "prob_away": probs[:, 2],
         }
     )
 

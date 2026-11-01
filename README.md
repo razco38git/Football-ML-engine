@@ -136,7 +136,8 @@ because the projection simulates from the full feature table — shots, xG and
 all — and a row missing half its features would quietly distort it.
 
 Individual stages are ordinary modules — `build_dataset`, `build_players`,
-`train`, `backtest`, `score_upcoming`, `project_season`, `validate_european`.
+`build_squad_strength`, `train`, `backtest`, `score_upcoming`,
+`project_season`, `validate_european`.
 
 ## Reading the code
 

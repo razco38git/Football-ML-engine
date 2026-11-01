@@ -27,12 +27,14 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from footballml.atomic import write_csv  # noqa: E402
+from footballml.atomic import write_csv, write_json  # noqa: E402
 from footballml.data import PROCESSED_DIR  # noqa: E402
 from footballml.players.squad_rating import squad_strength  # noqa: E402
+from footballml.players.team_strength import team_strength  # noqa: E402
 
 RATINGS = PROCESSED_DIR / "player_ratings.csv"
 OUTPUT = PROCESSED_DIR / "squad_strength.csv"
+INSIGHTS = PROCESSED_DIR / "rating_insights.json"
 HISTORY = PROCESSED_DIR / "team_match_history_all.csv"
 
 
@@ -74,6 +76,14 @@ def main() -> int:
             ", ".join(f"{r.season} {r.team} ({r.how})" for r in unresolved),
         )
 
+    insights = _one_player(players)
+    if insights:
+        write_json({"one_player": insights}, INSIGHTS)
+        log.info(
+            "Wrote %s -- removing a club's best player costs a median of %.2f",
+            INSIGHTS, insights["median_drop"],
+        )
+
     latest = strength[strength["Season"] == strength["Season"].max()]
     print(f"\n=== Strongest pre-season squads, {latest['Season'].iloc[0]} ===")
     columns = ["Team", "League", "squad_overall", "n_from_history", "ea_label"]
@@ -86,6 +96,58 @@ def main() -> int:
     if args.report:
         _report(strength)
     return 0
+
+
+def _one_player(players: pd.DataFrame) -> dict[str, object] | None:
+    """What a club's rating loses when its single best player is removed.
+
+    Rebuilt rather than approximated: dropping the top-rated player and running
+    `team_strength` again means the sixteenth player moves into the fifteen and
+    the line weights shift, which is what actually happens when somebody is
+    sold. Subtracting his rating from a mean would answer an easier question.
+
+    Precomputed here because it aggregates 24,000 player-seasons twice -- 28
+    seconds -- for a number that changes only when the ratings do. The API
+    serves it from the JSON this writes.
+    """
+    rated = players[players["rated"] & players["rating"].notna()].copy()
+    if rated.empty:
+        return None
+
+    keys = ["League", "Season", "Team"]
+    full = team_strength(rated, method="best_n")
+    if full.empty:
+        return None
+
+    # The same total order `best_n` selects by, so "best player" means the one
+    # it would have put first rather than whichever row happened to sort first.
+    best = (
+        rated.sort_values(
+            ["rating", "minutes", "Player"], ascending=[False, False, True]
+        )
+        .groupby(keys, observed=True)
+        .head(1)
+    )
+    without = team_strength(rated.drop(index=best.index), method="best_n")
+    if without.empty:
+        return None
+
+    compared = full.merge(without, on=keys, suffixes=("", "_without"))
+    compared["drop"] = compared["strength_overall"] - compared["strength_overall_without"]
+    compared = compared[compared["drop"].notna()]
+    if compared.empty:
+        return None
+
+    worst = compared.loc[compared["drop"].idxmax()]
+    return {
+        "median_drop": round(float(compared["drop"].median()), 2),
+        "q1_drop": round(float(compared["drop"].quantile(0.25)), 2),
+        "q3_drop": round(float(compared["drop"].quantile(0.75)), 2),
+        "max_drop": round(float(worst["drop"]), 2),
+        "max_team": str(worst["Team"]),
+        "max_season": str(worst["Season"]),
+        "n": int(len(compared)),
+    }
 
 
 def _report(strength: pd.DataFrame) -> None:

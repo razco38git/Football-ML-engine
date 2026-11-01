@@ -130,6 +130,62 @@ class AgainstTheRun(BaseModel):
     prob_actual: float
 
 
+class LineValidity(BaseModel):
+    """How well one line of the pitch predicts what a club does next season.
+
+    Next season, not this one, for the reason `add_team_strength` exists: a
+    rating is only ever read a season after it was built, and a same-season
+    correlation would also flatter a rating built from that season's results.
+
+    Signs differ by design. ``vs_goals_against`` should be **negative** -- a
+    better side concedes fewer -- and the other two positive.
+    """
+
+    line: str
+    label: str
+    vs_points: float
+    vs_goals_for: float
+    vs_goals_against: float
+    n: int
+
+
+class OnePlayerInsight(BaseModel):
+    """What one player is worth, measured two ways.
+
+    ``*_drop`` is what a club's overall rating loses when its single
+    highest-rated player is removed and the rating is rebuilt from the next
+    fifteen: the direct answer to "can one player carry a side" on this
+    project's own numbers.
+
+    The ``squad_rps_*`` fields are the other half and the more important one.
+    They are the recorded ablation result for removing squad strength from the
+    **model** entirely -- not recomputed per request, because reproducing them
+    means a full walk-forward run. Positive means the model got worse without
+    it. The interval includes zero, which is the finding.
+    """
+
+    median_drop: float
+    q1_drop: float
+    q3_drop: float
+    max_drop: float
+    max_team: str
+    max_season: str
+    n: int
+
+    squad_rps_delta: float
+    squad_rps_low: float
+    squad_rps_high: float
+    squad_rps_matches: int
+
+
+class RatingInsights(BaseModel):
+    """Answers to two questions about the ratings, measured rather than argued."""
+
+    lines: list[LineValidity]
+    #: The whole squad, for comparison with any single line of it.
+    overall: LineValidity | None = None
+    one_player: OnePlayerInsight | None = None
+
 class Prediction(BaseModel):
     league: str
     date: date
@@ -614,6 +670,27 @@ class ProjectedTeam(BaseModel):
     top_four_pct: float
     relegation_pct: float
 
+    #: Points from the last `SeasonProjection.form_matches` matches, and how
+    #: many of them there were -- fewer than the window early in a season.
+    form_points: int | None = None
+    form_played: int | None = None
+    #: Mean pre-match Elo of those opponents, against the league's own mean
+    #: over every match played so far. Form without this is unreadable: five
+    #: wins over the bottom five is a different run from five over the top
+    #: five, and the points column cannot tell them apart.
+    form_opponent_elo: float | None = None
+    league_mean_elo: float | None = None
+    #: Points the chances in this club's matches were worth, each match scored
+    #: against its own xG through the same Poisson-with-rho the match cards
+    #: use, summed. `points_over_expected` is the gap: positive means the club
+    #: is ahead of its chances.
+    expected_points: float | None = None
+    points_over_expected: float | None = None
+    #: How many played matches carried xG. The xG feed lags the results feed,
+    #: so this is usually a match or two behind `played` and the page says so
+    #: rather than silently comparing a full points total with a partial one.
+    xg_matches: int | None = None
+
 
 class SeasonProjection(BaseModel):
     """A league's projected table plus how much of it is still guesswork."""
@@ -623,6 +700,9 @@ class SeasonProjection(BaseModel):
     #: Matches still to play. The whole basis for reading the table sceptically.
     remaining: int
     played: int
+    #: How long the form window is, so the page can label it rather than
+    #: hardcoding a number that would drift from the one the API used.
+    form_matches: int = 5
     teams: list[ProjectedTeam]
 
 
