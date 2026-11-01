@@ -494,3 +494,71 @@ def test_a_history_without_xg_columns_is_survivable() -> None:
     """Every season before 2014/15 -- Understat does not go back further."""
     assert api._match_xg_lookup(pd.DataFrame()) == {}
     assert api._match_xg_lookup(pd.DataFrame({"Team": ["A"]})) == {}
+
+
+# --- the against-the-run board -----------------------------------------------
+#
+# The same retrodiction, computed once over the whole history instead of per
+# request: 22,018 matches in about 60ms, against the same cost repeated on
+# every page load if it were lazy.
+
+
+def _history(rows: list[tuple[str, str, float, float, int, int]]) -> pd.DataFrame:
+    """Home-perspective rows: (season, league, xgF, xgA, goalsF, goalsA)."""
+    return pd.DataFrame([
+        {
+            "Season": s, "League": lg, "Date": pd.Timestamp(f"2026-10-{i + 1:02d}"),
+            "Team": f"H{i}", "Opponent": f"A{i}", "Venue": "Home",
+            "xGFor": xf, "xGAgainst": xa, "GoalsFor": gf, "GoalsAgainst": ga,
+        }
+        for i, (s, lg, xf, xa, gf, ga) in enumerate(rows)
+    ])
+
+
+def test_the_board_puts_the_least_likely_result_first(monkeypatch) -> None:
+    monkeypatch.setattr(api.state, "metadata", SimpleNamespace(rho=-0.0567))
+    out = api._retrodict_all(_history([
+        ("2526", "E0", 1.2, 1.1, 1, 1),   # even chances, a draw -- unremarkable
+        ("2526", "E0", 3.5, 0.2, 0, 1),   # hammered them and lost
+    ]))
+
+    assert len(out) == 2
+    assert out.nsmallest(1, "prob_actual").iloc[0]["xg_home"] == 3.5
+
+
+def test_a_match_with_no_chances_is_kept_off_the_board(monkeypatch) -> None:
+    """The abandoned match again. Top of a board titled "against the run of
+    play" is the worst place for a 0.0%."""
+    monkeypatch.setattr(api.state, "metadata", SimpleNamespace(rho=-0.0567))
+    out = api._retrodict_all(_history([
+        ("1617", "F1", 0.0, 0.0, 0, 3),
+        ("1617", "F1", 1.4, 1.2, 2, 0),
+    ]))
+
+    assert len(out) == 1
+    assert out.iloc[0]["xg_home"] == 1.4
+
+
+def test_the_season_is_carried_so_the_board_can_say_which_one(monkeypatch) -> None:
+    """Twelve seasons of history: a day and month alone identifies nothing."""
+    monkeypatch.setattr(api.state, "metadata", SimpleNamespace(rho=-0.0567))
+    out = api._retrodict_all(_history([("1819", "I1", 2.0, 0.3, 0, 1)]))
+
+    assert out.iloc[0]["Season"] == "1819"
+    assert out.iloc[0]["League"] == "I1"
+
+
+def test_a_history_without_xg_yields_an_empty_board() -> None:
+    assert api._retrodict_all(pd.DataFrame()).empty
+    assert api._retrodict_all(pd.DataFrame({"Team": ["A"]})).empty
+
+
+def test_the_probability_is_for_the_result_that_happened(monkeypatch) -> None:
+    """An away win on one-sided home chances must score low; the same chances
+    with the home side winning must score high."""
+    monkeypatch.setattr(api.state, "metadata", SimpleNamespace(rho=-0.0567))
+    lost = api._retrodict_all(_history([("2526", "E0", 3.0, 0.3, 0, 1)])).iloc[0]
+    won = api._retrodict_all(_history([("2526", "E0", 3.0, 0.3, 3, 0)])).iloc[0]
+
+    assert lost["prob_actual"] < 0.10
+    assert won["prob_actual"] > 0.50

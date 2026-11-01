@@ -518,6 +518,69 @@ function Explainer({ summary }: { summary: Accuracy }) {
   );
 }
 
+/** Results the chances in that match made least likely.
+ *
+ *  Reads the same retrodiction a settled match card shows, sorted. It belongs
+ *  here rather than in Discover because Discover promises "the same numbers the
+ *  Match Predictor shows, sorted by the questions worth asking" — about
+ *  fixtures — and this is a historical board over every season we hold.
+ *
+ *  Deliberately *not* titled "unlucky". A side that goes two goals up stops
+ *  needing chances, so a comfortable win can appear here on the losing side's
+ *  shot count. The blurb says so rather than letting the reader assume.
+ */
+function AgainstTheRunBoard({ league }: { league: string }) {
+  const { data, loading } = useAsync(() => api.againstTheRun(league, 8), [league]);
+  if (loading || !data || data.length === 0) return null;
+
+  return (
+    <div className="rounded-xl p-5 mb-6" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+      <div className="text-xs font-display font-bold uppercase tracking-wider" style={{ color: 'var(--muted-foreground)' }}>
+        Against the run of play
+      </div>
+      <div className="text-xs mb-4 mt-1 leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
+        Every match since 2014/15 scored against the chances it actually
+        produced, lowest first. This is not a claim that the losing side
+        deserved better: a team that goes two goals up stops needing chances, so
+        a comfortable win can land here on the other side&rsquo;s shot count.
+      </div>
+      <div className="flex flex-col gap-2">
+        {data.map(m => (
+          <div
+            key={`${m.date}-${m.home_team}-${m.away_team}`}
+            className="flex items-center gap-3 text-xs"
+          >
+            {/*
+              The season, not the date. This board spans 2014/15 to now, and
+              `formatDate` renders "18 Sept" with no year — which on a twelve
+              season board tells the reader nothing about which Roma v Atalanta
+              this was.
+            */}
+            <span className="font-data" style={{ color: 'var(--muted-foreground)', width: 54, flexShrink: 0 }}>
+              {m.season.slice(0, 2)}/{m.season.slice(2)}
+            </span>
+            <span style={{ color: teamColor(m.home_team), minWidth: 0, flex: '1 1 0', textAlign: 'right' }}>
+              {m.home_team}
+            </span>
+            <span className="font-data font-bold" style={{ color: 'var(--foreground)', flexShrink: 0 }}>
+              {m.home_goals}&ndash;{m.away_goals}
+            </span>
+            <span style={{ color: teamColor(m.away_team), minWidth: 0, flex: '1 1 0' }}>
+              {m.away_team}
+            </span>
+            <span className="font-data" style={{ color: 'var(--muted-foreground)', width: 86, flexShrink: 0, textAlign: 'right' }}>
+              xG {m.xg_home.toFixed(2)}&ndash;{m.xg_away.toFixed(2)}
+            </span>
+            <span className="font-data font-bold" style={{ color: '#a78bfa', width: 42, flexShrink: 0, textAlign: 'right' }}>
+              {m.prob_actual < 0.01 ? '<1%' : pct(m.prob_actual)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function PredictionHistory() {
   const [source, setSource] = useState<Source>('backtest');
   const [league, setLeague] = useState('All');
@@ -808,6 +871,8 @@ export default function PredictionHistory() {
           )}
         </>
       )}
+
+      {source === 'backtest' && <AgainstTheRunBoard league={league} />}
 
       <div className="flex flex-col gap-3">
         {matches.map((m, i) => (

@@ -35,6 +35,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from footballml import registry, store
 from footballml.api.schemas import (
     Accuracy,
+    AgainstTheRun,
     CalibrationBin,
     CompetitionAccuracy,
     Driver,
@@ -156,6 +157,13 @@ class State:
     #: plausible-looking feature than a bookmaker price, so it never goes near
     #: that frame.
     match_xg: dict[tuple, tuple[float, float]] = field(default_factory=dict)
+
+    #: Every played match scored against its own chances, newest first. The
+    #: same retrodiction a match card shows, computed once so the "against the
+    #: run of play" board does not re-run 22,000 Dixon-Coles matrices per
+    #: request. 60ms to build; it is derived from `match_xg`, which is why it
+    #: is rebuilt beside it.
+    retrodicted: pd.DataFrame = field(default_factory=pd.DataFrame)
 
     #: When the walk-forward run was evaluated, and whether the files it read
     #: have changed since. `None` for both means no provenance was recorded --
@@ -365,6 +373,8 @@ def _load_state(startup: bool = False) -> dict[str, int]:
 
     state.match_xg = _match_xg_lookup(tmh)
     logger.info("Loaded own-match xG for %d matches", len(state.match_xg))
+    state.retrodicted = _retrodict_all(tmh)
+    logger.info("Scored %d matches against their own chances", len(state.retrodicted))
 
     # Scored fixtures are cached for a few minutes; after a reload that cache
     # describes the previous model, so drop it.
@@ -723,6 +733,49 @@ def health() -> Health:
         n_train=meta.n_train,
         league_adjustment_stale=state.league_offsets_stale,
     )
+
+
+@app.get("/insights/against-the-run", response_model=list[AgainstTheRun])
+def against_the_run(
+    league: str | None = Query(None, description="Division code, e.g. E0"),
+    limit: int = Query(10, ge=1, le=50),
+) -> list[AgainstTheRun]:
+    """Results the chances in that match made least likely.
+
+    Every played match since Understat's data starts in 2014/15, scored against
+    its own xG and sorted. The method, its calibration and its limitations are
+    in `EXPERIMENTS.md`; the one that matters for reading this board is that a
+    side which goes two goals up stops needing chances, so a comfortable win
+    can appear here on the losing side's shot count.
+    """
+    if state.retrodicted.empty:
+        raise HTTPException(
+            404,
+            "No matches scored against their own chances yet. This needs "
+            "Understat xG in `team_match_history_all.csv`.",
+        )
+
+    rows = state.retrodicted
+    if league:
+        rows = rows[rows["League"] == league]
+        if rows.empty:
+            raise HTTPException(404, f"No matches for {league}")
+
+    return [
+        AgainstTheRun(
+            season=str(r.Season),
+            league=str(r.League),
+            date=pd.Timestamp(r.Date).date(),
+            home_team=str(r.HomeTeam),
+            away_team=str(r.AwayTeam),
+            home_goals=int(r.FTHG),
+            away_goals=int(r.FTAG),
+            xg_home=round(float(r.xg_home), 2),
+            xg_away=round(float(r.xg_away), 2),
+            prob_actual=round(float(r.prob_actual), 4),
+        )
+        for r in rows.nsmallest(limit, "prob_actual").itertuples()
+    ]
 
 
 @app.get("/leagues")
@@ -2147,6 +2200,56 @@ def _retrodiction(row: pd.Series) -> Retrodiction | None:
         prob_draw=round(float(probs[1]), 4),
         prob_away_win=round(float(probs[2]), 4),
         prob_actual=round(float(probs[OUTCOMES.index(actual)]), 4),
+    )
+
+
+def _retrodict_all(tmh: pd.DataFrame) -> pd.DataFrame:
+    """Score every played match against the chances it produced.
+
+    Vectorised over the whole history rather than per request: 22,018 matches
+    in about 60ms, against roughly the same cost repeated on every page load if
+    it were done lazily.
+
+    Carries the same gate as the per-match version, for the same reason -- the
+    one abandoned match with no shots on either side would otherwise sit at the
+    top of a board titled "against the run of play", which is exactly the
+    confident-but-empty number the site exists not to publish.
+    """
+    needed = {"Venue", "Team", "Opponent", "Date", "xGFor", "xGAgainst",
+              "GoalsFor", "GoalsAgainst", "League", "Season"}
+    if tmh.empty or not needed <= set(tmh.columns):
+        return pd.DataFrame()
+
+    home = tmh[tmh["Venue"].astype(str).str.lower() == "home"]
+    home = home.dropna(subset=["xGFor", "xGAgainst", "GoalsFor", "GoalsAgainst"])
+    home = home[home["xGFor"] + home["xGAgainst"] >= MIN_TOTAL_MATCH_XG]
+    if home.empty:
+        return pd.DataFrame()
+
+    rho = state.metadata.rho if state.metadata else 0.0
+    probs = outcome_probs(
+        score_matrix(
+            home["xGFor"].to_numpy(dtype=float),
+            home["xGAgainst"].to_numpy(dtype=float),
+            rho=rho,
+        )
+    )
+    goals_for = home["GoalsFor"].to_numpy()
+    goals_against = home["GoalsAgainst"].to_numpy()
+    column = np.where(goals_for > goals_against, 0, np.where(goals_for < goals_against, 2, 1))
+    return pd.DataFrame(
+        {
+            "Season": home["Season"].astype(str).to_numpy(),
+            "League": home["League"].to_numpy(),
+            "Date": pd.to_datetime(home["Date"]).to_numpy(),
+            "HomeTeam": home["Team"].to_numpy(),
+            "AwayTeam": home["Opponent"].to_numpy(),
+            "FTHG": goals_for.astype(int),
+            "FTAG": goals_against.astype(int),
+            "xg_home": home["xGFor"].to_numpy(dtype=float),
+            "xg_away": home["xGAgainst"].to_numpy(dtype=float),
+            "prob_actual": probs[np.arange(len(home)), column],
+        }
     )
 
 

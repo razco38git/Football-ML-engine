@@ -128,6 +128,20 @@ export interface Prediction {
   retrodiction?: Retrodiction | null;
 }
 
+export interface AgainstTheRun {
+  season: string;
+  league: string;
+  date: string;
+  home_team: string;
+  away_team: string;
+  home_goals: number;
+  away_goals: number;
+  xg_home: number;
+  xg_away: number;
+  /** The probability the chances gave the result that happened. */
+  prob_actual: number;
+}
+
 export interface Retrodiction {
   /** The chances each side created, as xG. Penalties included. */
   xg_home: number;
@@ -222,6 +236,13 @@ export const api = {
 
   /** How the five leagues compare on average squad rating. */
   leagueStrength: (season?: string) => fetchLeagueStrength(season),
+
+  /** Results the chances in that match made least likely. */
+  againstTheRun: (league?: string, limit = 8) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (league && league !== 'All') params.set('league', league);
+    return get<AgainstTheRun[]>(`/insights/against-the-run?${params}`);
+  },
 
   /** Settled matches: prediction beside the real score. */
   history: (source: 'live' | 'backtest', league?: string, limit = 50) =>

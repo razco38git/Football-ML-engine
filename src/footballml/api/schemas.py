@@ -108,6 +108,28 @@ class Retrodiction(BaseModel):
     prob_actual: float
 
 
+class AgainstTheRun(BaseModel):
+    """A result the chances in that match made unlikely.
+
+    The same retrodiction a settled match card shows, sorted. It is not a
+    judgement that the losing side deserved to win -- chances are not
+    independent of the score, and a side that goes ahead stops needing them.
+    What it measures is how far the result sat from the shots that produced it.
+    """
+
+    season: str
+    league: str
+    date: date
+    home_team: str
+    away_team: str
+    home_goals: int
+    away_goals: int
+    xg_home: float
+    xg_away: float
+    #: The probability the chances gave the result that happened.
+    prob_actual: float
+
+
 class Prediction(BaseModel):
     league: str
     date: date
