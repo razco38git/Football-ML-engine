@@ -52,6 +52,7 @@ import unicodedata
 
 import pandas as pd
 
+from footballml.browser import headless
 from footballml.ingest.understat import UNDERSTAT_LEAGUES
 from footballml.players import cache
 
@@ -402,7 +403,7 @@ def fetch_fbref_stats(
     codes = leagues or sorted(UNDERSTAT_LEAGUES)
     names = [UNDERSTAT_LEAGUES[c] for c in codes]
     inverse = {v: k for k, v in UNDERSTAT_LEAGUES.items()}
-    fb = sd.FBref(leagues=names, seasons=seasons)
+    fb = sd.FBref(leagues=names, seasons=seasons, headless=headless())
     current_season = max(seasons) if seasons else None
     cached_seasons: list[str] = []
 
@@ -425,7 +426,10 @@ def fetch_fbref_stats(
                 cached_seasons.append(str(season))
                 continue
 
-            reader = fb if season is None else sd.FBref(leagues=names, seasons=season)
+            reader = (
+                fb if season is None
+                else sd.FBref(leagues=names, seasons=season, headless=headless())
+            )
             try:
                 raw = reader.read_player_season_stats(stat_type).reset_index()
             except Exception as exc:  # noqa: BLE001 - keep going on a bad page

@@ -39,6 +39,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from footballml.browser import headless
 from footballml.entities.teams import load_aliases
 from footballml.ingest.matchhistory import current_season_label
 from footballml.ingest.understat import UNDERSTAT_LEAGUES
@@ -178,7 +179,9 @@ def fetch_schedule(
     if uefa:
         _register(uefa)
 
-    reader = sd.FBref(leagues=[known[c] for c in codes], seasons=list(seasons))
+    reader = sd.FBref(
+        leagues=[known[c] for c in codes], seasons=list(seasons), headless=headless()
+    )
     # `force_cache` is all soccerdata offers; the age test is ours.
     raw = reader.read_schedule(force_cache=_cache_is_fresh(reader, max_age)).reset_index()
     if raw.empty:

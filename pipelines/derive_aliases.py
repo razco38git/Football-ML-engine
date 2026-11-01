@@ -36,6 +36,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from footballml.browser import headless  # noqa: E402
 from footballml.data import PROCESSED_DIR  # noqa: E402
 from footballml.entities.teams import ALIAS_CONFIG, load_aliases  # noqa: E402
 from footballml.ingest.matchhistory import fetch_match_history, to_matches  # noqa: E402
@@ -101,7 +102,11 @@ def _read_fbref(leagues: list[str], seasons: list[str]) -> pd.DataFrame:
     import soccerdata as sd
 
     sched = (
-        sd.FBref(leagues=[UNDERSTAT_LEAGUES[c] for c in leagues], seasons=seasons)
+        sd.FBref(
+            leagues=[UNDERSTAT_LEAGUES[c] for c in leagues],
+            seasons=seasons,
+            headless=headless(),
+        )
         .read_schedule()
         .reset_index()
     )

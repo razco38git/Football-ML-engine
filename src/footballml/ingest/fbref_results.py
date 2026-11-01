@@ -35,6 +35,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from footballml.browser import headless
 from footballml.data import PROCESSED_DIR
 from footballml.entities import load_aliases
 from footballml.ingest.matchhistory import current_season_label
@@ -158,7 +159,7 @@ def _matchlog_reader(leagues: list[str], seasons: list[str]):
             df[col] = df[col].replace(known)
             return df
 
-    return _FBrefWithMatchlogLeagues(leagues=leagues, seasons=seasons)
+    return _FBrefWithMatchlogLeagues(leagues=leagues, seasons=seasons, headless=headless())
 
 
 def _shooting(leagues: list[str], seasons: list[str]) -> pd.DataFrame:

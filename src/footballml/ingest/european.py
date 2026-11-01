@@ -35,6 +35,7 @@ import logging
 
 import pandas as pd
 
+from footballml.browser import headless
 from footballml.entities.teams import load_aliases
 from footballml.ingest.schedule import _SCORE
 
@@ -220,7 +221,9 @@ def fetch_european_matches(
         blocks = []
         for season in seasons:
             try:
-                reader = sd.FBref(leagues=[EUROPEAN_LEAGUES[code]], seasons=[season])
+                reader = sd.FBref(
+                    leagues=[EUROPEAN_LEAGUES[code]], seasons=[season], headless=headless()
+                )
                 block = reader.read_schedule().reset_index()
             except Exception as exc:  # noqa: BLE001 - one bad season is survivable
                 logger.warning("%s %s: could not read schedule (%s)", code, season, exc)
