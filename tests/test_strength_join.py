@@ -15,8 +15,9 @@ Both properties are asserted below, since the join's correctness rests on them.
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
-from footballml.data import load_team_strength
+from footballml.data import TEAM_STRENGTH, load_team_strength
 from footballml.features.build import add_team_strength
 
 
@@ -82,15 +83,28 @@ def test_an_unrated_team_still_gets_nan_rather_than_a_wrong_row() -> None:
 
 
 # --- the properties the key rests on ---------------------------------------
+#
+# These two read the built table, so they can only run where it exists.
+# `load_team_strength` answers an absent file with an empty frame, by design --
+# the match pipeline has to run before `pipelines.build_players` has -- and an
+# empty frame has no `Team` column to group by, so asking these questions of it
+# raises instead of either passing or failing. Skipping says the honest thing:
+# the property is unexamined here, not satisfied.
+
+
+def _real_strength() -> pd.DataFrame:
+    if not TEAM_STRENGTH.exists():
+        pytest.skip("run `python -m pipelines.build_players` first")
+    return load_team_strength()
 
 
 def test_no_club_appears_in_two_leagues() -> None:
     """Dropping league from the join key is only safe while this holds."""
-    real = load_team_strength()
+    real = _real_strength()
     leagues = real.groupby("Team")["League"].nunique()
     assert leagues.max() == 1, sorted(leagues[leagues > 1].index)
 
 
 def test_season_and_team_identify_one_row() -> None:
-    real = load_team_strength()
+    real = _real_strength()
     assert not real.duplicated(subset=["Season", "Team"]).any()

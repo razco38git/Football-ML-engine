@@ -32,7 +32,10 @@ def tmh() -> pd.DataFrame:
     The multi-league file, not the default: the legacy EPL-only one has no
     `League` column, which `build_upcoming_features` needs.
     """
-    df = load_team_match_history(PROCESSED_DIR / "team_match_history_all.csv")
+    path = PROCESSED_DIR / "team_match_history_all.csv"
+    if not path.exists():
+        pytest.skip("team_match_history_all.csv not built; run `pipelines.build_dataset`")
+    df = load_team_match_history(path)
     return df[df["Season"].astype(str).isin(["2324", "2425"])].copy()
 
 
