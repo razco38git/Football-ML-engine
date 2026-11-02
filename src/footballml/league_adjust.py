@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -180,8 +181,10 @@ def _probabilities(block: pd.DataFrame, offsets: dict[str, float]) -> np.ndarray
 def adjust(
     mu_home: np.ndarray | float,
     mu_away: np.ndarray | float,
-    home_league: np.ndarray | str,
-    away_league: np.ndarray | str,
+    # A sequence, not only an array: the body hands these to `np.asarray`, and
+    # `/matches` has always passed plain lists of division codes.
+    home_league: Sequence[str] | np.ndarray | str,
+    away_league: Sequence[str] | np.ndarray | str,
     offsets: dict[str, float],
 ) -> tuple[np.ndarray, np.ndarray]:
     """Shift goal rates by the measured gap between the two leagues.

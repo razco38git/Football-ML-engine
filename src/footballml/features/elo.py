@@ -122,6 +122,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from footballml.cells import as_float
+
 #: Every team starts here. The scale is arbitrary; only differences matter.
 START = 1500.0
 
@@ -207,8 +209,12 @@ def _walk(
 
     for row in home.itertuples():
         season = str(row.Season)
+        # `itertuples` hands each cell back as "some scalar", so the two names
+        # are pinned to `str` here rather than at each of the six dict accesses
+        # that follow.
+        home_team, away_team = str(row.Team), str(row.Opponent)
         pair = []
-        for team in (row.Team, row.Opponent):
+        for team in (home_team, away_team):
             rating = ratings.get(team, START)
             # A new season for this team: pull back toward the anchor before the
             # rating is used, so the regression is visible to the first match
@@ -220,12 +226,12 @@ def _walk(
             pair.append(rating)
 
         home_rating, away_rating = pair
-        pre[(row.League, row.Date, row.Team, row.Opponent)] = (home_rating, away_rating)
+        pre[(row.League, row.Date, home_team, away_team)] = (home_rating, away_rating)
 
         if pd.isna(row.GoalsFor) or pd.isna(row.GoalsAgainst):
             continue  # Unplayed placeholder: it has no result to learn from.
 
-        goals_for, goals_against = float(row.GoalsFor), float(row.GoalsAgainst)
+        goals_for, goals_against = as_float(row.GoalsFor), as_float(row.GoalsAgainst)
         actual = 1.0 if goals_for > goals_against else 0.5 if goals_for == goals_against else 0.0
         # A final is at a neutral ground, so neither side gets the home term.
         # Compared against True explicitly: concatenating a frame that has this
@@ -242,8 +248,8 @@ def _walk(
         weight = max(1.0, _margin_multiplier(int(goals_for - goals_against)))
         change = k * weight * (actual - expected)
 
-        ratings[row.Team] = home_rating + change
-        ratings[row.Opponent] = away_rating - change
+        ratings[home_team] = home_rating + change
+        ratings[away_team] = away_rating - change
 
     return pre, ratings
 

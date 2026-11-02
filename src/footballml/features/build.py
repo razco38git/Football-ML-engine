@@ -221,7 +221,21 @@ def _next_season(label: str) -> str:
 
 #: Sentinel for "load the European matches from disk". A plain ``None`` default
 #: cannot express this, because ``None`` has to keep meaning "no European data".
-AUTO = object()
+class _Auto:
+    """Type of the `AUTO` sentinel below.
+
+    A bare `object()` would do at runtime, but it forces the parameter's
+    annotation to `object` -- which accepts anything and narrows to nothing, so
+    the `european` frame stayed untyped all the way into `european_elo_rows`.
+    """
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return "AUTO"
+
+
+#: "Load the European ties yourself." Distinct from `None`, which means "do not
+#: use them at all" -- see `build_match_features`.
+AUTO = _Auto()
 
 
 def european_elo_rows(matches: pd.DataFrame) -> pd.DataFrame:
@@ -263,7 +277,7 @@ def build_team_features(
     tmh: pd.DataFrame,
     windows: Sequence[int] = DEFAULT_WINDOWS,
     congestion_days: int = 14,
-    european: pd.DataFrame | None | object = AUTO,
+    european: pd.DataFrame | None | _Auto = AUTO,
 ) -> pd.DataFrame:
     """Run the full long-shape feature build: prepare, roll, venue-split, rest.
 
@@ -277,7 +291,7 @@ def build_team_features(
             explicitly, which tests do.
     """
     df = prepare_team_match(tmh)
-    if european is AUTO:
+    if isinstance(european, _Auto):
         european = load_european_matches()
     extra = None if european is None else european_elo_rows(european)
     # Elo before the rolling features, so it is just another team-level column
@@ -298,7 +312,7 @@ def build_match_features(
     congestion_days: int = 14,
     strength: pd.DataFrame | None = None,
     previous_season_strength: bool = True,
-    european: pd.DataFrame | None | object = AUTO,
+    european: pd.DataFrame | None | _Auto = AUTO,
 ) -> pd.DataFrame:
     """Build the wide, model-ready match feature table from long team-match rows.
 
@@ -526,30 +540,33 @@ def build_frozen_form_features(
             ]
         )
         built = build_upcoming_features(tmh, round_fixtures, windows=windows, **kwargs)
-        for _, row in built.iterrows():
-            blocks.setdefault(row["HomeTeam"], {})["home"] = row
-            blocks.setdefault(row["AwayTeam"], {})["away"] = row
+        for _, built_row in built.iterrows():
+            blocks.setdefault(str(built_row["HomeTeam"]), {})["home"] = built_row
+            blocks.setdefault(str(built_row["AwayTeam"]), {})["away"] = built_row
 
     if not blocks:
         return pd.DataFrame()
 
     template = next(iter(blocks.values()))
-    sample = template.get("home", template.get("away"))
+    # Every block got one side or the other filled in above, so one of these two
+    # keys is present; indexing rather than `.get` chaining says so.
+    sample = template["home"] if "home" in template else template["away"]
     home_cols = [c for c in sample.index if c.startswith("home_")]
     away_cols = [c for c in sample.index if c.startswith("away_")]
 
     rows = []
     for fixture in fixtures.itertuples():
-        home = blocks.get(fixture.HomeTeam, {}).get("home")
-        away = blocks.get(fixture.AwayTeam, {}).get("away")
+        home_team, away_team = str(fixture.HomeTeam), str(fixture.AwayTeam)
+        home = blocks.get(home_team, {}).get("home")
+        away = blocks.get(away_team, {}).get("away")
         if home is None or away is None:
             continue
         row = {
             "League": league,
             "Season": season,
             "Date": as_of + pd.Timedelta(days=7),
-            "HomeTeam": fixture.HomeTeam,
-            "AwayTeam": fixture.AwayTeam,
+            "HomeTeam": home_team,
+            "AwayTeam": away_team,
             "FTHG": np.nan,
             "FTAG": np.nan,
             "FTR": None,

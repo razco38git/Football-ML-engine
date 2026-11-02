@@ -161,12 +161,12 @@ class MatchPredictor:
 
     def predict_goal_rates(self, X: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
         """Expected goals for each side. This is the site's headline number."""
-        self._check_fitted()
+        home_model, away_model = self._fitted()
         X = X[self.feature_names_]
         # Poisson-loss HGB returns the rate directly, but clip anyway: a rate of
         # zero would make the scoreline matrix degenerate.
-        mu_h = np.clip(self.home_model_.predict(X), 1e-6, None)
-        mu_a = np.clip(self.away_model_.predict(X), 1e-6, None)
+        mu_h = np.clip(home_model.predict(X), 1e-6, None)
+        mu_a = np.clip(away_model.predict(X), 1e-6, None)
         return mu_h, mu_a
 
     def predict_matrix(self, X: pd.DataFrame) -> np.ndarray:
@@ -263,12 +263,12 @@ class MatchPredictor:
         """
         import shap  # imported lazily: heavy, and only needed for explanations
 
-        self._check_fitted()
+        home_model, away_model = self._fitted()
         X = X[self.feature_names_]
 
         contributions = {
             side: shap.TreeExplainer(model).shap_values(X)
-            for side, model in (("home", self.home_model_), ("away", self.away_model_))
+            for side, model in (("home", home_model), ("away", away_model))
         }
 
         out: list[dict[str, list[tuple[str, float]]]] = []
@@ -281,9 +281,19 @@ class MatchPredictor:
             out.append(entry)
         return out
 
-    def _check_fitted(self) -> None:
+    def _fitted(
+        self,
+    ) -> tuple[HistGradientBoostingRegressor, HistGradientBoostingRegressor]:
+        """The two side models, or a clear error if `fit` has not run.
+
+        Returns them rather than just asserting, so that a caller cannot get
+        past the check and then reach for `self.home_model_` anyway -- which is
+        what `_check_fitted()` allowed, and what left two unguarded
+        `None.predict` paths that only a type checker noticed.
+        """
         if self.home_model_ is None or self.away_model_ is None:
             raise RuntimeError("MatchPredictor is not fitted; call fit() first")
+        return self.home_model_, self.away_model_
 
 
 def feature_columns(df: pd.DataFrame) -> list[str]:

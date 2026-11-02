@@ -28,6 +28,7 @@ import logging
 import time
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import requests
 
@@ -320,8 +321,15 @@ def to_matches(raw: pd.DataFrame) -> pd.DataFrame:
         }
     )
     for prefix, name in _STAT_COLUMNS.items():
-        out[f"H{name}"] = pd.to_numeric(raw.get(f"H{prefix}"), errors="coerce")
-        out[f"A{name}"] = pd.to_numeric(raw.get(f"A{prefix}"), errors="coerce")
+        for side in ("H", "A"):
+            # Older football-data.co.uk files carry fewer statistics, so a
+            # column can be missing outright. `pd.to_numeric(None)` happens to
+            # answer NaN, which broadcasts to an all-NaN column and is what we
+            # want -- but relying on that leaves the intent unsaid.
+            column = raw.get(f"{side}{prefix}")
+            out[f"{side}{name}"] = (
+                np.nan if column is None else pd.to_numeric(column, errors="coerce")
+            )
 
     # Matches without a result are fixtures that have not been played.
     played = out["FTHG"].notna() & out["FTAG"].notna()

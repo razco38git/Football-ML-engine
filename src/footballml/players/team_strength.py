@@ -246,8 +246,8 @@ def team_strength(
 
     if method == "eleven":
         # A plain loop rather than groupby.apply: apply's handling of the group
-        # keys varies with include_groups, and concatenating the returned frames
-        # keeps every original column intact without any index gymnastics.
+        # keys has varied across pandas versions, and concatenating the returned
+        # frames keeps every original column intact without index gymnastics.
         picks = [select_eleven(g, formation) for _, g in players.groupby(keys, observed=True)]
         selected = pd.concat(picks) if picks else players.head(0)
     elif method == "best_n":
@@ -264,7 +264,7 @@ def team_strength(
 
     lines = (
         selected.groupby([*keys, "line"], observed=True)
-        .apply(_weighted_mean, include_groups=False)
+        .apply(_weighted_mean)
         .reset_index(name="rating")
     )
     wide = lines.pivot_table(index=keys, columns="line", values="rating").reset_index()

@@ -246,10 +246,10 @@ def _build_names(df: pd.DataFrame) -> pd.Series | None:
             + " "
             + df[last_col].fillna("").astype(str).str.strip()
         ).str.strip()
-        combined = combined.replace("", pd.NA)
+        combined = combined.replace({"": pd.NA})
 
     if name_col:
-        primary = df[name_col].astype("string").str.strip().replace("", pd.NA)
+        primary = df[name_col].astype("string").str.strip().replace({"": pd.NA})
         return primary.fillna(combined) if combined is not None else primary.fillna("")
 
     return combined
@@ -770,8 +770,8 @@ def _match_loosely(merged: pd.DataFrame, fifa: pd.DataFrame, columns: list[str])
             # the 2024/25 edition; exactly one of them plays for Paris SG.
             # Without that, a bare "Pablo" or "Rafa" would collapse onto
             # whichever namesake sorted first.
-            ours = parts[0]
-            candidates = possible([row for tokens, row in token_sets if ours in tokens])
+            sole_token = parts[0]
+            candidates = possible([row for tokens, row in token_sets if sole_token in tokens])
             hit = at_club(candidates, team)
 
         if hit is not None:
@@ -1298,7 +1298,7 @@ def _settle_reordered_roles(merged: pd.DataFrame) -> pd.DataFrame:
 
     chosen = (
         work.groupby(["Player", "_key"], sort=False)[["Season", "role"]]
-        .apply(_settle, include_groups=False)
+        .apply(_settle)
         .rename("settled")
     )
     settled = work.join(chosen, on=["Player", "_key"])["settled"]

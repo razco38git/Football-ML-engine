@@ -182,8 +182,8 @@ def _curves(players: pd.DataFrame) -> dict[tuple[str, str], tuple[np.ndarray, np
     for keys, block in frame.groupby(["role", "Season"], observed=True):
         role, season = (str(k) for k in keys)
         curves[(role, season)] = _curve(block)
-    for season, block in frame.groupby("Season", observed=True):
-        curves[("", str(season))] = _curve(block)
+    for any_role_season, block in frame.groupby("Season", observed=True):
+        curves[("", str(any_role_season))] = _curve(block)
     return curves
 
 
@@ -243,11 +243,18 @@ def rosters(
 
     # A club's league in a season, from our own data: the roster comes from EA,
     # which carries no league column at all, and `team_strength` keys on it.
-    leagues = (
+    # Flattened to rows rather than read off the grouped Series: a MultiIndex
+    # key is one `Hashable` as far as the stubs are concerned, and `.to_dict()`
+    # on it answers `dict[Hashable, Any]` -- not a key shape `_rate_squad` can
+    # be held to.
+    by_club = (
         frame.groupby(["Season", "Team"], observed=True)["League"]
         .agg(lambda s: s.value_counts().index[0])
-        .to_dict()
+        .reset_index()
     )
+    leagues: dict[tuple[str, str], str] = {
+        (str(row.Season), str(row.Team)): str(row.League) for row in by_club.itertuples()
+    }
 
     blocks: list[pd.DataFrame] = []
     for season, group in _by_season(resolutions):
@@ -265,6 +272,8 @@ def rosters(
         }
 
         for resolution in group:
+            if resolution.label is None:
+                continue  # Unresolved: no label to look a roster up by.
             raw = by_label.get(resolution.label)
             if raw is None or raw.empty:
                 continue

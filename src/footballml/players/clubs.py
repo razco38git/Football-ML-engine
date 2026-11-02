@@ -78,6 +78,7 @@ from collections import defaultdict
 
 import pandas as pd
 
+from footballml.cells import as_float, as_int
 from footballml.entities import load_aliases
 from footballml.ingest.understat import UNDERSTAT_LEAGUES
 from footballml.players.fbref import _is_same_name, _name_keys, _tokens, normalise_name
@@ -204,10 +205,10 @@ def _clubs_by_name_key(fbref: pd.DataFrame, minutes: pd.Series) -> dict[tuple, d
                 owner[full] = norm
             elif seen != norm:
                 ambiguous.add(full)
-            by_key[full][club] = max(by_key[full].get(club, 0.0), float(minutes.at[idx]))
+            by_key[full][club] = max(by_key[full].get(club, 0.0), as_float(minutes.at[idx]))
 
-    for key in ambiguous:
-        by_key.pop(key, None)
+    for ambiguous_key in ambiguous:
+        by_key.pop(ambiguous_key, None)
     if ambiguous:
         logger.info(
             "Club attribution: %d FBref name key(s) named more than one player, ignored",
@@ -241,7 +242,7 @@ def _clubs_by_containment(
     for idx, row in hits:
         club = str(row["Team"]).strip()
         club = aliases.get(club, club)
-        clubs[club] = max(clubs.get(club, 0.0), float(minutes.at[idx]))
+        clubs[club] = max(clubs.get(club, 0.0), as_float(minutes.at[idx]))
     return clubs
 
 
@@ -290,10 +291,10 @@ def resolve_club_attribution(
 
     for idx in out.index:
         try:
-            player_id = int(out.at[idx, "player_id"])
+            player_id = as_int(out.at[idx, "player_id"])
         except (TypeError, ValueError):
             continue
-        league = out.at[idx, "League"]
+        league = str(out.at[idx, "League"])
         season = str(out.at[idx, "Season"])
         listed = candidates.get((league, season, player_id))
         if not listed:

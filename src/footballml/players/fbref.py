@@ -273,7 +273,7 @@ def match_players(
         # kept inheriting a midfielder's tackles. An ambiguous key is not a
         # match, so drop it and let the player fall through to the next key or
         # go unmatched.
-        lookup: dict[tuple, dict] = {}
+        lookup: dict[tuple, pd.Series] = {}
         ambiguous: set[tuple] = set()
         for _, row in right.iterrows():
             group = tuple(row[c] for c in keys)
@@ -284,8 +284,8 @@ def match_players(
                     lookup[full] = row
                 elif seen["_norm"] != row["_norm"]:
                     ambiguous.add(full)
-        for key in ambiguous:
-            del lookup[key]
+        for ambiguous_key in ambiguous:
+            del lookup[ambiguous_key]
         if ambiguous:
             logger.info(
                 "Ambiguous on %s: %d name keys matched more than one player, left unmatched",
@@ -422,7 +422,10 @@ def fetch_fbref_stats(
         # eleven that parsed fine.
         seasonal: list[pd.DataFrame] = []
         request = cache.request_key(codes, stat_type)
-        for season in seasons or [None]:
+        # `[None]` means "whatever the reader was built for", so the loop runs
+        # exactly once; spelled as its own list so the element type admits it.
+        requested: list[str | None] = list(seasons) if seasons else [None]
+        for season in requested:
             # A finished season reads the same forever, and reading all twelve
             # is 150s of the 346s `build_players` takes. The season in progress
             # changes daily, so it is never served from cache.

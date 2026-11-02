@@ -200,7 +200,7 @@ def add_rest_features(tmh: pd.DataFrame, congestion_days: int = 14) -> pd.DataFr
 
     df[f"matches_last_{congestion_days}_days"] = (
         df.groupby("Team", sort=False, observed=True, group_keys=False)
-        .apply(_congestion, include_groups=False)
+        .apply(_congestion)
         .reindex(df.index)
     )
     return df

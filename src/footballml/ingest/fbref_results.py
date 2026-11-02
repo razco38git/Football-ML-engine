@@ -36,6 +36,7 @@ import numpy as np
 import pandas as pd
 
 from footballml.browser import headless
+from footballml.cells import as_int, as_timestamp
 from footballml.data import PROCESSED_DIR
 from footballml.entities import load_aliases
 from footballml.ingest.matchhistory import current_season_label
@@ -547,8 +548,8 @@ def _record_deferred(
 
     record: dict[tuple, tuple[int, pd.Timestamp]] = {
         (row.League, row.Season, row.Date, row.HomeTeam, row.AwayTeam): (
-            int(row.attempts),
-            row.last_attempt,
+            as_int(row.attempts),
+            as_timestamp(row.last_attempt),
         )
         for row in deferred.itertuples()
     }
@@ -626,7 +627,7 @@ def _park_what_failed(
 def _describe(matches: pd.DataFrame, limit: int = 4) -> str:
     """``SP1 2026-10-10 Vallecano v Ath Bilbao`` for a log line."""
     shown = [
-        f"{row.League} {pd.Timestamp(row.Date).date()} {row.HomeTeam} v {row.AwayTeam}"
+        f"{row.League} {as_timestamp(row.Date).date()} {row.HomeTeam} v {row.AwayTeam}"
         for row in matches.head(limit).itertuples()
     ]
     if len(matches) > limit:

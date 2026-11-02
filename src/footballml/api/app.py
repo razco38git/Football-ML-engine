@@ -20,12 +20,12 @@ import hashlib
 import json
 import logging
 import threading
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict, TypeVar
 
 import numpy as np
 import pandas as pd
@@ -65,6 +65,7 @@ from footballml.api.schemas import (
     TeamStrength,
     TeamStrengthPage,
 )
+from footballml.cells import as_float, as_int, as_timestamp
 from footballml.data import (
     ODDS_COLUMNS,
     PROCESSED_DIR,
@@ -134,6 +135,10 @@ _upcoming_lock = threading.Lock()
 
 #: Outcome probability columns, in H/D/A order.
 PROB_COLUMNS = ["prob_home_win", "prob_draw", "prob_away_win"]
+
+#: What a stored number is read back as: whichever of `int`/`float` the caller
+#: asked for, rather than the union of both.
+_NumT = TypeVar("_NumT", int, float)
 
 
 @dataclass
@@ -892,7 +897,11 @@ def reload_state() -> dict[str, object]:
         ) from exc
 
     logger.info("Reloaded on request: %s", loaded)
-    return {"reloaded": True, "model_version": state.metadata.version, **loaded}
+    # Through `_require_model` rather than `state.metadata` directly: the
+    # reload above published both halves or raised, and this is the one
+    # phrasing that says so instead of assuming it.
+    _, meta = _require_model()
+    return {"reloaded": True, "model_version": meta.version, **loaded}
 
 
 @app.get("/health", response_model=Health)
@@ -937,14 +946,14 @@ def against_the_run(
         AgainstTheRun(
             season=str(r.Season),
             league=str(r.League),
-            date=pd.Timestamp(r.Date).date(),
+            date=as_timestamp(r.Date).date(),
             home_team=str(r.HomeTeam),
             away_team=str(r.AwayTeam),
-            home_goals=int(r.FTHG),
-            away_goals=int(r.FTAG),
-            xg_home=round(float(r.xg_home), 2),
-            xg_away=round(float(r.xg_away), 2),
-            prob_actual=round(float(r.prob_actual), 4),
+            home_goals=as_int(r.FTHG),
+            away_goals=as_int(r.FTAG),
+            xg_home=round(as_float(r.xg_home), 2),
+            xg_away=round(as_float(r.xg_away), 2),
+            prob_actual=round(as_float(r.prob_actual), 4),
         )
         for r in rows.nsmallest(limit, "prob_actual").itertuples()
     ]
@@ -1346,7 +1355,11 @@ def _upcoming_european() -> pd.DataFrame:
     if schedule.empty:
         return pd.DataFrame()
 
-    kept, _ = big_five_only(schedule.assign(FTHG=pd.NA, FTAG=pd.NA, FTR=pd.NA), state.tmh)
+    # Named in one place and passed as a mapping: `big_five_only` wants the
+    # result columns present and empty, because a fixture has no result yet, and
+    # `pd.NA` is not something the stubs will let `assign` take as a keyword.
+    unplayed: dict[str, Any] = {"FTHG": pd.NA, "FTAG": pd.NA, "FTR": pd.NA}
+    kept, _ = big_five_only(schedule.assign(**unplayed), state.tmh)
     if kept.empty:
         return pd.DataFrame()
     return pd.DataFrame(
@@ -1461,7 +1474,7 @@ def _recent_from_store(known_through: pd.Timestamp, league: str | None) -> list[
         modal_home, modal_away = int(r["modal_score_home"]), int(r["modal_score_away"])
         entry = Prediction(
             league=str(r["League"]),
-            date=str(r["Date"].date()),
+            date=as_timestamp(r["Date"]).date(),
             home_team=str(r["HomeTeam"]),
             away_team=str(r["AwayTeam"]),
             competition=str(r.get("competition") or store.DOMESTIC),
@@ -1515,7 +1528,21 @@ def _recent_from_store(known_through: pd.Timestamp, league: str | None) -> list[
     return out
 
 
-def _stored_market(row: pd.Series) -> dict[str, float]:
+class _Market(TypedDict, total=False):
+    """The three keys `_stored_market` may contribute to a `Prediction`.
+
+    A plain `dict[str, float]` splatted with `**` has to be checkable against
+    every keyword the model still has open, which it is not. Spelling the keys
+    out makes the splat mean something; `total=False` is the "or nothing" the
+    function's docstring promises.
+    """
+
+    market_prob_home: float
+    market_prob_draw: float
+    market_prob_away: float
+
+
+def _stored_market(row: pd.Series) -> _Market:
     """The market's view of a stored prediction, de-vigged, or nothing.
 
     Discover's "where we disagreed with the bookmakers" filters on these, so a
@@ -1525,7 +1552,7 @@ def _stored_market(row: pd.Series) -> dict[str, float]:
     """
     cols = list(ODDS_COLUMNS)
     if any(pd.isna(row.get(c)) for c in cols):
-        return {}
+        return _Market()
     market = odds_implied_probs(pd.DataFrame([{c: float(row[c]) for c in cols}]), ODDS_COLUMNS)[0]
     return {
         "market_prob_home": round(float(market[0]), 4),
@@ -1728,7 +1755,9 @@ def accuracy(league: str | None = Query(None)) -> Accuracy:
     metrics = evaluate(actual, probs)
 
     result = Accuracy(
-        n=metrics["n"],
+        # `evaluate` returns one `dict[str, float]`, so the count comes back as a
+        # float and has to be asked for as a count again here.
+        n=int(metrics["n"]),
         accuracy=round(metrics["accuracy"], 4),
         rps=round(metrics["rps"], 4),
         log_loss=round(metrics["log_loss"], 4),
@@ -1738,10 +1767,7 @@ def accuracy(league: str | None = Query(None)) -> Accuracy:
         exact_score=_exact_score_rate(rows),
         by_league=_per_group(rows, rows["League"], PROB_COLUMNS, "actual_result"),
         by_competition=_by_competition(rows),
-        calibration=[
-            CalibrationBin(**row)
-            for row in calibration_table(actual, probs).drop(columns=["gap"]).to_dict("records")
-        ],
+        calibration=_calibration_bins(actual, probs),
     )
 
     result.rps_market = _market_rps(rows, "actual_result")
@@ -1836,9 +1862,20 @@ def _stat_percentiles(row: pd.Series) -> dict[str, float]:
 def _to_player(row: pd.Series, percentiles: dict[str, float] | None = None) -> PlayerRating:
     """Convert one rating row into an API response."""
 
-    def num(column: str, cast: type) -> int | float | None:
+    def num(column: str, cast: Callable[[Any], _NumT]) -> _NumT | None:
         value = row.get(column)
         return None if pd.isna(value) else cast(value)
+
+    # The sub-rating and per-90 fields are named from `_PLAYER_SUBS` and
+    # `_PLAYER_STATS` rather than written out, so nothing can line them up with
+    # the model's own fields; `Any` says that rather than implying a check.
+    computed: dict[str, Any] = {
+        **{f"sub_{name}": num(f"sub_{name}", int) for name in _PLAYER_SUBS},
+        **{
+            stat: num(stat, int if stat in {"goals", "assists"} else float)
+            for stat in _PLAYER_STATS
+        },
+    }
 
     return PlayerRating(
         player=str(row["Player"]),
@@ -1863,11 +1900,7 @@ def _to_player(row: pd.Series, percentiles: dict[str, float] | None = None) -> P
             if f"fifa_{name}" in row.index and pd.notna(row.get(f"fifa_{name}"))
         },
         stat_percentiles=percentiles or {},
-        **{f"sub_{name}": num(f"sub_{name}", int) for name in _PLAYER_SUBS},
-        **{
-            stat: num(stat, int if stat in {"goals", "assists"} else float)
-            for stat in _PLAYER_STATS
-        },
+        **computed,
     )
 
 
@@ -1917,8 +1950,8 @@ def _default_season(rows: pd.DataFrame) -> str:
     counts = rows.groupby("Season").size()
     if counts.empty:
         return ""
-    full = counts.max() * MIN_SEASON_SHARE
-    eligible = counts[counts >= full]
+    full = float(counts.max()) * MIN_SEASON_SHARE
+    eligible = counts[counts.astype(float) >= full]
     return str((eligible if not eligible.empty else counts).index.max())
 
 
@@ -2263,8 +2296,12 @@ def league_strength(
 
     out: list[LeagueStrength] = []
     for league, block in rows.groupby("League"):
-        strongest = block.loc[block["strength_overall"].idxmax()]
-        weakest = block.loc[block["strength_overall"].idxmin()]
+        # `.loc[idxmax()]` would read better, but `idxmax` answers a bare
+        # `Hashable` and `.loc` will not take one. A mask picks out the same row
+        # -- the first one at the extreme -- without the detour through a label.
+        strength = block["strength_overall"]
+        strongest = block[strength == strength.max()].iloc[0]
+        weakest = block[strength == strength.min()].iloc[0]
         out.append(
             LeagueStrength(
                 league=str(league),
@@ -2570,7 +2607,10 @@ def _match_xg_lookup(tmh: pd.DataFrame) -> dict[tuple, tuple[float, float]]:
     home = tmh[tmh["Venue"].astype(str).str.lower() == "home"]
     home = home.dropna(subset=["xGFor", "xGAgainst"])
     return {
-        (pd.Timestamp(r.Date).date(), r.Team, r.Opponent): (float(r.xGFor), float(r.xGAgainst))
+        (as_timestamp(r.Date).date(), r.Team, r.Opponent): (
+            as_float(r.xGFor),
+            as_float(r.xGAgainst),
+        )
         for r in home.itertuples()
     }
 
@@ -2733,6 +2773,20 @@ def _market_rps(rows: pd.DataFrame, actual_col: str) -> float | None:
     return round(evaluate(priced[actual_col], market)["rps"], 4)
 
 
+def _calibration_bins(actual: pd.Series, probs: np.ndarray) -> list[CalibrationBin]:
+    """Predicted against observed frequency, one row per bin.
+
+    The column names are rebuilt as `str` on the way in: `to_dict("records")`
+    hands back `Hashable` keys, which is all a DataFrame promises, and a model
+    cannot be constructed from keywords of that shape.
+    """
+    table = calibration_table(actual, probs).drop(columns=["gap"])
+    return [
+        CalibrationBin(**{str(name): value for name, value in row.items()})
+        for row in table.to_dict("records")
+    ]
+
+
 def _per_group(
     rows: pd.DataFrame, by: pd.Series, prob_cols: list[str], actual_col: str
 ) -> dict[str, CompetitionAccuracy]:
@@ -2742,7 +2796,7 @@ def _per_group(
         actual = block[actual_col]
         metrics = evaluate(actual, block[prob_cols].to_numpy())
         out[str(name)] = CompetitionAccuracy(
-            n=metrics["n"],
+            n=int(metrics["n"]),
             accuracy=round(metrics["accuracy"], 4),
             rps=round(metrics["rps"], 4),
             rps_base_rate=round(evaluate(actual, base_rate_probs(actual, len(block)))["rps"], 4),
@@ -2769,7 +2823,7 @@ def _summarise(rows: pd.DataFrame, prob_cols: list[str], actual_col: str) -> Acc
             accuracy_market = round(float((favourite == sub[actual_col]).mean()), 4)
 
     return Accuracy(
-        n=metrics["n"],
+        n=int(metrics["n"]),
         accuracy=round(metrics["accuracy"], 4),
         rps=round(metrics["rps"], 4),
         log_loss=round(metrics["log_loss"], 4),
@@ -2784,10 +2838,7 @@ def _summarise(rows: pd.DataFrame, prob_cols: list[str], actual_col: str) -> Acc
         rps_market=_market_rps(rows, actual_col),
         exact_score=_exact_score_rate(rows),
         by_league=_per_group(rows, rows["League"], prob_cols, actual_col),
-        calibration=[
-            CalibrationBin(**row)
-            for row in calibration_table(actual, probs).drop(columns=["gap"]).to_dict("records")
-        ],
+        calibration=_calibration_bins(actual, probs),
     )
 
 

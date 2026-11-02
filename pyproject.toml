@@ -8,7 +8,13 @@ version = "0.1.0"
 description = "Football match prediction, player ratings, and accuracy tracking"
 requires-python = ">=3.11"
 dependencies = [
-    "pandas>=2.2",
+    # 3.0, not 2.2: `groupby.apply` drops the group keys by default from 3.0,
+    # which is the behaviour the three call sites in `features.rolling`,
+    # `players.fifa` and `players.team_strength` depend on. Under 2.2 they had
+    # to ask for it with `include_groups=False`, a keyword pandas-stubs does not
+    # model, so `mypy src` could not check any of those calls. The project is
+    # only ever run and tested against 3.x, so the floor now says so.
+    "pandas>=3.0",
     "numpy>=1.26",
     "scipy>=1.12",
     "scikit-learn>=1.4",

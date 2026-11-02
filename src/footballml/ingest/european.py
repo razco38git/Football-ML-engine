@@ -320,7 +320,10 @@ def big_five_only(matches: pd.DataFrame, tmh: pd.DataFrame) -> tuple[pd.DataFram
     out = matches.copy()
     out["Season"] = out["Season"].astype(str)
     for side, column in (("HomeTeam", "home_league"), ("AwayTeam", "away_league")):
-        out[column] = pd.MultiIndex.from_arrays([out["Season"], out[side]]).map(lookup)
+        # `.map` is handed a plain dict rather than the Series: the lookup is
+        # keyed by `(Season, Team)` tuples either way, and `Index.map` accepts a
+        # Mapping in the stubs but not a Series.
+        out[column] = pd.MultiIndex.from_arrays([out["Season"], out[side]]).map(lookup.to_dict())
 
     keep = out["home_league"].notna() & out["away_league"].notna()
     dropped = out[~keep].copy()

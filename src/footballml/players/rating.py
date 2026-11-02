@@ -288,9 +288,16 @@ def _weighted(
     # function already states for columns; a row deserves the same reading.
     # Where nothing is missing -- the overwhelming majority -- the arithmetic is
     # unchanged, because `present` equals `total`.
-    present = sum(frame[c].notna().astype(float) * abs(w) for c, w in usable.items())
+    # Started from a zero Series rather than the implicit integer 0: `usable` is
+    # non-empty by the guard above, so the sums are Series either way, but the
+    # explicit start is what makes that true of the *type* as well.
+    nothing = pd.Series(0.0, index=frame.index)
+    present = sum(
+        (frame[c].notna().astype(float) * abs(w) for c, w in usable.items()), start=nothing
+    )
     stacked = sum(
-        (frame[c] if w > 0 else 1.0 - frame[c]).fillna(0.0) * abs(w) for c, w in usable.items()
+        ((frame[c] if w > 0 else 1.0 - frame[c]).fillna(0.0) * abs(w) for c, w in usable.items()),
+        start=nothing,
     )
     measured_share = present / total
     return (stacked / present.replace(0.0, np.nan)).where(
@@ -373,8 +380,8 @@ def rate_players(players: pd.DataFrame, config: dict[str, Any] | None = None) ->
     df["unrated_reason"] = pd.Series([None] * len(df), dtype="object")
 
     df.loc[df["role"].isna(), "unrated_reason"] = "No position recorded"
-    for group, reason in UNRATED_GROUPS.items():
-        df.loc[df["role"] == group, "unrated_reason"] = reason
+    for unrated_role, reason in UNRATED_GROUPS.items():
+        df.loc[df["role"] == unrated_role, "unrated_reason"] = reason
     df.loc[(df["minutes"] < min_minutes) & df["unrated_reason"].isna(), "unrated_reason"] = (
         f"Under {min_minutes} minutes played"
     )
@@ -498,12 +505,12 @@ def rate_players(players: pd.DataFrame, config: dict[str, Any] | None = None) ->
                 # whole role-season over a 3% term. Cards are served for every
                 # season in this dataset, so this has never fired; it is the
                 # kind of thing that fires the first time a source changes.
-                composite = np.where(
+                blended = np.where(
                     score.notna(),
                     composite * (1 - weight) + score * weight,
                     composite,
                 )
-                composite = pd.Series(composite, index=block.index)
+                composite = pd.Series(blended, index=block.index)
 
         composites.loc[block.index] = composite.astype(float)
 
@@ -751,7 +758,7 @@ def _blend_with_fifa(work: pd.DataFrame, config: dict[str, Any]) -> pd.Series:
         # it by the measured share says it takes proportionally more evidence
         # to be trusted when less of the role was measured: unchanged at 1.0,
         # and 4 nineties becomes 10.5 for a 2014/15 centre back.
-        nineties = k
+        nineties: float | pd.Series = k
         if share is not None:
             nineties = k / share.astype(float).fillna(0.0).clip(lower=0.1)
         shrunk = shrink_toward_mean(work, "performance_rating", [group, "Season"], nineties)
