@@ -270,7 +270,7 @@ export default function TeamStrength() {
           <strong style={{ color: 'var(--foreground)' }}>PRE</strong> is the pre-season squad EA
           listed in September, each player carrying last season&rsquo;s rating — so it exists from
           matchweek one, misses every January transfer, and is measurably the weaker of the two
-          wherever both exist (it predicts next season&rsquo;s points at 0.72 against 0.77). We
+          wherever both exist (it predicts next season&rsquo;s points at 0.70 against 0.76). We
           measured why: swapping to EA&rsquo;s squad list costs almost nothing, and the whole gap
           is last season&rsquo;s ratings being last season&rsquo;s.
         </p>
