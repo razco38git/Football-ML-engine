@@ -70,6 +70,16 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--understat-from-cache",
+        action="store_true",
+        help=(
+            "Read Understat from soccerdata's stored payload rather than "
+            "fetching the season in progress. For rebuilding when understat.com "
+            "is unreachable: the ratings are then as of the last successful "
+            "fetch, so do not use it to pick up new matches."
+        ),
+    )
+    parser.add_argument(
         "--clear-cache",
         action="store_true",
         help="Delete every cached season before running.",
@@ -97,7 +107,12 @@ def main() -> None:
     if args.clear_cache:
         log.info("Cleared %d cached season(s)", cache.clear())
 
-    players = fetch_player_seasons(args.leagues, seasons, use_cache=not args.no_cache)
+    players = fetch_player_seasons(
+        args.leagues,
+        seasons,
+        use_cache=not args.no_cache,
+        understat_from_cache=args.understat_from_cache,
+    )
     log.info("Fetched %d player-seasons", len(players))
 
     rated = rate_players(players)

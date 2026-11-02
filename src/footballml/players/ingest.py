@@ -229,6 +229,7 @@ def fetch_player_seasons(
     with_fbref: bool = True,
     with_fifa: bool = True,
     use_cache: bool = True,
+    understat_from_cache: bool = False,
 ) -> pd.DataFrame:
     """Fetch per-season player totals and derive per-90 rates.
 
@@ -245,6 +246,22 @@ def fetch_player_seasons(
             :mod:`footballml.players.cache` says at length why nothing further
             can be -- three of the corrections here deliberately compare a
             player's seasons against each other.
+        understat_from_cache: Read the season in progress from soccerdata's
+            stored Understat payload instead of fetching it. soccerdata never
+            serves the current season from cache by default, which is right --
+            it changes daily -- so this is off unless asked for.
+
+            It exists because that default makes Understat a hard dependency of
+            every rebuild, including rebuilds that have nothing to do with new
+            matches. On 2026-11-02 understat.com's authoritative nameservers
+            went unreachable (Cloudflare: ``EDE(22) No Reachable Authority at
+            delegation``), and a correct, merged, already-tested ingest fix
+            could not be published for want of data we already had on disk.
+
+            The cost is explicit: player stats are then as of the last
+            successful fetch, so a rebuild on this path must not be presented
+            as including matches played since. It does not touch FBref or the
+            EA editions, which are read normally.
 
     Returns:
         One row per player per team per season, with raw totals, ``*_per90``
@@ -256,7 +273,12 @@ def fetch_player_seasons(
     seasons = seasons or season_labels()
 
     reader = sd.Understat(leagues=[UNDERSTAT_LEAGUES[c] for c in codes], seasons=seasons)
-    raw = reader.read_player_season_stats().reset_index()
+    if understat_from_cache:
+        logger.warning(
+            "Reading Understat from soccerdata's stored payload: the season in "
+            "progress is as of its last successful fetch, not as of now."
+        )
+    raw = reader.read_player_season_stats(force_cache=understat_from_cache).reset_index()
     logger.info("Fetched %d player-seasons", len(raw))
 
     inverse = {v: k for k, v in UNDERSTAT_LEAGUES.items()}
