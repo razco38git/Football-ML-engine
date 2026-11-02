@@ -101,18 +101,31 @@ KEEPER_COLUMNS = {
 #: But ``Đ``, ``ł`` and ``ø`` are distinct letters, not decorated ones, so they
 #: survive decomposition and never match their plain spellings. That is why
 #: ``"Đorđe Petrović"`` failed to match ``"Djordje Petrovic"``.
-TRANSLITERATIONS = str.maketrans({
-    "Đ": "D", "đ": "d", "Ð": "D", "ð": "d",
-    "Ł": "L", "ł": "l",
-    "Ø": "O", "ø": "o",
-    "Æ": "AE", "æ": "ae",
-    "Œ": "OE", "œ": "oe",
-    "ß": "ss",
-    "Þ": "Th", "þ": "th",
-    "Ħ": "H", "ħ": "h",
-    "Ŀ": "L", "ŀ": "l",
-    "ı": "i", "İ": "I",
-})
+TRANSLITERATIONS = str.maketrans(
+    {
+        "Đ": "D",
+        "đ": "d",
+        "Ð": "D",
+        "ð": "d",
+        "Ł": "L",
+        "ł": "l",
+        "Ø": "O",
+        "ø": "o",
+        "Æ": "AE",
+        "æ": "ae",
+        "Œ": "OE",
+        "œ": "oe",
+        "ß": "ss",
+        "Þ": "Th",
+        "þ": "th",
+        "Ħ": "H",
+        "ħ": "h",
+        "Ŀ": "L",
+        "ŀ": "l",
+        "ı": "i",
+        "İ": "I",
+    }
+)
 
 
 def normalise_name(name: str) -> str:
@@ -223,15 +236,9 @@ def match_players(
     # metric names are dropped too -- `Int` and `TklW` appear in both the misc
     # and defense tables with identical values, so first source wins.
     extra = [
-        c
-        for c in right.columns
-        if c not in {*on, "Player", "_norm"} and c not in left.columns
+        c for c in right.columns if c not in {*on, "Player", "_norm"} and c not in left.columns
     ]
-    dropped = [
-        c
-        for c in right.columns
-        if c not in {*on, "Player", "_norm"} and c in left.columns
-    ]
+    dropped = [c for c in right.columns if c not in {*on, "Player", "_norm"} and c in left.columns]
     if dropped:
         logger.debug("Already present, not re-merged: %s", dropped)
 
@@ -243,7 +250,7 @@ def match_players(
     # needs this to tell "the only Gabriel left" from "a Gabriel".
     taken: dict[tuple, set[str]] = {}
     matched_exactly = merged[extra[0]].notna()
-    for keys in ([on] + ([fallback_on] if fallback_on else [])):
+    for keys in [on] + ([fallback_on] if fallback_on else []):
         for idx in merged.index[matched_exactly]:
             group = tuple(merged.at[idx, c] for c in keys)
             taken.setdefault(group, set()).add(str(merged.at[idx, "_norm"]))
@@ -253,7 +260,7 @@ def match_players(
 
     logger.info("Name match, exact within %s: %.0f%%", "+".join(on), _rate() * 100)
 
-    for keys in ([on] + ([fallback_on] if fallback_on else [])):
+    for keys in [on] + ([fallback_on] if fallback_on else []):
         unmatched = merged[extra[0]].isna()
         if not unmatched.any():
             break
@@ -282,7 +289,8 @@ def match_players(
         if ambiguous:
             logger.info(
                 "Ambiguous on %s: %d name keys matched more than one player, left unmatched",
-                "+".join(keys), len(ambiguous),
+                "+".join(keys),
+                len(ambiguous),
             )
 
         for idx in merged.index[unmatched]:
@@ -317,7 +325,7 @@ def match_players(
     # what resolves Gabriel: "gabriel" alone cannot tell Magalhães from Jesus,
     # but Jesus matched exactly on the first pass, so only one Gabriel is left
     # to take.
-    for keys in ([on] + ([fallback_on] if fallback_on else [])):
+    for keys in [on] + ([fallback_on] if fallback_on else []):
         unmatched = merged[extra[0]].isna()
         if not unmatched.any():
             break
@@ -342,9 +350,7 @@ def match_players(
                     merged.at[idx, col] = hit[col]
                 taken.setdefault(group, set()).add(str(hit["_norm"]))
 
-        logger.info(
-            "After containment pass on %s: %.0f%%", "+".join(keys), _rate() * 100
-        )
+        logger.info("After containment pass on %s: %.0f%%", "+".join(keys), _rate() * 100)
 
     return merged.drop(columns=["_norm"], errors="ignore")
 
@@ -427,7 +433,8 @@ def fetch_fbref_stats(
                 continue
 
             reader = (
-                fb if season is None
+                fb
+                if season is None
                 else sd.FBref(leagues=names, seasons=season, headless=headless())
             )
             try:
@@ -469,13 +476,16 @@ def fetch_fbref_stats(
         frames.append(combined)
         logger.info(
             "FBref %s: %d rows across %d season(s)",
-            stat_type, len(combined), combined["Season"].nunique(),
+            stat_type,
+            len(combined),
+            combined["Season"].nunique(),
         )
 
     if cached_seasons:
         logger.info(
             "FBref: %d block(s) served from cache, covering season(s) %s",
-            len(cached_seasons), ", ".join(sorted(set(cached_seasons))),
+            len(cached_seasons),
+            ", ".join(sorted(set(cached_seasons))),
         )
 
     misc, keeper = frames

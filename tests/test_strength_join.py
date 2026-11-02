@@ -23,10 +23,24 @@ from footballml.features.build import add_team_strength
 def _strength() -> pd.DataFrame:
     return pd.DataFrame(
         [
-            {"League": "E0", "Season": "2526", "Team": "Man City", "strength_overall": 80.9,
-             "strength_attack": 83.7, "strength_defence": 77.3, "strength_goalkeeper": 88.0},
-            {"League": "SP1", "Season": "2526", "Team": "Real Madrid", "strength_overall": 81.6,
-             "strength_attack": 83.8, "strength_defence": 79.4, "strength_goalkeeper": 84.0},
+            {
+                "League": "E0",
+                "Season": "2526",
+                "Team": "Man City",
+                "strength_overall": 80.9,
+                "strength_attack": 83.7,
+                "strength_defence": 77.3,
+                "strength_goalkeeper": 88.0,
+            },
+            {
+                "League": "SP1",
+                "Season": "2526",
+                "Team": "Real Madrid",
+                "strength_overall": 81.6,
+                "strength_attack": 83.8,
+                "strength_defence": 79.4,
+                "strength_goalkeeper": 84.0,
+            },
         ]
     )
 

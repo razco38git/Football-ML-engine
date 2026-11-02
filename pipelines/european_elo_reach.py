@@ -219,8 +219,10 @@ def main() -> int:
     domestic_long = load_team_match_history(TMH)
     kept_long = european_long(kept, None)
     dropped_long = european_long(None, dropped)
-    print(f"long rows: {len(domestic_long)} domestic, {len(kept_long)} kept, "
-          f"{len(dropped_long)} dropped")
+    print(
+        f"long rows: {len(domestic_long)} domestic, {len(kept_long)} kept, "
+        f"{len(dropped_long)} dropped"
+    )
 
     # Two walks. `production` learns from exactly what `add_elo(extra=...)` is
     # given today; `extended` also learns from the ties the model cannot
@@ -257,15 +259,17 @@ def main() -> int:
     for name, euro, dom in (("production", euro_p, dom_p), ("extended", euro_e, dom_e)):
         both = scored.merge(
             euro[["Date", "HomeTeam", "AwayTeam", "elo_diff"]],
-            on=["Date", "HomeTeam", "AwayTeam"], how="inner",
+            on=["Date", "HomeTeam", "AwayTeam"],
+            how="inner",
         ).dropna(subset=["prob_home_win", "prob_draw", "prob_away_win", "elo_diff"])
         probs, rows = walk_forward_probs(dom, both)
         arms[name] = (rows, probs)
 
     # The arms must score the same fixtures or the comparison is meaningless --
     # asserted rather than trusted, as `align` in ablation_ladder puts it.
-    keys = [set(zip(r["Date"], r["HomeTeam"], r["AwayTeam"], strict=True))
-            for r, _ in arms.values()]
+    keys = [
+        set(zip(r["Date"], r["HomeTeam"], r["AwayTeam"], strict=True)) for r, _ in arms.values()
+    ]
     shared = set.intersection(*keys)
     print(f"  ties scored by both arms: {len(shared)}")
     assert len(shared) == len(arms["production"][0]) == len(arms["extended"][0]), (
@@ -284,17 +288,13 @@ def main() -> int:
     # believing a difference here is correspondingly higher.
     pr, pp = arms["production"]
     er, ep = arms["extended"]
-    boot = paired_bootstrap(
-        rps_per_match(pr["result"], pp), rps_per_match(er["result"], ep)
-    )
+    boot = paired_bootstrap(rps_per_match(pr["result"], pp), rps_per_match(er["result"], ep))
     print(
         f"  extended vs production: {boot['delta']:+.5f} "
         f"[{boot['lo']:+.5f}, {boot['hi']:+.5f}] "
         f"{'significant' if boot['excludes_zero'] else 'not significant'}"
     )
-    vs_full = paired_bootstrap(
-        rps_per_match(rows["result"], full), rps_per_match(er["result"], ep)
-    )
+    vs_full = paired_bootstrap(rps_per_match(rows["result"], full), rps_per_match(er["result"], ep))
     print(
         f"  extended vs full model: {vs_full['delta']:+.5f} "
         f"[{vs_full['lo']:+.5f}, {vs_full['hi']:+.5f}] "
@@ -306,9 +306,7 @@ def main() -> int:
     # within a season share a calibration. So require the season record too.
     print()
     print("  by season (negative = the extended walk is better):")
-    per = pr.assign(
-        d=rps_per_match(er["result"], ep) - rps_per_match(pr["result"], pp)
-    )
+    per = pr.assign(d=rps_per_match(er["result"], ep) - rps_per_match(pr["result"], pp))
     wins = 0
     seasons = 0
     for season, block in per.groupby(per["Season"].astype(str), sort=True):
@@ -321,22 +319,19 @@ def main() -> int:
 
     if ADJUSTMENT.exists():
         h = json.loads(ADJUSTMENT.read_text(encoding="utf-8")).get("holdout", {})
-        print(f"  (shipped cross-league holdout: corrected {h.get('rps_corrected')}, "
-              f"n={h.get('n')})")
+        print(
+            f"  (shipped cross-league holdout: corrected {h.get('rps_corrected')}, n={h.get('n')})"
+        )
 
     print("\n=== 3. The ties production cannot score at all ===")
-    unrateable = euro_e[
-        ~(euro_e["HomeTeam"].isin(big_five) & euro_e["AwayTeam"].isin(big_five))
-    ]
+    unrateable = euro_e[~(euro_e["HomeTeam"].isin(big_five) & euro_e["AwayTeam"].isin(big_five))]
     probs, rows = walk_forward_probs(dom_e, unrateable)
     print(f"  ties with an unrateable club: {len(unrateable)}, scored {len(rows)}")
     print("  production cannot score these: the clubs never enter its walk.")
     if len(rows):
         print(f"  Elo only, extended  RPS {_rps(rows, probs):.5f}")
         print(f"  base rate           RPS {_rps(rows, _base_rate(rows, rows)):.5f}")
-        neither = rows[
-            ~(rows["HomeTeam"].isin(big_five) | rows["AwayTeam"].isin(big_five))
-        ]
+        neither = rows[~(rows["HomeTeam"].isin(big_five) | rows["AwayTeam"].isin(big_five))]
         if len(neither):
             idx = rows.index.get_indexer(neither.index)
             print(f"  of which neither side is rateable: {len(neither)}")

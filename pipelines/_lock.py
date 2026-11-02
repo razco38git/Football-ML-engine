@@ -90,7 +90,7 @@ def _recorded(text: str) -> tuple[int | None, float | None]:
                 pid = int(field[4:])
         elif field.startswith("since="):
             with contextlib.suppress(ValueError):
-                stamp = datetime.fromisoformat(field[len("since="):])
+                stamp = datetime.fromisoformat(field[len("since=") :])
                 if stamp.tzinfo is not None:
                     since = stamp.timestamp()
     return pid, since
@@ -113,10 +113,10 @@ def _windows_process(pid: int) -> tuple[bool | None, float | None]:
     if not handle:
         err = ctypes.get_last_error()
         if err == _ERROR_INVALID_PARAMETER:
-            return False, None          # no process has this id
+            return False, None  # no process has this id
         if err == _ERROR_ACCESS_DENIED:
-            return True, None           # it exists; we may not query it
-        return None, None               # indeterminate: assume nothing
+            return True, None  # it exists; we may not query it
+        return None, None  # indeterminate: assume nothing
     try:
         code = wintypes.DWORD()
         if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
@@ -126,8 +126,10 @@ def _windows_process(pid: int) -> tuple[bool | None, float | None]:
         creation, exited, kern, user = (wintypes.FILETIME() for _ in range(4))
         if not kernel32.GetProcessTimes(
             handle,
-            ctypes.byref(creation), ctypes.byref(exited),
-            ctypes.byref(kern), ctypes.byref(user),
+            ctypes.byref(creation),
+            ctypes.byref(exited),
+            ctypes.byref(kern),
+            ctypes.byref(user),
         ):
             return True, None
         ticks = (creation.dwHighDateTime << 32) | creation.dwLowDateTime
@@ -151,10 +153,10 @@ def _process(pid: int | None) -> tuple[bool | None, float | None]:
     except ProcessLookupError:
         return False, None
     except PermissionError:
-        return True, None               # exists, owned by another user
+        return True, None  # exists, owned by another user
     except OSError:  # pragma: no cover - platform-specific
         return None, None
-    return True, None                   # POSIX: liveness without identity
+    return True, None  # POSIX: liveness without identity
 
 
 def _is_stale(path: Path) -> bool:
@@ -190,18 +192,16 @@ def _is_stale(path: Path) -> bool:
         logger.warning(
             "Cannot determine whether %s is still running; keeping the lock. "
             "Delete %s by hand if that run is known to be gone.",
-            _describe(path), path,
+            _describe(path),
+            path,
         )
         return False
-    if (
-        created is not None
-        and since is not None
-        and created > since + _IDENTITY_TOLERANCE_SECONDS
-    ):
+    if created is not None and since is not None and created > since + _IDENTITY_TOLERANCE_SECONDS:
         logger.warning(
             "The refresh lock names pid %d, but that pid started after the "
             "lock was taken, so it is a different process. Treating the lock "
-            "as abandoned.", pid,
+            "as abandoned.",
+            pid,
         )
         return True
 
@@ -216,7 +216,10 @@ def _is_stale(path: Path) -> bool:
             "past any run on record (the longest is 5h 56m, 2026-10-19). The "
             "owner is still alive, so it is being left alone. If that process "
             "is wedged, stop pid %d and delete %s.",
-            _describe(LOCK_PATH), age / 3600.0, pid, path,
+            _describe(LOCK_PATH),
+            age / 3600.0,
+            pid,
+            path,
         )
     return False
 

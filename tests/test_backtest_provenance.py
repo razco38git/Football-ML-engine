@@ -25,11 +25,15 @@ api = importlib.import_module("footballml.api.app")
 
 
 def _preds() -> pd.DataFrame:
-    return pd.DataFrame({
-        "Season": [1516, 1516, 1617], "FTR": ["H", "D", "A"],
-        "prob_H": [0.5, 0.3, 0.2], "prob_D": [0.3, 0.4, 0.3],
-        "prob_A": [0.2, 0.3, 0.5],
-    })
+    return pd.DataFrame(
+        {
+            "Season": [1516, 1516, 1617],
+            "FTR": ["H", "D", "A"],
+            "prob_H": [0.5, 0.3, 0.2],
+            "prob_D": [0.3, 0.4, 0.3],
+            "prob_A": [0.2, 0.3, 0.5],
+        }
+    )
 
 
 def test_the_backtest_never_loads_the_deployed_model() -> None:

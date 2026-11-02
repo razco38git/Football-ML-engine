@@ -37,11 +37,16 @@ TMH = pd.DataFrame(
 
 def _match(home: str, away: str, hg: int, ag: int, season: str = "2425") -> dict:
     return {
-        "League": "UCL", "Season": season, "Date": pd.Timestamp("2025-02-11"),
-        "HomeTeam": home, "AwayTeam": away,
-        "FTHG": hg, "FTAG": ag,
+        "League": "UCL",
+        "Season": season,
+        "Date": pd.Timestamp("2025-02-11"),
+        "HomeTeam": home,
+        "AwayTeam": away,
+        "FTHG": hg,
+        "FTAG": ag,
         "FTR": "H" if hg > ag else "A" if ag > hg else "D",
-        "home_league": pd.NA, "away_league": pd.NA,
+        "home_league": pd.NA,
+        "away_league": pd.NA,
     }
 
 
@@ -129,8 +134,10 @@ def _synthetic(gap: float, n: int = 400, seed: int = 3) -> pd.DataFrame:
         ag = hg - gd
         rows.append(
             {
-                "home_league": home_league, "away_league": away_league,
-                "FTHG": hg, "FTAG": max(ag, 0),
+                "home_league": home_league,
+                "away_league": away_league,
+                "FTHG": hg,
+                "FTAG": max(ag, 0),
                 "FTR": "H" if hg > ag else "A" if ag > hg else "D",
             }
         )
@@ -236,8 +243,8 @@ def test_a_supplemented_name_survives_the_big_five_filter() -> None:
 @pytest.mark.parametrize(
     ("name", "expected"),
     [
-        ("Group stage", "round_robin"),      # up to 2023/24
-        ("League phase", "round_robin"),     # the 2024/25 format change
+        ("Group stage", "round_robin"),  # up to 2023/24
+        ("League phase", "round_robin"),  # the 2024/25 format change
         ("Round of 32", "two_legged"),
         ("Round of 16", "two_legged"),
         ("Quarter-finals", "two_legged"),

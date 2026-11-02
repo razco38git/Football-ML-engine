@@ -137,12 +137,8 @@ STEPS: tuple[Step, ...] = (
     # mean a week of fresh domestic data sitting on disk while the site served
     # the old model -- a worse failure than the staleness this job prevents.
     Step("fetch_european", (), "pull any new UEFA results", required=False),
-    Step(
-        "validate_european", (), "score European ties with the new model", required=False
-    ),
-    Step(
-        "fit_league_adjustment", (), "refit the cross-league correction", required=False
-    ),
+    Step("validate_european", (), "score European ties with the new model", required=False),
+    Step("fit_league_adjustment", (), "refit the cross-league correction", required=False),
 )
 
 #: Not a pipeline module -- handled in-process, see `reload_api`.
@@ -292,7 +288,9 @@ def reload_api(url: str = API_URL, timeout: float = 120.0) -> bool:
         # prevent.
         body = exc.read().decode("utf-8", errors="replace")[:400]
         logger.error(
-            "    API refused the reload (HTTP %d): %s", exc.code, body,
+            "    API refused the reload (HTTP %d): %s",
+            exc.code,
+            body,
         )
         logger.error(
             "    The site is still serving the previous model. Restart the API "
@@ -313,11 +311,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     names = [step.name for step in STEPS] + [RELOAD]
     parser.add_argument(
-        "--only", choices=names, action="append",
+        "--only",
+        choices=names,
+        action="append",
         help="Run just this step. Repeatable. Useful for rerunning one failure.",
     )
     parser.add_argument(
-        "--skip", choices=names, action="append", default=[],
+        "--skip",
+        choices=names,
+        action="append",
+        default=[],
         help="Skip this step. Repeatable.",
     )
     parser.add_argument("--api-url", default=API_URL)
@@ -345,7 +348,8 @@ def main() -> int:
                 "Not starting: two runs rewriting data/processed at once can "
                 "leave a half-written table that every later stage reads as "
                 "real. Investigate that run, then rerun this one.",
-                LOCK_WAIT_SECONDS / 60, holder() or "unknown",
+                LOCK_WAIT_SECONDS / 60,
+                holder() or "unknown",
             )
             return 1
         return _run(args, wanted, log_path, started)
@@ -356,9 +360,7 @@ def main() -> int:
 LOCK_WAIT_SECONDS = 600.0
 
 
-def _run(
-    args: argparse.Namespace, wanted: set[str], log_path: Path, started: float
-) -> int:
+def _run(args: argparse.Namespace, wanted: set[str], log_path: Path, started: float) -> int:
     ran: list[str] = []
     failed_optional: list[str] = []
 
@@ -374,14 +376,18 @@ def _run(
                     "%s failed (exit %d). Stopping: a partial refresh looks like a "
                     "complete one, and the site would serve a mix of old and new. "
                     "Fix it, then rerun just this step with --only %s",
-                    step.name, exc.returncode, step.name,
+                    step.name,
+                    exc.returncode,
+                    step.name,
                 )
                 return 1
             logger.error(
                 "%s failed (exit %d). Continuing: it is optional, and stopping "
                 "here would leave freshly built data unpublished. Rerun it with "
                 "--only %s once the cause is fixed.",
-                step.name, exc.returncode, step.name,
+                step.name,
+                exc.returncode,
+                step.name,
             )
             failed_optional.append(step.name)
             continue
@@ -398,7 +404,8 @@ def _run(
         ran.append(RELOAD)
 
     logger.info(
-        "Weekly refresh finished in %s (%s)", _duration(time.monotonic() - started),
+        "Weekly refresh finished in %s (%s)",
+        _duration(time.monotonic() - started),
         ", ".join(ran) or "nothing to do",
     )
     if failed_optional:
@@ -407,7 +414,8 @@ def _run(
         # nobody will ever look at again.
         logger.error(
             "Finished, but %d optional step(s) failed: %s",
-            len(failed_optional), ", ".join(failed_optional),
+            len(failed_optional),
+            ", ".join(failed_optional),
         )
         return 1
     return 0

@@ -28,16 +28,30 @@ def _long(*matches: tuple[str, str, str, int, int], league: str = "E0", season: 
     """Long team-match rows from (date, home, away, hg, ag) tuples."""
     rows = []
     for date, home, away, hg, ag in matches:
-        rows.append({
-            "League": league, "Season": season, "Date": pd.Timestamp(date),
-            "Team": home, "Opponent": away, "Venue": "Home",
-            "GoalsFor": hg, "GoalsAgainst": ag,
-        })
-        rows.append({
-            "League": league, "Season": season, "Date": pd.Timestamp(date),
-            "Team": away, "Opponent": home, "Venue": "Away",
-            "GoalsFor": ag, "GoalsAgainst": hg,
-        })
+        rows.append(
+            {
+                "League": league,
+                "Season": season,
+                "Date": pd.Timestamp(date),
+                "Team": home,
+                "Opponent": away,
+                "Venue": "Home",
+                "GoalsFor": hg,
+                "GoalsAgainst": ag,
+            }
+        )
+        rows.append(
+            {
+                "League": league,
+                "Season": season,
+                "Date": pd.Timestamp(date),
+                "Team": away,
+                "Opponent": home,
+                "Venue": "Away",
+                "GoalsFor": ag,
+                "GoalsAgainst": hg,
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -79,8 +93,9 @@ def test_an_extra_match_moves_the_rating_of_a_later_one() -> None:
 def test_no_extra_matches_reproduces_the_old_behaviour_exactly() -> None:
     """The change must be invisible when there is no European data -- which is
     the state of any checkout that has not run `pipelines.fetch_european`."""
-    tmh = _long(("2025-01-01", "Arsenal", "Chelsea", 1, 0),
-                ("2025-01-08", "Chelsea", "Arsenal", 2, 2))
+    tmh = _long(
+        ("2025-01-01", "Arsenal", "Chelsea", 1, 0), ("2025-01-08", "Chelsea", "Arsenal", 2, 2)
+    )
     pd.testing.assert_frame_equal(add_elo(tmh), add_elo(tmh, extra=None))
     pd.testing.assert_frame_equal(add_elo(tmh), add_elo(tmh, extra=pd.DataFrame()))
 
@@ -99,10 +114,14 @@ def test_an_extra_match_after_the_fixture_cannot_reach_it() -> None:
 
 
 def test_truncating_the_extra_matches_leaves_earlier_ratings_untouched() -> None:
-    tmh = _long(("2025-01-01", "Arsenal", "Chelsea", 1, 0),
-                ("2025-03-01", "Arsenal", "Chelsea", 1, 0))
-    extra = _long(("2024-12-01", "Arsenal", "Real Madrid", 3, 0),
-                  ("2025-02-01", "Arsenal", "Inter", 2, 0), league="UCL")
+    tmh = _long(
+        ("2025-01-01", "Arsenal", "Chelsea", 1, 0), ("2025-03-01", "Arsenal", "Chelsea", 1, 0)
+    )
+    extra = _long(
+        ("2024-12-01", "Arsenal", "Real Madrid", 3, 0),
+        ("2025-02-01", "Arsenal", "Inter", 2, 0),
+        league="UCL",
+    )
 
     full = add_elo(tmh, extra=extra)
     trimmed = add_elo(tmh, extra=extra[extra["Date"] < pd.Timestamp("2025-01-01")])
@@ -136,11 +155,18 @@ def test_a_final_grants_no_home_advantage() -> None:
 
 def test_european_elo_rows_emits_two_mirrored_rows_per_match() -> None:
     matches = pd.DataFrame(
-        [{
-            "League": "UCL", "Season": "2425", "Date": pd.Timestamp("2025-02-19"),
-            "HomeTeam": "Arsenal", "AwayTeam": "Real Madrid",
-            "FTHG": 2, "FTAG": 1, "Round": "Round of 16",
-        }]
+        [
+            {
+                "League": "UCL",
+                "Season": "2425",
+                "Date": pd.Timestamp("2025-02-19"),
+                "HomeTeam": "Arsenal",
+                "AwayTeam": "Real Madrid",
+                "FTHG": 2,
+                "FTAG": 1,
+                "Round": "Round of 16",
+            }
+        ]
     )
     rows = european_elo_rows(matches)
     assert len(rows) == 2
@@ -154,12 +180,26 @@ def test_european_elo_rows_emits_two_mirrored_rows_per_match() -> None:
 def test_only_the_final_is_marked_neutral() -> None:
     matches = pd.DataFrame(
         [
-            {"League": "UCL", "Season": "2425", "Date": pd.Timestamp("2025-05-31"),
-             "HomeTeam": "Paris SG", "AwayTeam": "Inter", "FTHG": 5, "FTAG": 0,
-             "Round": "Final"},
-            {"League": "UCL", "Season": "2425", "Date": pd.Timestamp("2025-04-30"),
-             "HomeTeam": "Barcelona", "AwayTeam": "Inter", "FTHG": 3, "FTAG": 3,
-             "Round": "Semi-finals"},
+            {
+                "League": "UCL",
+                "Season": "2425",
+                "Date": pd.Timestamp("2025-05-31"),
+                "HomeTeam": "Paris SG",
+                "AwayTeam": "Inter",
+                "FTHG": 5,
+                "FTAG": 0,
+                "Round": "Final",
+            },
+            {
+                "League": "UCL",
+                "Season": "2425",
+                "Date": pd.Timestamp("2025-04-30"),
+                "HomeTeam": "Barcelona",
+                "AwayTeam": "Inter",
+                "FTHG": 3,
+                "FTAG": 3,
+                "Round": "Semi-finals",
+            },
         ]
     )
     rows = european_elo_rows(matches)
@@ -253,15 +293,15 @@ def test_domestic_matches_keep_home_advantage_when_extra_is_supplied() -> None:
     """
     # Two matches: the second carries the rating the first produced, which is
     # where the missing home advantage shows up.
-    tmh = _long(("2025-06-10", "Arsenal", "Chelsea", 0, 0),
-                ("2025-06-20", "Arsenal", "Chelsea", 0, 0))
+    tmh = _long(
+        ("2025-06-10", "Arsenal", "Chelsea", 0, 0), ("2025-06-20", "Arsenal", "Chelsea", 0, 0)
+    )
     extra = _long(("2025-06-01", "Liverpool", "Inter", 1, 0), league="UCL")
 
     alone = _elo(add_elo(tmh), "Arsenal", "2025-06-20")
     with_extra = _elo(add_elo(tmh, extra=extra), "Arsenal", "2025-06-20")
     assert alone == pytest.approx(with_extra), (
-        "an unrelated European match changed a domestic rating -- "
-        "home advantage is being dropped"
+        "an unrelated European match changed a domestic rating -- home advantage is being dropped"
     )
     # And it must be the value home advantage gives: Arsenal were favoured at
     # home and only drew, so they come into the second match rated below START.
@@ -271,9 +311,11 @@ def test_domestic_matches_keep_home_advantage_when_extra_is_supplied() -> None:
 def test_a_european_result_cannot_reach_a_match_that_precedes_it() -> None:
     """The general form of the same check, and the one that caught the bug:
     no match before the first European result may move at all."""
-    tmh = _long(("2015-01-01", "Arsenal", "Chelsea", 2, 0),
-                ("2015-02-01", "Chelsea", "Arsenal", 1, 1),
-                ("2026-01-01", "Arsenal", "Chelsea", 0, 1))
+    tmh = _long(
+        ("2015-01-01", "Arsenal", "Chelsea", 2, 0),
+        ("2015-02-01", "Chelsea", "Arsenal", 1, 1),
+        ("2026-01-01", "Arsenal", "Chelsea", 0, 1),
+    )
     extra = _long(("2025-09-13", "Arsenal", "Inter", 4, 0), league="UCL")
 
     before = add_elo(tmh)

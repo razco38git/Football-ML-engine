@@ -144,9 +144,7 @@ def test_an_ambiguous_leading_pair_is_rejected():
             {"fifa_name": "jose maria callejon", "fifa_overall": 80.0, "Season": "2526"},
         ]
     )
-    players = pd.DataFrame(
-        {"Player": ["jose maria"], "Season": ["2526"], "position_group": ["M"]}
-    )
+    players = pd.DataFrame({"Player": ["jose maria"], "Season": ["2526"], "position_group": ["M"]})
     assert attach_fifa(players, export)["fifa_overall"].isna().all()
 
 
@@ -185,18 +183,35 @@ def _club_fixture(extra_players: list[dict]) -> tuple[pd.DataFrame, pd.DataFrame
     rows, players = [], []
     for team, (club, names) in teammates.items():
         for name in names:
-            rows.append({"fifa_name": name, "fifa_overall": 70.0,
-                         "fifa_club": club, "Season": "1516"})
+            rows.append(
+                {"fifa_name": name, "fifa_overall": 70.0, "fifa_club": club, "Season": "1516"}
+            )
             players.append({"Player": name, "Team": team})
     rows += [
-        {"fifa_name": "david garcia zubiria", "fifa_overall": 75.0,
-         "fifa_club": "CA Osasuna", "Season": "1516"},
-        {"fifa_name": "david garcia santana", "fifa_overall": 72.0,
-         "fifa_club": "UD Las Palmas", "Season": "1516"},
-        {"fifa_name": "hugo miguel almeida costa lopes", "fifa_overall": 71.0,
-         "fifa_club": "Granada CF", "Season": "1516"},
-        {"fifa_name": "rui lopes", "fifa_overall": 65.0,
-         "fifa_club": "CA Osasuna", "Season": "1516"},
+        {
+            "fifa_name": "david garcia zubiria",
+            "fifa_overall": 75.0,
+            "fifa_club": "CA Osasuna",
+            "Season": "1516",
+        },
+        {
+            "fifa_name": "david garcia santana",
+            "fifa_overall": 72.0,
+            "fifa_club": "UD Las Palmas",
+            "Season": "1516",
+        },
+        {
+            "fifa_name": "hugo miguel almeida costa lopes",
+            "fifa_overall": 71.0,
+            "fifa_club": "Granada CF",
+            "Season": "1516",
+        },
+        {
+            "fifa_name": "rui lopes",
+            "fifa_overall": 65.0,
+            "fifa_club": "CA Osasuna",
+            "Season": "1516",
+        },
     ]
     frame = pd.DataFrame(players + extra_players)
     frame["Season"] = "1516"
@@ -212,8 +227,10 @@ def _overall(matched: pd.DataFrame, player: str, team: str) -> float:
 def test_club_breaks_an_ambiguous_leading_pair():
     """Two David Garcías, one at each club: each row takes his own."""
     players, export = _club_fixture(
-        [{"Player": "david garcia", "Team": "Las Palmas"},
-         {"Player": "david garcia", "Team": "Osasuna"}]
+        [
+            {"Player": "david garcia", "Team": "Las Palmas"},
+            {"Player": "david garcia", "Team": "Osasuna"},
+        ]
     )
     matched = attach_fifa(players, export)
     assert _overall(matched, "david garcia", "Las Palmas") == 72.0
@@ -223,8 +240,10 @@ def test_club_breaks_an_ambiguous_leading_pair():
 def test_club_breaks_a_shared_surname_only_with_the_given_name():
     """``"Miguel Lopes"`` finds Hugo Miguel ... Lopes at his club; a stranger does not."""
     players, export = _club_fixture(
-        [{"Player": "miguel lopes", "Team": "Granada"},
-         {"Player": "pedro lopes", "Team": "Granada"}]
+        [
+            {"Player": "miguel lopes", "Team": "Granada"},
+            {"Player": "pedro lopes", "Team": "Granada"},
+        ]
     )
     matched = attach_fifa(players, export)
     assert _overall(matched, "miguel lopes", "Granada") == 71.0
@@ -250,9 +269,7 @@ def test_unmatched_role_uses_the_season_not_the_career():
     position of D. Falling back to the career value made him a centre-back
     rated 90, which propped up Chelsea's defence rating.
     """
-    export = _export(
-        [{"fifa_name": "someone else", "fifa_overall": 70.0, "Season": "2526"}]
-    )
+    export = _export([{"fifa_name": "someone else", "fifa_overall": 70.0, "Season": "2526"}])
     players = pd.DataFrame(
         {
             "Player": ["moises caicedo"],
@@ -266,9 +283,7 @@ def test_unmatched_role_uses_the_season_not_the_career():
 
 def test_career_position_is_still_the_backstop():
     """With no season position, the career one is better than nothing."""
-    export = _export(
-        [{"fifa_name": "someone else", "fifa_overall": 70.0, "Season": "2526"}]
-    )
+    export = _export([{"fifa_name": "someone else", "fifa_overall": 70.0, "Season": "2526"}])
     players = pd.DataFrame(
         {
             "Player": ["unknown player"],
@@ -289,8 +304,7 @@ def test_extra_given_and_family_names_are_matched():
     temper him, was rated 90 off a misassigned role.
     """
     export = _export(
-        [{"fifa_name": "moises isaac caicedo corozo", "fifa_overall": 87.0,
-          "Season": "2526"}]
+        [{"fifa_name": "moises isaac caicedo corozo", "fifa_overall": 87.0, "Season": "2526"}]
     )
     players = pd.DataFrame(
         {"Player": ["moises caicedo"], "Season": ["2526"], "position_group": ["M"]}
@@ -301,12 +315,9 @@ def test_extra_given_and_family_names_are_matched():
 def test_containment_needs_every_token():
     """A partial overlap is not a match: "david silva" must not take "david luiz"."""
     export = _export(
-        [{"fifa_name": "david luiz moreira marinho", "fifa_overall": 82.0,
-          "Season": "2526"}]
+        [{"fifa_name": "david luiz moreira marinho", "fifa_overall": 82.0, "Season": "2526"}]
     )
-    players = pd.DataFrame(
-        {"Player": ["david silva"], "Season": ["2526"], "position_group": ["M"]}
-    )
+    players = pd.DataFrame({"Player": ["david silva"], "Season": ["2526"], "position_group": ["M"]})
     assert attach_fifa(players, export)["fifa_overall"].isna().all()
 
 
@@ -318,12 +329,16 @@ def test_nicknames_match_through_the_familiar_name():
     export's short name is indexed alongside it.
     """
     export = _export(
-        [{"fifa_name": "vitor machado ferreira", "fifa_alt_name": "vitinha",
-          "fifa_overall": 89.0, "Season": "2526"}]
+        [
+            {
+                "fifa_name": "vitor machado ferreira",
+                "fifa_alt_name": "vitinha",
+                "fifa_overall": 89.0,
+                "Season": "2526",
+            }
+        ]
     )
-    players = pd.DataFrame(
-        {"Player": ["vitinha"], "Season": ["2526"], "position_group": ["M"]}
-    )
+    players = pd.DataFrame({"Player": ["vitinha"], "Season": ["2526"], "position_group": ["M"]})
     assert attach_fifa(players, export)["fifa_overall"].iloc[0] == 89.0
 
 
@@ -335,12 +350,16 @@ def test_two_names_for_one_player_do_not_read_as_two_candidates():
     an ambiguity that does not exist and refuse a correct match.
     """
     export = _export(
-        [{"fifa_name": "fabian ruiz pena", "fifa_alt_name": "fabian ruiz",
-          "fifa_overall": 85.0, "Season": "2526"}]
+        [
+            {
+                "fifa_name": "fabian ruiz pena",
+                "fifa_alt_name": "fabian ruiz",
+                "fifa_overall": 85.0,
+                "Season": "2526",
+            }
+        ]
     )
-    players = pd.DataFrame(
-        {"Player": ["fabian ruiz"], "Season": ["2526"], "position_group": ["M"]}
-    )
+    players = pd.DataFrame({"Player": ["fabian ruiz"], "Season": ["2526"], "position_group": ["M"]})
     assert attach_fifa(players, export)["fifa_overall"].iloc[0] == 85.0
 
 
@@ -348,15 +367,21 @@ def test_genuine_ambiguity_is_still_refused_with_alt_names():
     """Two different players sharing a surname must still resolve to neither."""
     export = _export(
         [
-            {"fifa_name": "carlos silva santos", "fifa_alt_name": "carlinhos",
-             "fifa_overall": 80.0, "Season": "2526"},
-            {"fifa_name": "pedro silva costa", "fifa_alt_name": "pedrinho",
-             "fifa_overall": 78.0, "Season": "2526"},
+            {
+                "fifa_name": "carlos silva santos",
+                "fifa_alt_name": "carlinhos",
+                "fifa_overall": 80.0,
+                "Season": "2526",
+            },
+            {
+                "fifa_name": "pedro silva costa",
+                "fifa_alt_name": "pedrinho",
+                "fifa_overall": 78.0,
+                "Season": "2526",
+            },
         ]
     )
-    players = pd.DataFrame(
-        {"Player": ["silva"], "Season": ["2526"], "position_group": ["M"]}
-    )
+    players = pd.DataFrame({"Player": ["silva"], "Season": ["2526"], "position_group": ["M"]})
     assert attach_fifa(players, export)["fifa_overall"].isna().all()
 
 
@@ -379,14 +404,19 @@ def _with_clubs(ea_rows: list[dict], players: list[dict]) -> tuple[pd.DataFrame,
     calls each of our teams from players that matched by name -- so a club-aware
     test needs at least `CLUB_EVIDENCE_MIN` exact matches per club.
     """
-    clubs = {"Aston Villa": "Aston Villa", "Kilmarnock": "Kilmarnock FC",
-             "Bournemouth": "AFC Bournemouth", "Barcelona": "FC Barcelona"}
+    clubs = {
+        "Aston Villa": "Aston Villa",
+        "Kilmarnock": "Kilmarnock FC",
+        "Bournemouth": "AFC Bournemouth",
+        "Barcelona": "FC Barcelona",
+    }
     rows, squad = list(ea_rows), list(players)
     for team, club in clubs.items():
         for i in range(3):
             name = f"{team.lower().replace(' ', '')} filler {i}"
-            rows.append({"fifa_name": name, "fifa_overall": 70.0,
-                         "fifa_club": club, "Season": "2526"})
+            rows.append(
+                {"fifa_name": name, "fifa_overall": 70.0, "fifa_club": club, "Season": "2526"}
+            )
             squad.append({"Player": name, "Team": team})
     frame = pd.DataFrame(squad)
     frame["Season"] = "2526"
@@ -399,16 +429,26 @@ def _with_clubs(ea_rows: list[dict], players: list[dict]) -> tuple[pd.DataFrame,
 
 
 def test_a_diminutive_matches_on_initial_and_surname():
-    """"Ollie Watkins" against EA's "Oliver George Arthur Watkins"."""
+    """ "Ollie Watkins" against EA's "Oliver George Arthur Watkins"."""
     players, export = _with_clubs(
         [
-            {"fifa_name": "oliver george arthur watkins", "fifa_club": "Aston Villa",
-             "fifa_overall": 84.0, "Season": "2526"},
-            {"fifa_name": "marley joseph watkins", "fifa_club": "Kilmarnock FC",
-             "fifa_overall": 65.0, "Season": "2526"},
+            {
+                "fifa_name": "oliver george arthur watkins",
+                "fifa_club": "Aston Villa",
+                "fifa_overall": 84.0,
+                "Season": "2526",
+            },
+            {
+                "fifa_name": "marley joseph watkins",
+                "fifa_club": "Kilmarnock FC",
+                "fifa_overall": 65.0,
+                "Season": "2526",
+            },
         ],
-        [{"Player": "ollie watkins", "Team": "Aston Villa"},
-         {"Player": "marley watkins", "Team": "Kilmarnock"}],
+        [
+            {"Player": "ollie watkins", "Team": "Aston Villa"},
+            {"Player": "marley watkins", "Team": "Kilmarnock"},
+        ],
     )
     matched = attach_fifa(players, export)
     assert _overall(matched, "ollie watkins", "Aston Villa") == 84.0
@@ -416,12 +456,22 @@ def test_a_diminutive_matches_on_initial_and_surname():
 
 
 def test_transliterated_given_names_share_an_initial():
-    """"Djordje Petrovic" against "Đorđe Petrović" -- both initials give d."""
+    """ "Djordje Petrovic" against "Đorđe Petrović" -- both initials give d."""
     players, export = _with_clubs(
-        [{"fifa_name": "đorđe petrović", "fifa_club": "AFC Bournemouth",
-          "fifa_overall": 80.0, "Season": "2526"},
-         {"fifa_name": "rasmus niklasson petrovic", "fifa_club": "GAIS",
-          "fifa_overall": 63.0, "Season": "2526"}],
+        [
+            {
+                "fifa_name": "đorđe petrović",
+                "fifa_club": "AFC Bournemouth",
+                "fifa_overall": 80.0,
+                "Season": "2526",
+            },
+            {
+                "fifa_name": "rasmus niklasson petrovic",
+                "fifa_club": "GAIS",
+                "fifa_overall": 63.0,
+                "Season": "2526",
+            },
+        ],
         [{"Player": "djordje petrovic", "Team": "Bournemouth"}],
     )
     assert _overall(attach_fifa(players, export), "djordje petrovic", "Bournemouth") == 80.0
@@ -436,10 +486,20 @@ def test_initial_and_surname_alone_never_decide_it():
     starter for a 66-rated stranger, dropping him to 54.
     """
     players, export = _with_clubs(
-        [{"fifa_name": "aliou badara balde", "fifa_club": "FC St.Gallen 1879",
-          "fifa_overall": 66.0, "Season": "2526"},
-         {"fifa_name": "mama samba balde", "fifa_club": "Stade Brestois 29",
-          "fifa_overall": 73.0, "Season": "2526"}],
+        [
+            {
+                "fifa_name": "aliou badara balde",
+                "fifa_club": "FC St.Gallen 1879",
+                "fifa_overall": 66.0,
+                "Season": "2526",
+            },
+            {
+                "fifa_name": "mama samba balde",
+                "fifa_club": "Stade Brestois 29",
+                "fifa_overall": 73.0,
+                "Season": "2526",
+            },
+        ],
         [{"Player": "alex balde", "Team": "Barcelona"}],
     )
     assert pd.isna(_overall(attach_fifa(players, export), "alex balde", "Barcelona"))
@@ -465,15 +525,18 @@ def _two_edition_clubs(
     season* -- the club map is built per edition precisely because EA renames
     clubs between them.
     """
-    clubs = {"Real Madrid": {"2526": "Real Madrid", "2627": "Real Madrid CF"},
-             "Barcelona": {"2526": "FC Barcelona", "2627": "FC Barcelona"}}
+    clubs = {
+        "Real Madrid": {"2526": "Real Madrid", "2627": "Real Madrid CF"},
+        "Barcelona": {"2526": "FC Barcelona", "2627": "FC Barcelona"},
+    }
     rows, squad = list(ea_rows), list(players)
     for team, per_season in clubs.items():
         for season, club in per_season.items():
             for i in range(3):
                 name = f"{team.lower().replace(' ', '')} filler {i}"
-                rows.append({"fifa_name": name, "fifa_overall": 70.0,
-                             "fifa_club": club, "Season": season})
+                rows.append(
+                    {"fifa_name": name, "fifa_overall": 70.0, "fifa_club": club, "Season": season}
+                )
                 squad.append({"Player": name, "Team": team, "Season": season})
     frame = pd.DataFrame(squad)
     frame["position_group"] = "M"
@@ -481,10 +544,14 @@ def _two_edition_clubs(
 
 
 VINI = [
-    {"fifa_name": "vinicius jose paixao de oliveira junior", "fifa_alt_name": "vini jr",
-     "fifa_club": "Real Madrid", "fifa_overall": 89.0, "Season": "2526"},
-    {"fifa_name": "vini jr", "fifa_club": "Real Madrid CF",
-     "fifa_overall": 91.0, "Season": "2627"},
+    {
+        "fifa_name": "vinicius jose paixao de oliveira junior",
+        "fifa_alt_name": "vini jr",
+        "fifa_club": "Real Madrid",
+        "fifa_overall": 89.0,
+        "Season": "2526",
+    },
+    {"fifa_name": "vini jr", "fifa_club": "Real Madrid CF", "fifa_overall": 91.0, "Season": "2627"},
 ]
 
 
@@ -492,8 +559,10 @@ def test_a_nickname_only_edition_inherits_the_match():
     """The 2627 entry is reachable only through the 2526 entry's alt name."""
     players, export = _two_edition_clubs(
         VINI,
-        [{"Player": "vinicius junior", "Team": "Real Madrid", "Season": s}
-         for s in ("2526", "2627")],
+        [
+            {"Player": "vinicius junior", "Team": "Real Madrid", "Season": s}
+            for s in ("2526", "2627")
+        ],
     )
     matched = attach_fifa(players, export)
     got = matched.set_index("Season").loc[
@@ -508,13 +577,21 @@ def test_a_shortened_name_inherits_the_match():
     catches: "Fermín" against "Fermín López"."""
     players, export = _two_edition_clubs(
         [
-            {"fifa_name": "fermin lopez marin", "fifa_alt_name": "fermin",
-             "fifa_club": "FC Barcelona", "fifa_overall": 80.0, "Season": "2526"},
-            {"fifa_name": "fermin", "fifa_club": "FC Barcelona",
-             "fifa_overall": 85.0, "Season": "2627"},
+            {
+                "fifa_name": "fermin lopez marin",
+                "fifa_alt_name": "fermin",
+                "fifa_club": "FC Barcelona",
+                "fifa_overall": 80.0,
+                "Season": "2526",
+            },
+            {
+                "fifa_name": "fermin",
+                "fifa_club": "FC Barcelona",
+                "fifa_overall": 85.0,
+                "Season": "2627",
+            },
         ],
-        [{"Player": "fermin lopez", "Team": "Barcelona", "Season": s}
-         for s in ("2526", "2627")],
+        [{"Player": "fermin lopez", "Team": "Barcelona", "Season": s} for s in ("2526", "2627")],
     )
     matched = attach_fifa(players, export)
     got = matched.set_index("Season").loc[
@@ -536,13 +613,24 @@ def test_the_club_is_required_not_merely_a_tiebreak():
     """
     players, export = _two_edition_clubs(
         [
-            {"fifa_name": "qoltan", "fifa_alt_name": "zevi",
-             "fifa_club": "FC Barcelona", "fifa_overall": 77.0, "Season": "2526"},
-            {"fifa_name": "zevi", "fifa_club": "Real Madrid CF",
-             "fifa_overall": 78.0, "Season": "2627"},
+            {
+                "fifa_name": "qoltan",
+                "fifa_alt_name": "zevi",
+                "fifa_club": "FC Barcelona",
+                "fifa_overall": 77.0,
+                "Season": "2526",
+            },
+            {
+                "fifa_name": "zevi",
+                "fifa_club": "Real Madrid CF",
+                "fifa_overall": 78.0,
+                "Season": "2627",
+            },
         ],
-        [{"Player": "qoltan", "Team": "Barcelona", "Season": "2526"},
-         {"Player": "qoltan", "Team": "Barcelona", "Season": "2627"}],
+        [
+            {"Player": "qoltan", "Team": "Barcelona", "Season": "2526"},
+            {"Player": "qoltan", "Team": "Barcelona", "Season": "2627"},
+        ],
     )
     matched = attach_fifa(players, export)
     later = matched[matched["Player"].eq("qoltan") & matched["Season"].eq("2627")]
@@ -560,16 +648,32 @@ def test_a_variant_claimed_by_two_players_identifies_neither():
     """
     players, export = _two_edition_clubs(
         [
-            {"fifa_name": "qoltan", "fifa_alt_name": "zevi",
-             "fifa_club": "FC Barcelona", "fifa_overall": 80.0, "Season": "2526"},
-            {"fifa_name": "brunex", "fifa_alt_name": "zevi",
-             "fifa_club": "FC Barcelona", "fifa_overall": 79.0, "Season": "2526"},
-            {"fifa_name": "zevi", "fifa_club": "FC Barcelona",
-             "fifa_overall": 85.0, "Season": "2627"},
+            {
+                "fifa_name": "qoltan",
+                "fifa_alt_name": "zevi",
+                "fifa_club": "FC Barcelona",
+                "fifa_overall": 80.0,
+                "Season": "2526",
+            },
+            {
+                "fifa_name": "brunex",
+                "fifa_alt_name": "zevi",
+                "fifa_club": "FC Barcelona",
+                "fifa_overall": 79.0,
+                "Season": "2526",
+            },
+            {
+                "fifa_name": "zevi",
+                "fifa_club": "FC Barcelona",
+                "fifa_overall": 85.0,
+                "Season": "2627",
+            },
         ],
-        [{"Player": "qoltan", "Team": "Barcelona", "Season": "2526"},
-         {"Player": "brunex", "Team": "Barcelona", "Season": "2526"},
-         {"Player": "qoltan", "Team": "Barcelona", "Season": "2627"}],
+        [
+            {"Player": "qoltan", "Team": "Barcelona", "Season": "2526"},
+            {"Player": "brunex", "Team": "Barcelona", "Season": "2526"},
+            {"Player": "qoltan", "Team": "Barcelona", "Season": "2627"},
+        ],
     )
     matched = attach_fifa(players, export)
     later = matched[matched["Player"].eq("qoltan") & matched["Season"].eq("2627")]
@@ -581,8 +685,10 @@ def test_nothing_already_matched_is_disturbed():
     per-season matcher made."""
     players, export = _two_edition_clubs(
         VINI,
-        [{"Player": "vinicius junior", "Team": "Real Madrid", "Season": s}
-         for s in ("2526", "2627")],
+        [
+            {"Player": "vinicius junior", "Team": "Real Madrid", "Season": s}
+            for s in ("2526", "2627")
+        ],
     )
     before = attach_fifa(players, export)
     assert before["fifa_overall"].notna().sum() == len(before)
@@ -604,8 +710,15 @@ def test_a_goalkeeper_is_never_matched_to_an_outfielder():
     Club Nacional, and the surname tier took the wrong one unopposed.
     """
     players, export = _with_clubs(
-        [{"fifa_name": "emiliano martinez toranza", "fifa_club": "Club Nacional",
-          "fifa_overall": 68.0, "role": "MID", "Season": "2526"}],
+        [
+            {
+                "fifa_name": "emiliano martinez toranza",
+                "fifa_club": "Club Nacional",
+                "fifa_overall": 68.0,
+                "role": "MID",
+                "Season": "2526",
+            }
+        ],
         [{"Player": "emiliano martinez", "Team": "Aston Villa", "position_group": "GK"}],
     )
     matched = attach_fifa(players, export)
@@ -619,10 +732,22 @@ def test_the_right_man_is_found_once_the_wrong_one_is_ruled_out():
     so the uniqueness guard resolves instead of refusing.
     """
     players, export = _with_clubs(
-        [{"fifa_name": "emiliano martinez toranza", "fifa_club": "Club Nacional",
-          "fifa_overall": 68.0, "role": "MID", "Season": "2526"},
-         {"fifa_name": "damian emiliano martinez", "fifa_club": "Aston Villa",
-          "fifa_overall": 84.0, "role": "GK", "Season": "2526"}],
+        [
+            {
+                "fifa_name": "emiliano martinez toranza",
+                "fifa_club": "Club Nacional",
+                "fifa_overall": 68.0,
+                "role": "MID",
+                "Season": "2526",
+            },
+            {
+                "fifa_name": "damian emiliano martinez",
+                "fifa_club": "Aston Villa",
+                "fifa_overall": 84.0,
+                "role": "GK",
+                "Season": "2526",
+            },
+        ],
         [{"Player": "emiliano martinez", "Team": "Aston Villa", "position_group": "GK"}],
     )
     matched = attach_fifa(players, export)
@@ -637,8 +762,15 @@ def test_an_exact_name_match_is_checked_too():
     have second thoughts.
     """
     players, export = _with_clubs(
-        [{"fifa_name": "ederson", "fifa_club": "Manchester City",
-          "fifa_overall": 88.0, "role": "GK", "Season": "2526"}],
+        [
+            {
+                "fifa_name": "ederson",
+                "fifa_club": "Manchester City",
+                "fifa_overall": 88.0,
+                "role": "GK",
+                "Season": "2526",
+            }
+        ],
         [{"Player": "ederson", "Team": "Barcelona", "position_group": "M"}],
     )
     matched = attach_fifa(players, export)
@@ -649,8 +781,15 @@ def test_a_forward_is_not_a_centre_back():
     """Espanyol's Sergio García carried Sergio Ramos' rating for three
     seasons -- 87, 90 and 91 -- on a shared surname."""
     players, export = _with_clubs(
-        [{"fifa_name": "sergio ramos garcia", "fifa_club": "Real Madrid CF",
-          "fifa_overall": 91.0, "role": "CB", "Season": "2526"}],
+        [
+            {
+                "fifa_name": "sergio ramos garcia",
+                "fifa_club": "Real Madrid CF",
+                "fifa_overall": 91.0,
+                "role": "CB",
+                "Season": "2526",
+            }
+        ],
         [{"Player": "sergio garcia", "Team": "Barcelona", "position_group": "F"}],
     )
     matched = attach_fifa(players, export)
@@ -662,8 +801,15 @@ def test_a_wing_back_filed_as_a_defender_still_matches():
     and EA calls them LM or RW -- 1,073 player-seasons, nearly all correct --
     so that disagreement must not be read as two different people."""
     players, export = _with_clubs(
-        [{"fifa_name": "marc cucurella saseta", "fifa_club": "FC Barcelona",
-          "fifa_overall": 81.0, "role": "AMW", "Season": "2526"}],
+        [
+            {
+                "fifa_name": "marc cucurella saseta",
+                "fifa_club": "FC Barcelona",
+                "fifa_overall": 81.0,
+                "role": "AMW",
+                "Season": "2526",
+            }
+        ],
         [{"Player": "marc cucurella", "Team": "Barcelona", "position_group": "D"}],
     )
     matched = attach_fifa(players, export)
@@ -674,8 +820,15 @@ def test_a_withdrawn_forward_still_matches_a_midfielder():
     """Forward-to-midfield is deliberately not a contradiction: false nines
     and withdrawn forwards cross it constantly."""
     players, export = _with_clubs(
-        [{"fifa_name": "lionel andres messi cuccittini", "fifa_club": "FC Barcelona",
-          "fifa_overall": 93.0, "role": "MID", "Season": "2526"}],
+        [
+            {
+                "fifa_name": "lionel andres messi cuccittini",
+                "fifa_club": "FC Barcelona",
+                "fifa_overall": 93.0,
+                "role": "MID",
+                "Season": "2526",
+            }
+        ],
         [{"Player": "lionel messi", "Team": "Barcelona", "position_group": "F"}],
     )
     matched = attach_fifa(players, export)
@@ -688,8 +841,15 @@ def test_a_sole_surname_holder_is_not_proof_on_its_own():
     Lottin of CD Castellon. Taken unopposed, a 91-rated striker became a
     65-rated defensive midfielder."""
     players, export = _with_clubs(
-        [{"fifa_name": "albert nicolas lottin", "fifa_club": "CD Castellon",
-          "fifa_overall": 65.0, "role": "FWD", "Season": "2526"}],
+        [
+            {
+                "fifa_name": "albert nicolas lottin",
+                "fifa_club": "CD Castellon",
+                "fifa_overall": 65.0,
+                "role": "FWD",
+                "Season": "2526",
+            }
+        ],
         [{"Player": "kylian mbappe-lottin", "Team": "Barcelona", "position_group": "F"}],
     )
     matched = attach_fifa(players, export)
@@ -704,8 +864,15 @@ def test_a_bare_surname_at_another_club_still_matches():
     name being a strict subset of ours is enough.
     """
     players, export = _with_clubs(
-        [{"fifa_name": "alena", "fifa_club": "Getafe CF",
-          "fifa_overall": 73.0, "role": "MID", "Season": "2526"}],
+        [
+            {
+                "fifa_name": "alena",
+                "fifa_club": "Getafe CF",
+                "fifa_overall": 73.0,
+                "role": "MID",
+                "Season": "2526",
+            }
+        ],
         [{"Player": "carles alena", "Team": "Barcelona", "position_group": "M"}],
     )
     matched = attach_fifa(players, export)
@@ -728,9 +895,7 @@ def test_every_role_is_accounted_for_in_the_compatibility_table():
         assert allowed <= roles, f"{group} allows a role that does not exist"
     outfield = roles - {"GK"}
     covered = set().union(*(a for g, a in COMPATIBLE_ROLES.items() if g != "GK"))
-    assert covered == outfield, (
-        f"outfield roles never allowed anywhere: {outfield - covered}"
-    )
+    assert covered == outfield, f"outfield roles never allowed anywhere: {outfield - covered}"
 
 
 def test_the_goalkeeper_boundary_is_the_only_total_one():
@@ -758,8 +923,15 @@ def test_an_ea_name_inside_ours_is_matched():
     in two seasons out of three.
     """
     players, export = _with_clubs(
-        [{"fifa_name": "kylian mbappe", "fifa_club": "Real Madrid CF",
-          "fifa_overall": 91.0, "role": "FWD", "Season": "2526"}],
+        [
+            {
+                "fifa_name": "kylian mbappe",
+                "fifa_club": "Real Madrid CF",
+                "fifa_overall": 91.0,
+                "role": "FWD",
+                "Season": "2526",
+            }
+        ],
         [{"Player": "kylian mbappe-lottin", "Team": "Barcelona", "position_group": "F"}],
     )
     # The club deliberately does not agree: he had just moved, which is exactly
@@ -778,8 +950,15 @@ def test_a_one_token_ea_name_does_not_reach_through_this_tier():
     bare "Alena" still reaches Carles Alena.)
     """
     players, export = _with_clubs(
-        [{"fifa_name": "thiago", "fifa_club": "FC St.Gallen 1879",
-          "fifa_overall": 62.0, "role": "MID", "Season": "2526"}],
+        [
+            {
+                "fifa_name": "thiago",
+                "fifa_club": "FC St.Gallen 1879",
+                "fifa_overall": 62.0,
+                "role": "MID",
+                "Season": "2526",
+            }
+        ],
         [{"Player": "thiago silva", "Team": "Barcelona", "position_group": "D"}],
     )
     assert pd.isna(_overall(attach_fifa(players, export), "thiago silva", "Barcelona"))
@@ -788,27 +967,43 @@ def test_a_one_token_ea_name_does_not_reach_through_this_tier():
 def test_two_shorter_ea_names_inside_ours_need_the_club():
     """Ambiguity is refused here as everywhere else."""
     players, export = _with_clubs(
-        [{"fifa_name": "carlos vinicius", "fifa_club": "Aston Villa",
-          "fifa_overall": 74.0, "role": "FWD", "Season": "2526"},
-         {"fifa_name": "vinicius santos", "fifa_club": "Kilmarnock FC",
-          "fifa_overall": 66.0, "role": "FWD", "Season": "2526"}],
-        [{"Player": "carlos vinicius santos", "Team": "Aston Villa",
-          "position_group": "F"}],
+        [
+            {
+                "fifa_name": "carlos vinicius",
+                "fifa_club": "Aston Villa",
+                "fifa_overall": 74.0,
+                "role": "FWD",
+                "Season": "2526",
+            },
+            {
+                "fifa_name": "vinicius santos",
+                "fifa_club": "Kilmarnock FC",
+                "fifa_overall": 66.0,
+                "role": "FWD",
+                "Season": "2526",
+            },
+        ],
+        [{"Player": "carlos vinicius santos", "Team": "Aston Villa", "position_group": "F"}],
     )
     # Both are subsets of ours; the club picks the right one.
-    assert _overall(attach_fifa(players, export),
-                    "carlos vinicius santos", "Aston Villa") == 74.0
+    assert _overall(attach_fifa(players, export), "carlos vinicius santos", "Aston Villa") == 74.0
 
 
 def test_the_position_check_still_applies_to_this_tier():
     """A shorter name is no reason to skip the guard the other tiers use."""
     players, export = _with_clubs(
-        [{"fifa_name": "kylian mbappe", "fifa_club": "Real Madrid CF",
-          "fifa_overall": 91.0, "role": "GK", "Season": "2526"}],
+        [
+            {
+                "fifa_name": "kylian mbappe",
+                "fifa_club": "Real Madrid CF",
+                "fifa_overall": 91.0,
+                "role": "GK",
+                "Season": "2526",
+            }
+        ],
         [{"Player": "kylian mbappe-lottin", "Team": "Barcelona", "position_group": "F"}],
     )
-    assert pd.isna(_overall(attach_fifa(players, export),
-                            "kylian mbappe-lottin", "Barcelona"))
+    assert pd.isna(_overall(attach_fifa(players, export), "kylian mbappe-lottin", "Barcelona"))
 
 
 # --- a role must not follow EA's position ordering --------------------------
@@ -899,9 +1094,7 @@ def test_a_tie_takes_the_later_seasons_reading():
 
 def test_a_player_with_no_ea_entry_is_left_to_the_fallback():
     """No position set, nothing to settle. The Understat fallback still rules."""
-    export = _export(
-        [{"fifa_name": "someone else", "fifa_overall": 70.0, "Season": "2526"}]
-    )
+    export = _export([{"fifa_name": "someone else", "fifa_overall": 70.0, "Season": "2526"}])
     players = pd.DataFrame(
         {
             "Player": ["unmatched player"],
@@ -974,8 +1167,7 @@ def test_the_token_set_never_crosses_the_goalkeeper_boundary():
     """Same tokens, wrong man: the one boundary that is proof of a different
     person has to hold here as it does in every other tier."""
     export = _export(
-        [{"fifa_name": "Min Heung Son", "fifa_overall": 87.0, "Season": "2425",
-          "role": "FWD"}]
+        [{"fifa_name": "Min Heung Son", "fifa_overall": 87.0, "Season": "2425", "role": "FWD"}]
     )
     players = pd.DataFrame(
         {
@@ -999,17 +1191,25 @@ def _squad(club: str, season: str = "2425", n: int = 3):
     rather than working around.
     """
     rows = [
-        {"fifa_name": f"Team Mate {i}", "fifa_overall": 70.0 + i,
-         "Season": season, "fifa_club": club}
+        {
+            "fifa_name": f"Team Mate {i}",
+            "fifa_overall": 70.0 + i,
+            "Season": season,
+            "fifa_club": club,
+        }
         for i in range(n)
     ]
     players = [
-        {"Player": f"Team Mate {i}", "Team": club, "Season": season,
-         "season_position": "M", "position_group": "M"}
+        {
+            "Player": f"Team Mate {i}",
+            "Team": club,
+            "Season": season,
+            "season_position": "M",
+            "position_group": "M",
+        }
         for i in range(n)
     ]
     return rows, players
-
 
 
 # --- a one-token name against a longer EA entry ----------------------------
@@ -1028,16 +1228,31 @@ def test_a_single_name_reaches_a_longer_ea_entry_at_the_same_club():
     export = _export(
         [
             *mates,
-            {"fifa_name": "Fabián Ruiz", "fifa_overall": 82.0, "Season": "2425",
-             "fifa_club": "Paris SG"},
-            {"fifa_name": "Fabian Schär", "fifa_overall": 82.0, "Season": "2425",
-             "fifa_club": "Newcastle Utd"},
+            {
+                "fifa_name": "Fabián Ruiz",
+                "fifa_overall": 82.0,
+                "Season": "2425",
+                "fifa_club": "Paris SG",
+            },
+            {
+                "fifa_name": "Fabian Schär",
+                "fifa_overall": 82.0,
+                "Season": "2425",
+                "fifa_club": "Newcastle Utd",
+            },
         ]
     )
     players = pd.DataFrame(
-        [*squad,
-         {"Player": "Fabián", "Team": "Paris SG", "Season": "2425",
-          "season_position": "M", "position_group": "M"}]
+        [
+            *squad,
+            {
+                "Player": "Fabián",
+                "Team": "Paris SG",
+                "Season": "2425",
+                "season_position": "M",
+                "position_group": "M",
+            },
+        ]
     )
 
     out = attach_fifa(players, export).set_index("Player")
@@ -1055,16 +1270,31 @@ def test_a_single_name_is_refused_when_the_club_cannot_decide():
     export = _export(
         [
             *mates,
-            {"fifa_name": "Fabián Ruiz", "fifa_overall": 82.0, "Season": "2425",
-             "fifa_club": "Paris SG"},
-            {"fifa_name": "Fabián Castillo", "fifa_overall": 70.0, "Season": "2425",
-             "fifa_club": "Paris SG"},
+            {
+                "fifa_name": "Fabián Ruiz",
+                "fifa_overall": 82.0,
+                "Season": "2425",
+                "fifa_club": "Paris SG",
+            },
+            {
+                "fifa_name": "Fabián Castillo",
+                "fifa_overall": 70.0,
+                "Season": "2425",
+                "fifa_club": "Paris SG",
+            },
         ]
     )
     players = pd.DataFrame(
-        [*squad,
-         {"Player": "Fabián", "Team": "Paris SG", "Season": "2425",
-          "season_position": "M", "position_group": "M"}]
+        [
+            *squad,
+            {
+                "Player": "Fabián",
+                "Team": "Paris SG",
+                "Season": "2425",
+                "season_position": "M",
+                "position_group": "M",
+            },
+        ]
     )
 
     out = attach_fifa(players, export).set_index("Player")
@@ -1077,14 +1307,27 @@ def test_a_single_name_at_the_wrong_club_is_refused():
     """Club is the only evidence here, so it is not optional."""
     mates, squad = _squad("Real Betis")
     export = _export(
-        [*mates,
-         {"fifa_name": "Fabián Ruiz", "fifa_overall": 82.0, "Season": "2425",
-          "fifa_club": "Paris SG"}]
+        [
+            *mates,
+            {
+                "fifa_name": "Fabián Ruiz",
+                "fifa_overall": 82.0,
+                "Season": "2425",
+                "fifa_club": "Paris SG",
+            },
+        ]
     )
     players = pd.DataFrame(
-        [*squad,
-         {"Player": "Fabián", "Team": "Real Betis", "Season": "2425",
-          "season_position": "M", "position_group": "M"}]
+        [
+            *squad,
+            {
+                "Player": "Fabián",
+                "Team": "Real Betis",
+                "Season": "2425",
+                "season_position": "M",
+                "position_group": "M",
+            },
+        ]
     )
 
     out = attach_fifa(players, export).set_index("Player")
@@ -1186,9 +1429,7 @@ def test_a_carried_role_cannot_cross_the_goalkeeper_boundary():
 
 
 def test_a_player_ea_never_lists_still_falls_back_to_understat():
-    export = _export(
-        [{"fifa_name": "someone else", "fifa_overall": 70.0, "Season": "2627"}]
-    )
+    export = _export([{"fifa_name": "someone else", "fifa_overall": 70.0, "Season": "2627"}])
     players = pd.DataFrame(
         {
             "Player": ["never in ea"],

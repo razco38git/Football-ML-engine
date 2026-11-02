@@ -21,26 +21,32 @@ from pipelines.fetch_european import _read, merge_seasons
 
 
 def _matches(season: str, teams: list[tuple[str, str]]) -> pd.DataFrame:
-    return pd.DataFrame({
-        "League": ["UCL"] * len(teams),
-        "Season": [season] * len(teams),
-        "Date": [f"20{season[:2]}-10-{10 + i:02d}" for i in range(len(teams))],
-        "HomeTeam": [h for h, _ in teams],
-        "AwayTeam": [a for _, a in teams],
-        "FTHG": [1] * len(teams),
-        "FTAG": [0] * len(teams),
-    })
+    return pd.DataFrame(
+        {
+            "League": ["UCL"] * len(teams),
+            "Season": [season] * len(teams),
+            "Date": [f"20{season[:2]}-10-{10 + i:02d}" for i in range(len(teams))],
+            "HomeTeam": [h for h, _ in teams],
+            "AwayTeam": [a for _, a in teams],
+            "FTHG": [1] * len(teams),
+            "FTAG": [0] * len(teams),
+        }
+    )
 
 
 # --- the property the flag needs ----------------------------------------------
 
+
 def test_seasons_not_fetched_are_kept() -> None:
     """The whole point: a narrow refetch is narrow."""
-    existing = pd.concat([
-        _matches("2425", [("Arsenal", "Bayern Munich")]),
-        _matches("2526", [("Real Madrid", "Inter")]),
-        _matches("2627", [("Napoli", "Arsenal")]),
-    ], ignore_index=True)
+    existing = pd.concat(
+        [
+            _matches("2425", [("Arsenal", "Bayern Munich")]),
+            _matches("2526", [("Real Madrid", "Inter")]),
+            _matches("2627", [("Napoli", "Arsenal")]),
+        ],
+        ignore_index=True,
+    )
     fetched = _matches("2627", [("Napoli", "Arsenal"), ("Roma", "Real Madrid")])
 
     out = merge_seasons(existing, fetched, ["2627"])
@@ -64,10 +70,13 @@ def test_the_fetched_season_is_replaced_wholesale() -> None:
 
 def test_a_full_refetch_replaces_everything() -> None:
     """The weekly job asks for every season, so nothing should survive it."""
-    existing = pd.concat([
-        _matches("2526", [("Old", "Row")]),
-        _matches("2627", [("Another", "Old")]),
-    ], ignore_index=True)
+    existing = pd.concat(
+        [
+            _matches("2526", [("Old", "Row")]),
+            _matches("2627", [("Another", "Old")]),
+        ],
+        ignore_index=True,
+    )
     fetched = _matches("2627", [("Napoli", "Arsenal")])
 
     out = merge_seasons(existing, fetched, ["2526", "2627"])
@@ -86,6 +95,7 @@ def test_season_labels_compare_as_strings() -> None:
 
 
 # --- not losing data on the unhappy paths -------------------------------------
+
 
 def test_an_empty_fetch_keeps_what_is_there() -> None:
     """A scrape that came back with nothing is not a reason to delete history."""
@@ -125,6 +135,7 @@ def test_a_file_with_the_right_schema_is_accepted(tmp_path) -> None:
 
 
 # --- ordering -----------------------------------------------------------------
+
 
 def test_the_merged_file_is_ordered_by_season_and_date() -> None:
     """So a human opening it sees a timeline rather than two stacked blocks."""

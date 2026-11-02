@@ -294,9 +294,7 @@ def add_elo(
         # Domestic rows have no `Neutral` column, so the concat leaves them NaN.
         # Normalise to real booleans before the walk reads them.
         walked["Neutral"] = (
-            walked.get("Neutral", pd.Series(False, index=walked.index))
-            .fillna(False)
-            .astype(bool)
+            walked.get("Neutral", pd.Series(False, index=walked.index)).fillna(False).astype(bool)
         )
 
     pre, _ = _walk(walked, k, home_advantage, season_regression)

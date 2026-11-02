@@ -52,10 +52,21 @@ from footballml.ingest.schedule import (  # noqa: E402
 )
 
 OUTPUT_COLUMNS = [
-    "League", "competition", "Date", "HomeTeam", "AwayTeam",
-    "expected_goals_home", "expected_goals_away",
-    "prob_home_win", "prob_draw", "prob_away_win", "predicted_outcome",
-    "modal_score_home", "modal_score_away", "prob_over_2_5", "prob_btts",
+    "League",
+    "competition",
+    "Date",
+    "HomeTeam",
+    "AwayTeam",
+    "expected_goals_home",
+    "expected_goals_away",
+    "prob_home_win",
+    "prob_draw",
+    "prob_away_win",
+    "predicted_outcome",
+    "modal_score_home",
+    "modal_score_away",
+    "prob_over_2_5",
+    "prob_btts",
 ]
 
 
@@ -122,7 +133,8 @@ def _european_fixtures(leagues: list[str] | None, log: logging.Logger) -> pd.Dat
     kept, dropped = big_five_only(schedule.assign(FTHG=pd.NA, FTAG=pd.NA, FTR=pd.NA), tmh)
     log.info(
         "European: %d of %d fixtures have both clubs in the big five",
-        len(kept), len(schedule),
+        len(kept),
+        len(schedule),
     )
     if kept.empty:
         return pd.DataFrame()
@@ -275,19 +287,21 @@ def _schedule_results(known: pd.DataFrame, log: logging.Logger) -> pd.DataFrame:
     log.info(
         "Topping up with %d result(s) FBref has and the match history does not "
         "(latest %s against %s)",
-        len(fresh), fresh["Date"].max().date(), pd.to_datetime(known["Date"]).max().date(),
+        len(fresh),
+        fresh["Date"].max().date(),
+        pd.to_datetime(known["Date"]).max().date(),
     )
     return fresh.assign(competition=store.DOMESTIC)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--leagues", nargs="+", choices=sorted([*LEAGUES, *SHOWN_COMPETITIONS])
-    )
+    parser.add_argument("--leagues", nargs="+", choices=sorted([*LEAGUES, *SHOWN_COMPETITIONS]))
     parser.add_argument("--settle-only", action="store_true")
     parser.add_argument(
-        "--horizon-days", type=int, default=DEFAULT_HORIZON_DAYS,
+        "--horizon-days",
+        type=int,
+        default=DEFAULT_HORIZON_DAYS,
         help="How far ahead to predict. See ingest.schedule for why this exists.",
     )
     args = parser.parse_args()

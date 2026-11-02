@@ -81,8 +81,9 @@ def label(coalition: tuple[str, ...]) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--start-season", type=int, default=1516)
-    parser.add_argument("--quick", action="store_true",
-                        help="Start at 2425: a smoke test, NOT a result.")
+    parser.add_argument(
+        "--quick", action="store_true", help="Start at 2425: a smoke test, NOT a result."
+    )
     parser.add_argument("--n-boot", type=int, default=10_000)
     parser.add_argument("--out-dir", type=Path, default=OUT_DIR)
     args = parser.parse_args()
@@ -134,14 +135,17 @@ def main() -> None:
         )
         logger.info(
             "  %2d/%d  %-26s %3d features  RPS %.5f  %.0fs",
-            i, len(every), label(coalition), len(cols), rps, elapsed,
+            i,
+            len(every),
+            label(coalition),
+            len(cols),
+            rps,
+            elapsed,
         )
 
     contributions = per_match_contributions(scores, PLAYERS)
     total_gain = check_efficiency(contributions, scores, PLAYERS)
-    logger.info(
-        "\nEfficiency holds: the four values sum to the total gain, %.5f", total_gain
-    )
+    logger.info("\nEfficiency holds: the four values sum to the total gain, %.5f", total_gain)
 
     logger.info("\n=== Shapley values (RPS gain over the base rung) ===")
     shapley_rows = []
@@ -163,7 +167,10 @@ def main() -> None:
         )
         logger.info(
             "  %-6s %+.5f [%+.5f, %+.5f]  %5.1f%%  %s",
-            player, boot["delta"], boot["lo"], boot["hi"],
+            player,
+            boot["delta"],
+            boot["lo"],
+            boot["hi"],
             100 * shapley_rows[-1]["share_of_total"],
             "SIGNIFICANT" if boot["excludes_zero"] else "not significant",
         )
@@ -199,11 +206,10 @@ def main() -> None:
     logger.info("\n%s", results.to_string(index=False))
 
 
-def plot(
-    shapley: pd.DataFrame, results: pd.DataFrame, total_gain: float, out_dir: Path
-) -> None:
+def plot(shapley: pd.DataFrame, results: pd.DataFrame, total_gain: float, out_dir: Path) -> None:
     try:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except ImportError:
@@ -224,8 +230,14 @@ def plot(
     ax.set_xlabel("Shapley value: RPS gain over the base rung")
     ax.set_title("Attribution averaged over all orderings")
     for yy, g, s in zip(y, gains, order["share_of_total"], strict=True):
-        ax.annotate(f"{g:+.5f}  ({100 * s:.1f}%)", (g, yy),
-                    textcoords="offset points", xytext=(8, 0), va="center", fontsize=9)
+        ax.annotate(
+            f"{g:+.5f}  ({100 * s:.1f}%)",
+            (g, yy),
+            textcoords="offset points",
+            xytext=(8, 0),
+            va="center",
+            fontsize=9,
+        )
     ax.set_xlim(right=max(gains) * 1.45)
     ax.grid(axis="x", alpha=0.3)
 
@@ -243,9 +255,15 @@ def plot(
         by_size.loc[group.index, "x"] = size + offsets
     right.scatter(by_size["x"], by_size["rps"], s=42, color="#1f77b4", zorder=3)
     for _, row in by_size.iterrows():
-        right.annotate(row["coalition"].replace("(base only)", "base"),
-                       (row["x"], row["rps"]), textcoords="offset points",
-                       xytext=(0, 7), ha="center", fontsize=6.5, rotation=20)
+        right.annotate(
+            row["coalition"].replace("(base only)", "base"),
+            (row["x"], row["rps"]),
+            textcoords="offset points",
+            xytext=(0, 7),
+            ha="center",
+            fontsize=6.5,
+            rotation=20,
+        )
     right.set_xticks(range(len(PLAYERS) + 1))
     right.set_xlabel("families present (beyond base)")
     right.set_ylabel("RPS (lower is better)")
@@ -254,10 +272,14 @@ def plot(
     right.grid(axis="y", alpha=0.3)
 
     fig.tight_layout(rect=(0, 0.06, 1, 1))
-    fig.text(0.5, 0.02,
-             f"Values sum to the total gain of {total_gain:.5f}; "
-             "95% paired-bootstrap intervals; grey = includes zero",
-             ha="center", fontsize=10)
+    fig.text(
+        0.5,
+        0.02,
+        f"Values sum to the total gain of {total_gain:.5f}; "
+        "95% paired-bootstrap intervals; grey = includes zero",
+        ha="center",
+        fontsize=10,
+    )
     fig.savefig(out_dir / "shapley_values.png", dpi=150)
     plt.close(fig)
     logger.info("Wrote shapley_values.png")

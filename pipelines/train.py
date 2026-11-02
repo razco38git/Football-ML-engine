@@ -65,7 +65,9 @@ def main() -> None:
         covered = played["home_strength_overall"].notna()
         log.info(
             "Squad strength on %d of %d matches (%.0f%%)",
-            int(covered.sum()), len(played), 100 * covered.mean(),
+            int(covered.sum()),
+            len(played),
+            100 * covered.mean(),
         )
     else:
         log.warning("No team_strength.csv -- training without squad strength")
@@ -85,9 +87,7 @@ def main() -> None:
         mu_h, mu_a = probe.predict_goal_rates(test[cols])
         metrics = {
             k: v
-            for k, v in evaluate(
-                test["FTR"], probs, test["FTHG"], test["FTAG"], mu_h, mu_a
-            ).items()
+            for k, v in evaluate(test["FTR"], probs, test["FTHG"], test["FTAG"], mu_h, mu_a).items()
             if isinstance(v, float)
         }
         metrics["rps_base_rate"] = evaluate(test["FTR"], base_rate_probs(train["FTR"], len(test)))[

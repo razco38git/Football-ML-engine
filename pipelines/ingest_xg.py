@@ -49,9 +49,7 @@ def main() -> None:
 
     merged = merge_xg(tmh, xg)
     covered = merged["xGFor"].notna().sum()
-    log.info(
-        "xG coverage %d/%d rows (%.1f%%)", covered, len(merged), covered / len(merged) * 100
-    )
+    log.info("xG coverage %d/%d rows (%.1f%%)", covered, len(merged), covered / len(merged) * 100)
 
     merged.to_csv(OUTPUT, index=False)
     log.info("Wrote %s", OUTPUT)

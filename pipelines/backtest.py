@@ -172,9 +172,7 @@ def run_backtest(
 
         mu_h, mu_a = model.predict_goal_rates(test[cols])
 
-        metrics = evaluate(
-            test["FTR"], probs, test["FTHG"], test["FTAG"], mu_h, mu_a
-        )
+        metrics = evaluate(test["FTR"], probs, test["FTHG"], test["FTAG"], mu_h, mu_a)
         metrics["season"] = season
         metrics["n_train"] = len(train)
         metrics["rho"] = model.rho_
@@ -221,9 +219,7 @@ def main() -> None:
         help="First season to test on; everything earlier is training-only.",
     )
     parser.add_argument("--no-dixon-coles", action="store_true", help="Plain independent Poisson.")
-    parser.add_argument(
-        "--no-calibration", action="store_true", help="Skip temperature scaling."
-    )
+    parser.add_argument("--no-calibration", action="store_true", help="Skip temperature scaling.")
     parser.add_argument(
         "--xg",
         action="store_true",
@@ -300,8 +296,16 @@ def main() -> None:
     show = [
         c
         for c in [
-            "season", "n", "rps", "rps_raw", "rps_market",
-            "ece", "ece_raw", "temperature", "accuracy", "goals_mae",
+            "season",
+            "n",
+            "rps",
+            "rps_raw",
+            "rps_market",
+            "ece",
+            "ece_raw",
+            "temperature",
+            "accuracy",
+            "goals_mae",
         ]
         if c in per_season.columns
     ]
@@ -331,9 +335,9 @@ def main() -> None:
             has_odds = grp[list(ODDS_COLUMNS)].notna().all(axis=1) if "B365H" in grp else None
             if has_odds is not None and has_odds.any():
                 sub = grp[has_odds]
-                entry["rps_market"] = evaluate(
-                    sub["FTR"], odds_implied_probs(sub, ODDS_COLUMNS)
-                )["rps"]
+                entry["rps_market"] = evaluate(sub["FTR"], odds_implied_probs(sub, ODDS_COLUMNS))[
+                    "rps"
+                ]
             rows.append(entry)
         by_league = pd.DataFrame(rows)[
             [c for c in ["league", "n", "rps", "rps_market", "accuracy"] if c in rows[0]]

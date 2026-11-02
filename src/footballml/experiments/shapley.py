@@ -80,11 +80,7 @@ def shapley_weight(subset_size: int, n_players: int) -> float:
     """
     if not 0 <= subset_size < n_players:
         raise ValueError(f"subset size {subset_size} out of range for {n_players} players")
-    return (
-        factorial(subset_size)
-        * factorial(n_players - subset_size - 1)
-        / factorial(n_players)
-    )
+    return factorial(subset_size) * factorial(n_players - subset_size - 1) / factorial(n_players)
 
 
 def per_match_contributions(
@@ -110,8 +106,7 @@ def per_match_contributions(
     missing = expected - set(scores)
     if missing:
         raise KeyError(
-            f"missing per-match scores for {len(missing)} coalition(s): "
-            f"{sorted(missing)[:3]}"
+            f"missing per-match scores for {len(missing)} coalition(s): {sorted(missing)[:3]}"
         )
 
     lengths = {arr.shape for arr in scores.values()}

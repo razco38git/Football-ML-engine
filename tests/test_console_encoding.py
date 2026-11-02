@@ -42,9 +42,9 @@ def test_printing_an_unencodable_name_does_not_raise() -> None:
     """
     done = subprocess.run(
         [
-            sys.executable, "-c",
-            f"import sys; sys.path.insert(0, r'{ROOT}'); "
-            f"import pipelines; print({AWKWARD!r})",
+            sys.executable,
+            "-c",
+            f"import sys; sys.path.insert(0, r'{ROOT}'); import pipelines; print({AWKWARD!r})",
         ],
         cwd=ROOT,
         capture_output=True,

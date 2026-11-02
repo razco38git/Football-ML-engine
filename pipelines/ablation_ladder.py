@@ -88,7 +88,11 @@ def _git_revision() -> str | None:
     try:
         out = subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=10, check=False,
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
         )
         return out.stdout.strip() or None
     except (OSError, subprocess.SubprocessError):
@@ -99,9 +103,7 @@ def load_features() -> pd.DataFrame:
     """The exact production feature table, built the way `pipelines.train` builds it."""
     path = PROCESSED_DIR / "team_match_history_all.csv"
     if not path.exists():
-        raise SystemExit(
-            f"{path} not found -- run `python -m pipelines.build_dataset` first"
-        )
+        raise SystemExit(f"{path} not found -- run `python -m pipelines.build_dataset` first")
     tmh = load_team_match_history(path)
     return build_match_features(tmh, strength=load_team_strength())
 
@@ -190,8 +192,12 @@ def run_rung(
     per_season = per_season.assign(rung=name)
     logger.info(
         "%-24s %3d features  RPS %.5f (raw %.5f)  acc %.4f  %.0fs",
-        name, len(cols), metrics["rps"], metrics["rps_uncalibrated"],
-        metrics["accuracy"], elapsed,
+        name,
+        len(cols),
+        metrics["rps"],
+        metrics["rps_uncalibrated"],
+        metrics["accuracy"],
+        elapsed,
     )
     return metrics, preds, per_season
 
@@ -224,7 +230,11 @@ def compare(
     result.update(comparison=name, kind=kind)
     logger.info(
         "  [%-12s] %-42s delta %+.5f [%+.5f, %+.5f] %s",
-        kind, name, result["delta"], result["lo"], result["hi"],
+        kind,
+        name,
+        result["delta"],
+        result["lo"],
+        result["hi"],
         "SIGNIFICANT" if result["excludes_zero"] else "not significant",
     )
     return result
@@ -234,6 +244,7 @@ def plot(results: pd.DataFrame, out_dir: Path) -> list[Path]:
     """RPS across the ladder, and the marginal contribution of each family."""
     try:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except ImportError:
@@ -246,13 +257,27 @@ def plot(results: pd.DataFrame, out_dir: Path) -> list[Path]:
     fig, ax = plt.subplots(figsize=(9, 5))
     x = np.arange(len(ladder))
     ax.plot(x, ladder["rps"], marker="o", color="#1f77b4", lw=2, zorder=3, label="model")
-    ax.axhline(ladder["rps_market"].iloc[0], ls="--", color="#d62728",
-               label=f"bookmakers {ladder['rps_market'].iloc[0]:.4f}")
-    ax.axhline(ladder["rps_base_rate"].iloc[0], ls=":", color="#7f7f7f",
-               label=f"base rate {ladder['rps_base_rate'].iloc[0]:.4f}")
+    ax.axhline(
+        ladder["rps_market"].iloc[0],
+        ls="--",
+        color="#d62728",
+        label=f"bookmakers {ladder['rps_market'].iloc[0]:.4f}",
+    )
+    ax.axhline(
+        ladder["rps_base_rate"].iloc[0],
+        ls=":",
+        color="#7f7f7f",
+        label=f"base rate {ladder['rps_base_rate'].iloc[0]:.4f}",
+    )
     for xi, (_, row) in zip(x, ladder.iterrows(), strict=True):
-        ax.annotate(f"{row['rps']:.4f}", (xi, row["rps"]), textcoords="offset points",
-                    xytext=(0, 9), ha="center", fontsize=8)
+        ax.annotate(
+            f"{row['rps']:.4f}",
+            (xi, row["rps"]),
+            textcoords="offset points",
+            xytext=(0, 9),
+            ha="center",
+            fontsize=8,
+        )
     ax.set_xticks(x)
     ax.set_xticklabels([r.replace("base+", "+") for r in ladder["rung"]], rotation=20, ha="right")
     ax.set_ylabel("RPS (lower is better)")
@@ -283,21 +308,31 @@ def plot(results: pd.DataFrame, out_dir: Path) -> list[Path]:
         fig, (ax, zoom) = plt.subplots(1, 2, figsize=(12, 5))
         for axis, subset in ((ax, slice(None)), (zoom, slice(1, None))):
             xi, gi = x[subset], gain[subset]
-            axis.bar(xi, gi, yerr=err[:, subset], capsize=4,
-                     color=colors[subset.start or 0:])
+            axis.bar(xi, gi, yerr=err[:, subset], capsize=4, color=colors[subset.start or 0 :])
             axis.axhline(0, color="black", lw=0.8)
             axis.set_xticks(xi)
-            axis.set_xticklabels(labels[subset.start or 0:], fontsize=9)
+            axis.set_xticklabels(labels[subset.start or 0 :], fontsize=9)
             axis.grid(axis="y", alpha=0.3)
             for xx, gg in zip(xi, gi, strict=True):
-                axis.annotate(f"{gg:+.5f}", (xx, gg), textcoords="offset points",
-                              xytext=(0, 10 if gg >= 0 else -16), ha="center", fontsize=8)
+                axis.annotate(
+                    f"{gg:+.5f}",
+                    (xx, gg),
+                    textcoords="offset points",
+                    xytext=(0, 10 if gg >= 0 else -16),
+                    ha="center",
+                    fontsize=8,
+                )
         ax.set_ylabel("RPS improvement (higher is better)")
         ax.set_title("Marginal contribution of each family")
         zoom.set_title("Same, excluding Elo")
         fig.tight_layout(rect=(0, 0.07, 1, 1))
-        fig.text(0.5, 0.02, "95% paired-bootstrap interval; grey = interval includes zero",
-                 ha="center", fontsize=10)
+        fig.text(
+            0.5,
+            0.02,
+            "95% paired-bootstrap interval; grey = interval includes zero",
+            ha="center",
+            fontsize=10,
+        )
         p = out_dir / "marginal_contribution.png"
         fig.savefig(p, dpi=150)
         plt.close(fig)
@@ -308,13 +343,23 @@ def plot(results: pd.DataFrame, out_dir: Path) -> list[Path]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--start-season", type=int, default=1516,
-                        help="First season to test on (production default: 1516).")
-    parser.add_argument("--quick", action="store_true",
-                        help="Start at 2324 instead: a fast smoke test, NOT a result.")
+    parser.add_argument(
+        "--start-season",
+        type=int,
+        default=1516,
+        help="First season to test on (production default: 1516).",
+    )
+    parser.add_argument(
+        "--quick",
+        action="store_true",
+        help="Start at 2324 instead: a fast smoke test, NOT a result.",
+    )
     parser.add_argument("--n-boot", type=int, default=10_000, help="Bootstrap resamples.")
-    parser.add_argument("--no-leave-one-out", action="store_true",
-                        help="Skip the secondary leave-one-family-out pass.")
+    parser.add_argument(
+        "--no-leave-one-out",
+        action="store_true",
+        help="Skip the secondary leave-one-family-out pass.",
+    )
     parser.add_argument("--out-dir", type=Path, default=OUT_DIR)
     args = parser.parse_args()
 
@@ -330,7 +375,8 @@ def main() -> None:
     grouped = classify(all_cols)
     logger.info(
         "%d features: %s",
-        len(all_cols), "  ".join(f"{f}={len(c)}" for f, c in grouped.items()),
+        len(all_cols),
+        "  ".join(f"{f}={len(c)}" for f, c in grouped.items()),
     )
     odds = load_raw_odds()
 
@@ -376,20 +422,26 @@ def main() -> None:
     boots = []
     for prev, cur in zip(ladder_names, ladder_names[1:], strict=False):
         boots.append(
-            compare(f"{prev} -> {cur}", "marginal", preds_by_rung[prev],
-                    preds_by_rung[cur], args.n_boot)
+            compare(
+                f"{prev} -> {cur}", "marginal", preds_by_rung[prev], preds_by_rung[cur], args.n_boot
+            )
         )
     for cur in ladder_names[1:]:
         boots.append(
-            compare(f"base -> {cur}", "vs_base", preds_by_rung["base"],
-                    preds_by_rung[cur], args.n_boot)
+            compare(
+                f"base -> {cur}", "vs_base", preds_by_rung["base"], preds_by_rung[cur], args.n_boot
+            )
         )
     if not args.no_leave_one_out:
         for family in LEAVE_ONE_OUT:
             boots.append(
-                compare(f"full vs full-minus-{family}", "leave_one_out",
-                        preds_by_rung["full"], preds_by_rung[f"full-minus-{family}"],
-                        args.n_boot)
+                compare(
+                    f"full vs full-minus-{family}",
+                    "leave_one_out",
+                    preds_by_rung["full"],
+                    preds_by_rung[f"full-minus-{family}"],
+                    args.n_boot,
+                )
             )
     bootstrap = pd.DataFrame(boots)
 
@@ -458,8 +510,15 @@ def main() -> None:
         logger.info("Wrote %s", p.name)
 
     show = [
-        "rung", "n_features", "rps", "rps_uncalibrated", "log_loss", "brier", "accuracy",
-        "d_rps_vs_prev", "d_rps_vs_base",
+        "rung",
+        "n_features",
+        "rps",
+        "rps_uncalibrated",
+        "log_loss",
+        "brier",
+        "accuracy",
+        "d_rps_vs_prev",
+        "d_rps_vs_base",
     ]
     logger.info("\n%s", results[show].to_string(index=False))
 

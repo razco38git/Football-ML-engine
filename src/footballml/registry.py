@@ -71,9 +71,7 @@ def save(
     target.mkdir(parents=True, exist_ok=True)
 
     joblib.dump(model, target / "model.joblib")
-    (target / "metadata.json").write_text(
-        json.dumps(asdict(metadata), indent=2), encoding="utf-8"
-    )
+    (target / "metadata.json").write_text(json.dumps(asdict(metadata), indent=2), encoding="utf-8")
 
     if mark_latest:
         # A pointer file rather than a symlink: symlinks need elevated

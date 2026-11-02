@@ -69,9 +69,7 @@ def main() -> None:
     for _, r in table.iterrows():
         match = f"{r.HomeTeam} v {r.AwayTeam}"[:37]
         xg = f"{r.expected_goals_home:.2f}-{r.expected_goals_away:.2f}"
-        hda = (
-            f"{r.prob_home_win * 100:4.1f}/{r.prob_draw * 100:4.1f}/{r.prob_away_win * 100:4.1f}"
-        )
+        hda = f"{r.prob_home_win * 100:4.1f}/{r.prob_draw * 100:4.1f}/{r.prob_away_win * 100:4.1f}"
         modal = f"{int(r.modal_score_home)}-{int(r.modal_score_away)}"
         actual = f"{int(r.FTHG)}-{int(r.FTAG)} ({r.FTR})" if pd.notna(r.FTHG) else "-"
         hit = "OK " if pd.notna(r.FTR) and r.predicted_outcome == r.FTR else "   "

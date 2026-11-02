@@ -17,12 +17,26 @@ from footballml.features.elo import START, add_elo, final_ratings
 
 def _match(date, home, away, hg, ag, season="2627", league="E0"):
     return [
-        {"League": league, "Season": season, "Date": pd.Timestamp(date),
-         "Team": home, "Opponent": away, "Venue": "Home",
-         "GoalsFor": hg, "GoalsAgainst": ag},
-        {"League": league, "Season": season, "Date": pd.Timestamp(date),
-         "Team": away, "Opponent": home, "Venue": "Away",
-         "GoalsFor": ag, "GoalsAgainst": hg},
+        {
+            "League": league,
+            "Season": season,
+            "Date": pd.Timestamp(date),
+            "Team": home,
+            "Opponent": away,
+            "Venue": "Home",
+            "GoalsFor": hg,
+            "GoalsAgainst": ag,
+        },
+        {
+            "League": league,
+            "Season": season,
+            "Date": pd.Timestamp(date),
+            "Team": away,
+            "Opponent": home,
+            "Venue": "Away",
+            "GoalsFor": ag,
+            "GoalsAgainst": hg,
+        },
     ]
 
 
@@ -47,20 +61,24 @@ def test_a_match_never_sees_its_own_result():
 
 
 def test_the_update_is_zero_sum():
-    rows = _frame([
-        _match("2026-08-01", "A", "B", 2, 0),
-        _match("2026-08-08", "A", "B", 1, 1),
-        _match("2026-08-15", "B", "A", 3, 1),
-    ])
+    rows = _frame(
+        [
+            _match("2026-08-01", "A", "B", 2, 0),
+            _match("2026-08-08", "A", "B", 1, 1),
+            _match("2026-08-15", "B", "A", 3, 1),
+        ]
+    )
     final = final_ratings(rows)
     assert final.sum() == pytest.approx(2 * START, abs=1e-6)
 
 
 def test_winning_raises_the_rating_and_losing_lowers_it():
-    rows = _frame([
-        _match("2026-08-01", "A", "B", 2, 0),
-        _match("2026-08-08", "A", "B", 2, 0),
-    ])
+    rows = _frame(
+        [
+            _match("2026-08-01", "A", "B", 2, 0),
+            _match("2026-08-08", "A", "B", 2, 0),
+        ]
+    )
     final = final_ratings(rows)
     assert final["A"] > START > final["B"]
 
@@ -118,7 +136,15 @@ def test_unplayed_fixtures_get_a_rating_but_do_not_change_one():
 
 def test_empty_history_returns_an_elo_column():
     empty = pd.DataFrame(
-        columns=["League", "Season", "Date", "Team", "Opponent", "Venue",
-                 "GoalsFor", "GoalsAgainst"]
+        columns=[
+            "League",
+            "Season",
+            "Date",
+            "Team",
+            "Opponent",
+            "Venue",
+            "GoalsFor",
+            "GoalsAgainst",
+        ]
     )
     assert "elo" in add_elo(empty).columns

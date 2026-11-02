@@ -58,9 +58,7 @@ def test_next_season(label: str, expected: str) -> None:
     assert _next_season(label) == expected
 
 
-def test_match_never_sees_its_own_season(
-    matches: pd.DataFrame, strength: pd.DataFrame
-) -> None:
+def test_match_never_sees_its_own_season(matches: pd.DataFrame, strength: pd.DataFrame) -> None:
     """The defining guard: a 2025/26 match must use 2024/25 strength.
 
     Values are seeded so the season is recoverable from the number -- 70 means
@@ -76,9 +74,7 @@ def test_match_never_sees_its_own_season(
     assert current["away_strength_overall"] == 70.0
 
 
-def test_earliest_season_gets_no_strength(
-    matches: pd.DataFrame, strength: pd.DataFrame
-) -> None:
+def test_earliest_season_gets_no_strength(matches: pd.DataFrame, strength: pd.DataFrame) -> None:
     """With nothing before it, the first season must be NaN rather than its own.
 
     Falling back to the match's own season here would be the leak arriving by a
@@ -150,9 +146,7 @@ def test_missing_strength_file_is_survivable() -> None:
     assert "home_strength_overall" not in joined.columns
 
 
-def test_join_does_not_duplicate_matches(
-    matches: pd.DataFrame, strength: pd.DataFrame
-) -> None:
+def test_join_does_not_duplicate_matches(matches: pd.DataFrame, strength: pd.DataFrame) -> None:
     """A many-to-one join that silently fans out would corrupt every metric."""
     assert len(add_team_strength(matches, strength, previous_season=True)) == len(matches)
 
@@ -208,20 +202,28 @@ def test_upcoming_fixture_gets_previous_season_strength(
 
     strength = pd.DataFrame(
         [
-            {"League": league, "Season": s, "Team": t,
-             "strength_overall": v, "strength_attack": v, "strength_defence": v}
+            {
+                "League": league,
+                "Season": s,
+                "Team": t,
+                "strength_overall": v,
+                "strength_attack": v,
+                "strength_defence": v,
+            }
             for s, v in ((_previous(season), 80.0), (season, 99.0))
             for t in (home, away)
         ]
     )
     fixture = pd.DataFrame(
-        [{
-            "League": league,
-            "Season": season,
-            "Date": recent_history["Date"].max() + pd.Timedelta(days=7),
-            "HomeTeam": home,
-            "AwayTeam": away,
-        }]
+        [
+            {
+                "League": league,
+                "Season": season,
+                "Date": recent_history["Date"].max() + pd.Timedelta(days=7),
+                "HomeTeam": home,
+                "AwayTeam": away,
+            }
+        ]
     )
 
     built = build_upcoming_features(recent_history, fixture, strength=strength)
@@ -245,13 +247,15 @@ def test_upcoming_fixture_without_strength_has_no_strength_columns(
 
     home, away = recent_history["Team"].drop_duplicates().iloc[:2].tolist()
     fixture = pd.DataFrame(
-        [{
-            "League": str(recent_history["League"].iloc[0]),
-            "Season": str(recent_history["Season"].max()),
-            "Date": recent_history["Date"].max() + pd.Timedelta(days=7),
-            "HomeTeam": home,
-            "AwayTeam": away,
-        }]
+        [
+            {
+                "League": str(recent_history["League"].iloc[0]),
+                "Season": str(recent_history["Season"].max()),
+                "Date": recent_history["Date"].max() + pd.Timedelta(days=7),
+                "HomeTeam": home,
+                "AwayTeam": away,
+            }
+        ]
     )
     built = build_upcoming_features(recent_history, fixture)
     assert not any("strength" in c for c in built.columns)
@@ -267,8 +271,9 @@ def test_understat_club_names_reach_football_data_fixtures(
     which is how the feature silently reached only 40% of Bundesliga
     team-seasons while every test above passed.
     """
-    renamed = strength.replace({"Team": {"Arsenal": "Borussia Dortmund",
-                                         "Chelsea": "Atletico Madrid"}})
+    renamed = strength.replace(
+        {"Team": {"Arsenal": "Borussia Dortmund", "Chelsea": "Atletico Madrid"}}
+    )
     matches = pd.DataFrame(
         {
             "League": ["E0"],
@@ -295,13 +300,15 @@ def test_already_played_fixtures_are_skipped(recent_history: pd.DataFrame) -> No
 
     home = recent_history[recent_history["Venue"] == "Home"].iloc[0]
     fixture = pd.DataFrame(
-        [{
-            "League": home["League"],
-            "Season": str(home["Season"]),
-            "Date": home["Date"],
-            "HomeTeam": home["Team"],
-            "AwayTeam": home["Opponent"],
-        }]
+        [
+            {
+                "League": home["League"],
+                "Season": str(home["Season"]),
+                "Date": home["Date"],
+                "HomeTeam": home["Team"],
+                "AwayTeam": home["Opponent"],
+            }
+        ]
     )
     assert build_upcoming_features(recent_history, fixture).empty
 
@@ -312,12 +319,14 @@ def test_unplayed_fixtures_still_build(recent_history: pd.DataFrame) -> None:
 
     home, away = recent_history["Team"].drop_duplicates().iloc[:2].tolist()
     fixture = pd.DataFrame(
-        [{
-            "League": str(recent_history["League"].iloc[0]),
-            "Season": str(recent_history["Season"].max()),
-            "Date": recent_history["Date"].max() + pd.Timedelta(days=14),
-            "HomeTeam": home,
-            "AwayTeam": away,
-        }]
+        [
+            {
+                "League": str(recent_history["League"].iloc[0]),
+                "Season": str(recent_history["Season"].max()),
+                "Date": recent_history["Date"].max() + pd.Timedelta(days=14),
+                "HomeTeam": home,
+                "AwayTeam": away,
+            }
+        ]
     )
     assert len(build_upcoming_features(recent_history, fixture)) == 1

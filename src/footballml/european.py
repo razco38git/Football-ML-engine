@@ -157,7 +157,10 @@ def fit_league_strength(
 
     rows = [
         {
-            "league": REFERENCE, "strength": 0.0, "low": 0.0, "high": 0.0,
+            "league": REFERENCE,
+            "strength": 0.0,
+            "low": 0.0,
+            "high": 0.0,
             "n_matches": int(involved.get(REFERENCE, 0)),
         }
     ]
@@ -204,15 +207,19 @@ def head_to_head(matches: pd.DataFrame) -> pd.DataFrame:
 
     home = pd.DataFrame(
         {
-            "league": cross["home_league"], "opponent": cross["away_league"],
-            "gf": cross["FTHG"], "ga": cross["FTAG"],
+            "league": cross["home_league"],
+            "opponent": cross["away_league"],
+            "gf": cross["FTHG"],
+            "ga": cross["FTAG"],
             "points": cross["FTR"].map({"H": 3, "D": 1, "A": 0}),
         }
     )
     away = pd.DataFrame(
         {
-            "league": cross["away_league"], "opponent": cross["home_league"],
-            "gf": cross["FTAG"], "ga": cross["FTHG"],
+            "league": cross["away_league"],
+            "opponent": cross["home_league"],
+            "gf": cross["FTAG"],
+            "ga": cross["FTHG"],
             "points": cross["FTR"].map({"A": 3, "D": 1, "H": 0}),
         }
     )

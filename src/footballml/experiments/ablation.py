@@ -49,7 +49,14 @@ from collections.abc import Iterable, Sequence
 #: Non-feature columns the backtest needs carried alongside any rung's features.
 #: Identifiers and targets -- `feature_columns` excludes them from the model.
 ID_COLUMNS: tuple[str, ...] = (
-    "League", "Season", "Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "FTR",
+    "League",
+    "Season",
+    "Date",
+    "HomeTeam",
+    "AwayTeam",
+    "FTHG",
+    "FTAG",
+    "FTR",
 )
 
 #: Family -> patterns matching the *stem* of a column (prefix and suffix
@@ -61,9 +68,7 @@ FAMILY_PATTERNS: dict[str, tuple[str, ...]] = {
         r"^days_since_last_match$",
         r"^matches_last_\d+_days$",
     ),
-    "elo": (
-        r"^elo$",
-    ),
+    "elo": (r"^elo$",),
     "form": (
         # Results: what the scoreline was.
         r"^(points|wins|draws|losses|goal_diff|goals_for|goals_against)_last_\d+(_venue)?$",
@@ -78,9 +83,7 @@ FAMILY_PATTERNS: dict[str, tuple[str, ...]] = {
         r"^(npxg_for|npxg_against|npxg_diff)_last_\d+(_venue)?$",
         r"^(deep_completions|ppda)_last_\d+(_venue)?$",
     ),
-    "squad": (
-        r"^strength_(overall|attack|defence|goalkeeper)$",
-    ),
+    "squad": (r"^strength_(overall|attack|defence|goalkeeper)$",),
 }
 
 #: The nested ladder, each rung adding one family to the one before.
@@ -151,9 +154,7 @@ def classify(columns: Iterable[str]) -> dict[str, list[str]]:
     return grouped
 
 
-def rung_columns(
-    all_columns: Sequence[str], families: Sequence[str]
-) -> list[str]:
+def rung_columns(all_columns: Sequence[str], families: Sequence[str]) -> list[str]:
     """Production columns belonging to ``families``, in production order.
 
     An empty ``families`` means the ``full`` rung: every column, unfiltered.

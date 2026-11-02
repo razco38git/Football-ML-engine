@@ -38,25 +38,36 @@ def _history(teams: list[str], rounds: int = 12) -> pd.DataFrame:
                 (home, away, "Home", hg, ag),
                 (away, home, "Away", ag, hg),
             ):
-                rows.append({
-                    "League": "E0", "Season": "2627", "Date": date,
-                    "Team": team, "Opponent": opp, "Venue": venue,
-                    "GoalsFor": gf, "GoalsAgainst": ga,
-                    "Result": "W" if gf > ga else "D" if gf == ga else "L",
-                    "ShotsFor": int(rng.integers(5, 20)),
-                    "ShotsAgainst": int(rng.integers(5, 20)),
-                    "ShotsOnTargetFor": int(rng.integers(1, 9)),
-                    "ShotsOnTargetAgainst": int(rng.integers(1, 9)),
-                })
+                rows.append(
+                    {
+                        "League": "E0",
+                        "Season": "2627",
+                        "Date": date,
+                        "Team": team,
+                        "Opponent": opp,
+                        "Venue": venue,
+                        "GoalsFor": gf,
+                        "GoalsAgainst": ga,
+                        "Result": "W" if gf > ga else "D" if gf == ga else "L",
+                        "ShotsFor": int(rng.integers(5, 20)),
+                        "ShotsAgainst": int(rng.integers(5, 20)),
+                        "ShotsOnTargetFor": int(rng.integers(1, 9)),
+                        "ShotsOnTargetAgainst": int(rng.integers(1, 9)),
+                    }
+                )
         date += pd.Timedelta(days=7)
     return pd.DataFrame(rows)
 
 
 def _all_pairs(teams: list[str]) -> pd.DataFrame:
-    return pd.DataFrame([
-        {"League": "E0", "Season": "2627", "HomeTeam": h, "AwayTeam": a}
-        for h in teams for a in teams if h != a
-    ])
+    return pd.DataFrame(
+        [
+            {"League": "E0", "Season": "2627", "HomeTeam": h, "AwayTeam": a}
+            for h in teams
+            for a in teams
+            if h != a
+        ]
+    )
 
 
 @pytest.fixture
@@ -83,14 +94,10 @@ def test_a_whole_season_keeps_its_form_features(teams):
 def test_stacking_a_whole_season_on_one_date_is_what_broke_it(teams):
     """Pin the failure mode itself, so the reason for this module is legible."""
     history = _history(list(teams))
-    fixtures = _all_pairs(teams).assign(
-        Date=history["Date"].max() + pd.Timedelta(days=7)
-    )
+    fixtures = _all_pairs(teams).assign(Date=history["Date"].max() + pd.Timedelta(days=7))
     stacked = build_upcoming_features(history, fixtures)
 
-    away_form = [
-        c for c in stacked.columns if c.startswith("away_") and "_last_5" in c
-    ]
+    away_form = [c for c in stacked.columns if c.startswith("away_") and "_last_5" in c]
     assert any(stacked[c].isna().all() for c in away_form), (
         "the old failure mode no longer reproduces; if build_upcoming_features "
         "has been fixed to handle repeated teams, this test should go"
@@ -131,9 +138,7 @@ def test_differences_are_recomputed_from_the_assembled_sides(teams):
     stem = "points_last_5"
     if f"{stem}_diff" in built.columns:
         expected = built[f"home_{stem}"] - built[f"away_{stem}"]
-        pd.testing.assert_series_equal(
-            built[f"{stem}_diff"], expected, check_names=False
-        )
+        pd.testing.assert_series_equal(built[f"{stem}_diff"], expected, check_names=False)
 
 
 def test_no_fixtures_returns_empty(teams):

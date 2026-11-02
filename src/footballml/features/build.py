@@ -82,9 +82,7 @@ def diff_stems(windows: Sequence[int] = DEFAULT_WINDOWS) -> tuple[str, ...]:
     ``home_points_last_19`` with no ``points_last_19_diff`` beside it, and the
     relative strength of the two sides is what actually decides a match.
     """
-    windowed = [
-        stem.format(w=w) for w in windows for stem in _WINDOWED_STEMS
-    ]
+    windowed = [stem.format(w=w) for w in windows for stem in _WINDOWED_STEMS]
     return tuple(windowed) + _FIXED_STEMS
 
 
@@ -364,9 +362,7 @@ def build_match_features(
     matches = matches.merge(away_feats, on=list(_ID_COLS), how="inner", validate="1:1")
 
     if strength is not None:
-        matches = add_team_strength(
-            matches, strength, previous_season=previous_season_strength
-        )
+        matches = add_team_strength(matches, strength, previous_season=previous_season_strength)
 
     matches = _add_diffs(matches, windows)
     matches["league_code"] = matches["League"].map(LEAGUE_CODES).astype("float64")
@@ -414,7 +410,8 @@ def build_upcoming_features(
     if already.any():
         logger.info(
             "Skipping %d of %d fixture(s) already played and in the history",
-            int(already.sum()), len(fixtures),
+            int(already.sum()),
+            len(fixtures),
         )
         fixtures = fixtures[~already.to_numpy()]
     if fixtures.empty:
@@ -436,7 +433,9 @@ def build_upcoming_features(
             "%d team(s) appear more than once in this fixture batch (worst: %s x%d). "
             "Their rolling form will be computed over the other placeholder rows "
             "and come back NaN. Use build_frozen_form_features for a whole season.",
-            len(repeated), repeated.index[0], int(repeated.iloc[0]),
+            len(repeated),
+            repeated.index[0],
+            int(repeated.iloc[0]),
         )
 
     placeholder = pd.concat(
@@ -451,9 +450,7 @@ def build_upcoming_features(
     # and the arithmetic in prepare_team_match then fails on it.
     for col in tmh.columns:
         if col not in placeholder.columns:
-            placeholder[col] = (
-                np.nan if pd.api.types.is_numeric_dtype(tmh[col]) else None
-            )
+            placeholder[col] = np.nan if pd.api.types.is_numeric_dtype(tmh[col]) else None
 
     combined = pd.concat([tmh, placeholder[tmh.columns]], ignore_index=True)
     for col in tmh.columns:
@@ -528,9 +525,7 @@ def build_frozen_form_features(
                 for a, b in pairs
             ]
         )
-        built = build_upcoming_features(
-            tmh, round_fixtures, windows=windows, **kwargs
-        )
+        built = build_upcoming_features(tmh, round_fixtures, windows=windows, **kwargs)
         for _, row in built.iterrows():
             blocks.setdefault(row["HomeTeam"], {})["home"] = row
             blocks.setdefault(row["AwayTeam"], {})["away"] = row
@@ -573,9 +568,7 @@ def build_frozen_form_features(
     return matches.reset_index(drop=True)
 
 
-def _fixture_side(
-    fixtures: pd.DataFrame, own: str, opp: str, venue: str
-) -> pd.DataFrame:
+def _fixture_side(fixtures: pd.DataFrame, own: str, opp: str, venue: str) -> pd.DataFrame:
     """One side of each unplayed fixture, with no match statistics."""
     return pd.DataFrame(
         {
@@ -598,16 +591,22 @@ def _feature_columns(long_df: pd.DataFrame, original: pd.DataFrame) -> list[str]
     the result.
     """
     derived_in_match = {
-        "Points", "Win", "Draw", "Loss", "GoalDiff", "ShotAccuracy",
-        "xGDiff", "xGOverperformance", "xGPerShot", "npxGDiff",
+        "Points",
+        "Win",
+        "Draw",
+        "Loss",
+        "GoalDiff",
+        "ShotAccuracy",
+        "xGDiff",
+        "xGOverperformance",
+        "xGPerShot",
+        "npxGDiff",
     }
     original_cols = set(original.columns) | derived_in_match
     return [c for c in long_df.columns if c not in original_cols]
 
 
-def _add_diffs(
-    matches: pd.DataFrame, windows: Sequence[int] = DEFAULT_WINDOWS
-) -> pd.DataFrame:
+def _add_diffs(matches: pd.DataFrame, windows: Sequence[int] = DEFAULT_WINDOWS) -> pd.DataFrame:
     """Add ``{stem}_diff`` columns for every stem present on both sides."""
     diffs = {
         f"{stem}_diff": matches[f"home_{stem}"] - matches[f"away_{stem}"]

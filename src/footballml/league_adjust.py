@@ -143,13 +143,13 @@ def fit(predictions: pd.DataFrame, reference: str = REFERENCE) -> dict[str, obje
             "rps_uncorrected": round(_rps(np.concatenate(held_base), actual), 5),
             "rps_corrected": round(_rps(np.concatenate(held_probs), actual), 5),
         }
-        holdout["improvement"] = round(
-            holdout["rps_uncorrected"] - holdout["rps_corrected"], 5
-        )
+        holdout["improvement"] = round(holdout["rps_uncorrected"] - holdout["rps_corrected"], 5)
         logger.info(
             "Leave-one-season-out: RPS %.5f -> %.5f (%+.5f) on %d matches",
-            holdout["rps_uncorrected"], holdout["rps_corrected"],
-            -holdout["improvement"], holdout["n"],
+            holdout["rps_uncorrected"],
+            holdout["rps_corrected"],
+            -holdout["improvement"],
+            holdout["n"],
         )
         assert OUTCOMES  # the probability column order these scores assume
 
@@ -232,9 +232,7 @@ def save(fitted: dict[str, object], path: Path | None = None) -> Path:
             "an unstamped file is applied to every later model without warning"
         )
     if not isinstance(fitted["offsets"], dict):
-        raise ValueError(
-            f"offsets must be a mapping, got {type(fitted['offsets']).__name__}"
-        )
+        raise ValueError(f"offsets must be a mapping, got {type(fitted['offsets']).__name__}")
 
     write_json(fitted, path)
     return path

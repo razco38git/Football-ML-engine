@@ -34,8 +34,14 @@ from footballml.ingest.schedule import (
 def _schedule(rows: list[tuple[str, str, str, str, bool]]) -> pd.DataFrame:
     return pd.DataFrame(
         [
-            {"League": lg, "Season": "2627", "Date": pd.Timestamp(date),
-             "HomeTeam": home, "AwayTeam": away, "played": played}
+            {
+                "League": lg,
+                "Season": "2627",
+                "Date": pd.Timestamp(date),
+                "HomeTeam": home,
+                "AwayTeam": away,
+                "played": played,
+            }
             for lg, date, home, away, played in rows
         ]
     )
@@ -46,13 +52,15 @@ TODAY = pd.Timestamp("2026-10-05")
 
 @pytest.fixture
 def schedule() -> pd.DataFrame:
-    return _schedule([
-        ("E0", "2026-09-20", "Arsenal", "Chelsea", True),     # already played
-        ("E0", "2026-10-09", "Man City", "Everton", False),   # in window
-        ("SP1", "2026-10-10", "Barcelona", "Betis", False),   # in window
-        ("D1", "2026-10-11", "Bayern Munich", "Mainz", False),
-        ("I1", "2026-11-20", "Inter", "Roma", False),         # beyond horizon
-    ])
+    return _schedule(
+        [
+            ("E0", "2026-09-20", "Arsenal", "Chelsea", True),  # already played
+            ("E0", "2026-10-09", "Man City", "Everton", False),  # in window
+            ("SP1", "2026-10-10", "Barcelona", "Betis", False),  # in window
+            ("D1", "2026-10-11", "Bayern Munich", "Mainz", False),
+            ("I1", "2026-11-20", "Inter", "Roma", False),  # beyond horizon
+        ]
+    )
 
 
 def test_only_unplayed_fixtures_in_the_window(schedule):
@@ -87,9 +95,7 @@ def test_fixtures_already_in_the_past_are_excluded():
 
 
 def test_an_empty_schedule_gives_an_empty_window_not_an_error():
-    empty = pd.DataFrame(
-        columns=["League", "Season", "Date", "HomeTeam", "AwayTeam", "played"]
-    )
+    empty = pd.DataFrame(columns=["League", "Season", "Date", "HomeTeam", "AwayTeam", "played"])
     window = window_fixtures(empty, today=TODAY)
     assert window.empty
     assert "played" not in window.columns
@@ -108,9 +114,7 @@ def test_default_horizon_covers_a_weekend_round():
     assert len(window_fixtures(schedule, horizon_days=DEFAULT_HORIZON_DAYS, today=TODAY)) == 1
 
 
-@pytest.mark.parametrize(
-    "score", ["4\u20132", "4-2", "4 \u2013 2", "0\u20130", "10\u201311"]
-)
+@pytest.mark.parametrize("score", ["4\u20132", "4-2", "4 \u2013 2", "0\u20130", "10\u201311"])
 def test_scores_parse_whatever_dash_the_source_used(score):
     """A score means the fixture has been played, so a parse that fails marks
     the whole season unplayed -- and FBref uses an en-dash, not a hyphen."""

@@ -197,9 +197,7 @@ def residualise(
         usable = group.dropna(subset=[column, *projected])
         if len(usable) <= len(projected) + 1:
             continue
-        x = np.column_stack(
-            [np.ones(len(usable)), *(usable[c].to_numpy() for c in projected)]
-        )
+        x = np.column_stack([np.ones(len(usable)), *(usable[c].to_numpy() for c in projected)])
         y = usable[column].to_numpy()
         beta, *_ = np.linalg.lstsq(x, y, rcond=None)
         fitted = x @ beta
@@ -302,9 +300,7 @@ def edition_stats(season: str) -> tuple[float, float, pd.Series]:
     return float(overall.mean()), float(overall.std()), overall.sort_values()
 
 
-def recover_outcomes(
-    rated: pd.DataFrame, lookup: pd.DataFrame | None = None
-) -> pd.DataFrame:
+def recover_outcomes(rated: pd.DataFrame, lookup: pd.DataFrame | None = None) -> pd.DataFrame:
     """Attach each player's EA rating and club in edition ``t+1``.
 
     Two tiers, and the second is the one that matters. Requiring a *rated*
@@ -352,9 +348,7 @@ def recover_outcomes(
         edition["_n"] = edition["name"].astype(str).map(normalise_name)
         edition = edition.dropna(subset=["_n"])
         groups = edition.groupby("_n").groups
-        for idx, name, age in zip(
-            group.index, group["fifa_name"], group["fifa_age"], strict=True
-        ):
+        for idx, name, age in zip(group.index, group["fifa_name"], group["fifa_age"], strict=True):
             key = normalise_name(str(name))
             if key not in groups or pd.isna(age):
                 continue
@@ -392,9 +386,7 @@ def build_sample() -> pd.DataFrame:
     rated = rated[clubs_per_season == 1]
 
     rated = rated[
-        rated["fifa_overall"].notna()
-        & rated["fifa_age"].notna()
-        & rated["fifa_club"].notna()
+        rated["fifa_overall"].notna() & rated["fifa_age"].notna() & rated["fifa_club"].notna()
     ]
     # The lookup keeps every rated season; only the *eligible* rows are filtered.
     lookup = rated

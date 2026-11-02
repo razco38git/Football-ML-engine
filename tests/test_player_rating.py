@@ -28,10 +28,10 @@ from footballml.players.rating import (
         ("GK S", "GK"),
         ("D", "D"),
         ("D S", "D"),
-        ("F M S", "F"),      # most forwards are listed this way
+        ("F M S", "F"),  # most forwards are listed this way
         ("D M S", "D"),
         ("M S", "M"),
-        ("S", None),         # substitute only, no role recorded
+        ("S", None),  # substitute only, no role recorded
         (None, None),
         (float("nan"), None),
     ],
@@ -112,8 +112,15 @@ def test_low_minutes_are_shrunk_toward_the_mean() -> None:
     elite = {c: squad[c].max() for c in squad.columns if c.endswith(("_per90", "_share"))}
 
     for name, minutes in (("Cameo", 500.0), ("Regular", 3000.0)):
-        row = {**squad.iloc[0].to_dict(), **elite, "Player": name, "minutes": minutes,
-               "nineties": minutes / 90, "yellow_cards_per90": 0.0, "red_cards_per90": 0.0}
+        row = {
+            **squad.iloc[0].to_dict(),
+            **elite,
+            "Player": name,
+            "minutes": minutes,
+            "nineties": minutes / 90,
+            "yellow_cards_per90": 0.0,
+            "red_cards_per90": 0.0,
+        }
         squad = pd.concat([squad, pd.DataFrame([row])], ignore_index=True)
 
     rated = rate_players(squad).set_index("Player")
@@ -132,7 +139,8 @@ def test_goalkeepers_are_rated_from_keeper_metrics() -> None:
     skill = rng.uniform(0.1, 1.0, n)
     keepers = pd.DataFrame(
         {
-            "League": "E0", "Season": "2526",
+            "League": "E0",
+            "Season": "2526",
             "Player": [f"GK{i}" for i in range(n)],
             "Team": [f"T{i}" for i in range(n)],
             "position_group": "GK",
@@ -293,11 +301,14 @@ def _defenders(n: int = 120, seasons: tuple[str, ...] = ("2425",), seed: int = 0
         frames.append(
             pd.DataFrame(
                 {
-                    "League": "E0", "Season": season,
+                    "League": "E0",
+                    "Season": season,
                     "Player": [f"{season}-P{i}" for i in range(n)],
                     "Team": [f"T{i % 20}" for i in range(n)],
-                    "position_group": "D", "role": "CB",
-                    "minutes": minutes, "nineties": minutes / 90,
+                    "position_group": "D",
+                    "role": "CB",
+                    "minutes": minutes,
+                    "nineties": minutes / 90,
                     "interceptions_padj": quality * 0.3,
                     "tackles_won_padj": quality * 0.2,
                     "fouls_per90": rng.uniform(0.1, 1.5, n),
@@ -324,7 +335,7 @@ def test_a_metric_covering_a_fraction_of_the_pool_is_not_a_percentile() -> None:
     filled with 0.5 and sat on the median while the Spanish players spread out
     around them -- a ranking of one league, presented as a ranking of five.
     """
-    squad = _defenders(n = 120)
+    squad = _defenders(n=120)
     thin = squad.index >= 20  # 17% coverage, as 2015/16 had
     squad.loc[thin, ["interceptions_padj", "tackles_won_padj"]] = np.nan
 
@@ -363,9 +374,17 @@ def test_a_refused_sub_rating_renormalises_rather_than_dropping_the_player() -> 
 
 
 _NO_PERFORMANCE = (
-    "interceptions_padj", "tackles_won_padj", "fouls_per90",
-    "xg_buildup_share", "xg_buildup_per90", "xg_chain_share", "xg_chain_per90",
-    "xa_per90", "key_passes_per90", "np_xg_per90", "np_goals_per90",
+    "interceptions_padj",
+    "tackles_won_padj",
+    "fouls_per90",
+    "xg_buildup_share",
+    "xg_buildup_per90",
+    "xg_chain_share",
+    "xg_chain_per90",
+    "xa_per90",
+    "key_passes_per90",
+    "np_xg_per90",
+    "np_goals_per90",
 )
 
 
@@ -425,9 +444,7 @@ def test_nullable_columns_from_the_ingest_do_not_break_the_build() -> None:
     # is the one thing still computable, and it is what upcasts the composite.
     early = squad["Season"].eq("1415")
     squad.loc[early, list(_NO_PERFORMANCE)] = pd.NA
-    squad["fifa_overall"] = pd.array(
-        np.linspace(60, 90, len(squad)), dtype="Float64"
-    )
+    squad["fifa_overall"] = pd.array(np.linspace(60, 90, len(squad)), dtype="Float64")
 
     rated = rate_players(squad)
     assert rated["rated"].all()
@@ -499,9 +516,7 @@ def test_the_peak_term_can_be_switched_off() -> None:
     assert off["composite_raw"].notna().any()
     # Recomputing the weighted mean by hand is the point: no peak, no change.
     again = rate_players(squad.copy(), {k: v for k, v in config.items() if k != "peak_weight"})
-    pd.testing.assert_series_equal(
-        off["composite_raw"], again["composite_raw"], check_names=False
-    )
+    pd.testing.assert_series_equal(off["composite_raw"], again["composite_raw"], check_names=False)
 
 
 def test_a_player_with_no_sub_ratings_is_not_pulled_toward_nothing() -> None:
@@ -537,14 +552,12 @@ def test_a_clean_tackler_outranks_a_busy_fouler() -> None:
     squad.loc[0, ["tackles_won_per90", "interceptions_per90", "fouls_per90"]] = [1.0, 1.0, 0.3]
     squad.loc[1, ["tackles_won_per90", "interceptions_per90", "fouls_per90"]] = [1.0, 1.0, 1.5]
     for i in (0, 1):
-        squad.loc[i, "clean_challenge_rate"] = (
-            squad.loc[i, "tackles_won_per90"]
-            / (squad.loc[i, "tackles_won_per90"] + squad.loc[i, "fouls_per90"])
+        squad.loc[i, "clean_challenge_rate"] = squad.loc[i, "tackles_won_per90"] / (
+            squad.loc[i, "tackles_won_per90"] + squad.loc[i, "fouls_per90"]
         )
         squad.loc[i, "ball_won_per_foul"] = (
-            (squad.loc[i, "tackles_won_per90"] + squad.loc[i, "interceptions_per90"])
-            / squad.loc[i, "fouls_per90"]
-        )
+            squad.loc[i, "tackles_won_per90"] + squad.loc[i, "interceptions_per90"]
+        ) / squad.loc[i, "fouls_per90"]
     squad.loc[[0, 1], ["interceptions_padj", "tackles_won_padj"]] = [0.15, 0.10]
 
     config = load_config()

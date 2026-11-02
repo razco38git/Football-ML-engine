@@ -130,9 +130,7 @@ READERS = {"understat": _read_understat, "fbref": _read_fbref}
 PLAYER_RATINGS = PROCESSED_DIR / "player_ratings.csv"
 
 
-def derive(
-    source: str, leagues: list[str], seasons: list[str]
-) -> tuple[dict[str, str], list[str]]:
+def derive(source: str, leagues: list[str], seasons: list[str]) -> tuple[dict[str, str], list[str]]:
     """Return ``(aliases, warnings)`` mapping ``source`` names to canonical ones."""
     # Read football-data.co.uk through our own reader, not soccerdata's: theirs
     # picks encoding by season number and silently loses whole seasons whose
@@ -256,9 +254,7 @@ def derive_sofifa(seasons: list[str] | None = None) -> tuple[dict[str, str], lis
     # hundred players. Those are the labels that matter most, because a rename
     # arrives with a new edition. Chain them instead -- see `_chain_editions`.
     resolved = {name: counter.most_common(1)[0][0] for name, counter in votes.items()}
-    chained, chain_warnings = _chain_editions(
-        resolved, wanted=set(rated["fifa_club"].astype(str))
-    )
+    chained, chain_warnings = _chain_editions(resolved, wanted=set(rated["fifa_club"].astype(str)))
     for name, canonical in chained.items():
         if name != canonical:
             aliases[name] = canonical
@@ -277,9 +273,7 @@ CHAIN_EVIDENCE_MIN = 4
 CHAIN_AGREEMENT = 0.5
 
 
-def _chain_editions(
-    resolved: dict[str, str], wanted: set[str]
-) -> tuple[dict[str, str], list[str]]:
+def _chain_editions(resolved: dict[str, str], wanted: set[str]) -> tuple[dict[str, str], list[str]]:
     """Resolve an edition's new club labels through the edition before it.
 
     EA renames a club the season it loses the licence, so the label that needs
@@ -380,7 +374,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--write", action="store_true", help="Update the alias config.")
     parser.add_argument(
-        "--source", default="understat", choices=[*sorted(READERS), "sofifa"],
+        "--source",
+        default="understat",
+        choices=[*sorted(READERS), "sofifa"],
         help="Which source's names to resolve against football-data's.",
     )
     parser.add_argument("--start-season", default="1415")
@@ -420,7 +416,9 @@ def main() -> None:
         if kept:
             log.info(
                 "Keeping %d existing %s alias(es) not re-derived this run: %s",
-                len(kept), args.source, ", ".join(sorted(kept)),
+                len(kept),
+                args.source,
+                ", ".join(sorted(kept)),
             )
         config[args.source] = dict(sorted({**existing, **aliases}.items()))
 
@@ -428,9 +426,7 @@ def main() -> None:
             HEADER + yaml.safe_dump(config, sort_keys=True, allow_unicode=True),
             encoding="utf-8",
         )
-        log.info(
-            "Wrote %d %s aliases to %s", len(config[args.source]), args.source, ALIAS_CONFIG
-        )
+        log.info("Wrote %d %s aliases to %s", len(config[args.source]), args.source, ALIAS_CONFIG)
     else:
         print("\n(dry run -- pass --write to update the config)")
 

@@ -82,7 +82,8 @@ def test_similarity_is_symmetric(outfielders):
     """
     forward, *_ = [m for m in similar_players(outfielders, "Subject", limit=99)[1]]
     back = next(
-        m for m in similar_players(outfielders, forward.player, limit=99)[1]
+        m
+        for m in similar_players(outfielders, forward.player, limit=99)[1]
         if m.player == "Subject"
     )
     assert forward.fifa_similarity == back.fifa_similarity
@@ -147,9 +148,7 @@ def test_a_missing_ea_entry_leaves_the_axis_empty_not_zero(outfielders):
         absent[f"fifa_{attribute}"] = np.nan
     frame = _frame([*outfielders.to_dict("records"), absent])
 
-    match = next(
-        m for m in similar_players(frame, "Subject", limit=99)[1] if m.player == "No EA"
-    )
+    match = next(m for m in similar_players(frame, "Subject", limit=99)[1] if m.player == "No EA")
     assert match.fifa_similarity is None
     assert match.percentile_similarity is not None
     assert match.combined == match.percentile_similarity

@@ -211,9 +211,7 @@ def usable_weights(
     usable = {
         c: w
         for c, w in weights.items()
-        if c in frame.columns
-        and w != 0
-        and frame[c].notna().mean() >= MIN_METRIC_COVERAGE
+        if c in frame.columns and w != 0 and frame[c].notna().mean() >= MIN_METRIC_COVERAGE
     }
     total = sum(abs(w) for w in weights.values() if w != 0)
     if not total:
@@ -255,8 +253,10 @@ def _weighted(
     share = 1.0 - measured
     if dropped:
         _warn_once(
-            "Ignoring %d configured metric(s) with no data (%.0f%% of the "
-            "weight): %s", len(dropped), 100 * share, ", ".join(sorted(dropped)),
+            "Ignoring %d configured metric(s) with no data (%.0f%% of the weight): %s",
+            len(dropped),
+            100 * share,
+            ", ".join(sorted(dropped)),
         )
 
     # What is left has to be most of what was asked for. Renormalising over a
@@ -290,8 +290,7 @@ def _weighted(
     # unchanged, because `present` equals `total`.
     present = sum(frame[c].notna().astype(float) * abs(w) for c, w in usable.items())
     stacked = sum(
-        (frame[c] if w > 0 else 1.0 - frame[c]).fillna(0.0) * abs(w)
-        for c, w in usable.items()
+        (frame[c] if w > 0 else 1.0 - frame[c]).fillna(0.0) * abs(w) for c, w in usable.items()
     )
     measured_share = present / total
     return (stacked / present.replace(0.0, np.nan)).where(
@@ -346,9 +345,7 @@ def _peak_over_rated_sub_ratings(
     return peak
 
 
-def rate_players(
-    players: pd.DataFrame, config: dict[str, Any] | None = None
-) -> pd.DataFrame:
+def rate_players(players: pd.DataFrame, config: dict[str, Any] | None = None) -> pd.DataFrame:
     """Compute ratings for every eligible player-season.
 
     Args:
@@ -378,9 +375,9 @@ def rate_players(
     df.loc[df["role"].isna(), "unrated_reason"] = "No position recorded"
     for group, reason in UNRATED_GROUPS.items():
         df.loc[df["role"] == group, "unrated_reason"] = reason
-    df.loc[
-        (df["minutes"] < min_minutes) & df["unrated_reason"].isna(), "unrated_reason"
-    ] = f"Under {min_minutes} minutes played"
+    df.loc[(df["minutes"] < min_minutes) & df["unrated_reason"].isna(), "unrated_reason"] = (
+        f"Under {min_minutes} minutes played"
+    )
 
     # Percentiles need a real distribution behind them. Drop pools too small to
     # provide one -- in practice the season currently in progress.
@@ -415,9 +412,7 @@ def rate_players(
     # first; and each column needs to start as plain float64, because assigning
     # a nullable Float64 block into one another group created as float64 raises.
     sub_columns: dict[str, None] = {
-        f"sub_{name}": None
-        for spec in config["positions"].values()
-        for name in spec["sub_ratings"]
+        f"sub_{name}": None for spec in config["positions"].values() for name in spec["sub_ratings"]
     }
     for column in sub_columns:
         work[column] = np.nan
@@ -472,9 +467,7 @@ def rate_players(
         # anyway. What is left is weaker, visibly so: `sub_defending` comes
         # back blank rather than as a plausible 50.
         frame = pd.DataFrame(sub_values)
-        composite = _weighted(
-            frame, spec["sub_rating_weights"], max_missing_weight=1.0
-        )
+        composite = _weighted(frame, spec["sub_rating_weights"], max_missing_weight=1.0)
         # The share of the role's definition that survived, for this pool. A
         # 2014/15 centre back keeps 38% of his: `defending` is 62% of the
         # composite and FBref served no `misc` table that season, so what is
@@ -573,18 +566,16 @@ def rate_players(
             f"{role} {season}"
             for role, season in work.loc[hollow, by].drop_duplicates().itertuples(index=False)
         )
-        rescued = hollow & work.get(
-            "fifa_overall", pd.Series(np.nan, index=work.index)
-        ).notna()
+        rescued = hollow & work.get("fifa_overall", pd.Series(np.nan, index=work.index)).notna()
         logger.warning(
             "No usable performance data for %d player-season(s) (%s); %d keep a "
             "rating from EA alone, %d are left unrated",
-            int(hollow.sum()), ", ".join(missing),
-            int(rescued.sum()), int((hollow & ~rescued).sum()),
+            int(hollow.sum()),
+            ", ".join(missing),
+            int(rescued.sum()),
+            int((hollow & ~rescued).sum()),
         )
-        df.loc[work.index[hollow & ~rescued], "unrated_reason"] = (
-            "No performance data this season"
-        )
+        df.loc[work.index[hollow & ~rescued], "unrated_reason"] = "No performance data this season"
         work = work[~(hollow & ~rescued)]
         if work.empty:
             return df
@@ -615,8 +606,14 @@ def rate_players(
     # player well above their EA overall is in form, one well below is coasting
     # on reputation.
     carried = [
-        *sub_columns, "composite_raw", "composite", "performance_rating",
-        "fifa_on_our_scale", "measured_share", "fifa_weight_used", "rating",
+        *sub_columns,
+        "composite_raw",
+        "composite",
+        "performance_rating",
+        "fifa_on_our_scale",
+        "measured_share",
+        "fifa_weight_used",
+        "rating",
     ]
     for column in carried:
         if column in work.columns:
@@ -630,7 +627,9 @@ def rate_players(
     df["rating"] = df["rating"].round().astype("Int64")
     logger.info(
         "Rated %d of %d player-seasons (%d unrated)",
-        int(df["rated"].sum()), len(df), int((~df["rated"]).sum()),
+        int(df["rated"].sum()),
+        len(df),
+        int((~df["rated"]).sum()),
     )
     return df
 
@@ -690,9 +689,7 @@ def _blend_with_fifa(work: pd.DataFrame, config: dict[str, Any]) -> pd.Series:
         return performance
 
     group = "role" if "role" in work.columns else "position_group"
-    fifa_percentile = work.groupby([group, "Season"], observed=True)["fifa_overall"].rank(
-        pct=True
-    )
+    fifa_percentile = work.groupby([group, "Season"], observed=True)["fifa_overall"].rank(pct=True)
     fifa_on_our_scale = _to_scale(fifa_percentile, config["scale"])
     # Kept, not just used. Published as `fifa_on_our_scale`, because without it
     # the page shows three numbers that cannot be reconciled: Chema Andres is
@@ -757,13 +754,14 @@ def _blend_with_fifa(work: pd.DataFrame, config: dict[str, Any]) -> pd.Series:
         nineties = k
         if share is not None:
             nineties = k / share.astype(float).fillna(0.0).clip(lower=0.1)
-        shrunk = shrink_toward_mean(
-            work, "performance_rating", [group, "Season"], nineties
-        )
+        shrunk = shrink_toward_mean(work, "performance_rating", [group, "Season"], nineties)
         blended[~present] = shrunk[~present]
     logger.info(
         "Blended %d/%d ratings with FIFA at weight %.2f (mean effective %.2f)",
-        int(present.sum()), len(work), weight, float(effective[present].mean()),
+        int(present.sum()),
+        len(work),
+        weight,
+        float(effective[present].mean()),
     )
     return blended
 

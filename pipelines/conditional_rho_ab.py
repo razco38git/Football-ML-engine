@@ -67,9 +67,7 @@ class FoldLeakError(RuntimeError):
     """Raised when a rho fit is handed rows from the fold it will score."""
 
 
-def fit_rho_within_fold(
-    train: pd.DataFrame, score_index: pd.Index, fitter, **kwargs
-) -> float:
+def fit_rho_within_fold(train: pd.DataFrame, score_index: pd.Index, fitter, **kwargs) -> float:
     """Fit rho on ``train`` only, refusing any overlap with the scored fold.
 
     The guard is the point of this function. Every arm routes through it so that
@@ -211,8 +209,10 @@ def _fit_pooled(frame: pd.DataFrame) -> float:
     from footballml.models.dixon_coles import fit_rho
 
     return fit_rho(
-        frame["mu_home"].to_numpy(), frame["mu_away"].to_numpy(),
-        frame["FTHG"].to_numpy(), frame["FTAG"].to_numpy(),
+        frame["mu_home"].to_numpy(),
+        frame["mu_away"].to_numpy(),
+        frame["FTHG"].to_numpy(),
+        frame["FTAG"].to_numpy(),
     )
 
 
@@ -233,8 +233,12 @@ def _fit_linear_in_lambda(frame: pd.DataFrame) -> tuple[float, float, float]:
         m = _matrix(mu_h, mu_a, rho)
         return -np.log(m[rows, hg, ag] + 1e-12).sum()
 
-    best = minimize(neg_log_lik, x0=[-0.05, 0.0], method="Nelder-Mead",
-                    options={"xatol": 1e-5, "fatol": 1e-3, "maxiter": 200})
+    best = minimize(
+        neg_log_lik,
+        x0=[-0.05, 0.0],
+        method="Nelder-Mead",
+        options={"xatol": 1e-5, "fatol": 1e-3, "maxiter": 200},
+    )
     return float(best.x[0]), float(best.x[1]), centre
 
 
@@ -264,9 +268,7 @@ def rho_for_arm(arm: str, train: pd.DataFrame, score: pd.DataFrame) -> np.ndarra
                 },
                 dtype="float64",
             )
-            series = shrink(
-                series, pooled, counts.reindex(series.index).fillna(0), variances
-            )
+            series = shrink(series, pooled, counts.reindex(series.index).fillna(0), variances)
         return score["League"].map(series).fillna(pooled).to_numpy()
 
     if arm == "per-lambda":

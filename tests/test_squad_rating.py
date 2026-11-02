@@ -46,8 +46,7 @@ def write_edition(directory, season: str, squads: dict[str, list[tuple[str, int,
 def squad(prefix: str, overalls: list[int] | None = None) -> list[tuple[str, int, str]]:
     """A full-shaped squad of made-up players, named from ``prefix``."""
     return [
-        (f"{prefix} {i}", (overalls[i] if overalls else 70), role)
-        for i, role in enumerate(_LINES)
+        (f"{prefix} {i}", (overalls[i] if overalls else 70), role) for i, role in enumerate(_LINES)
     ]
 
 
@@ -233,9 +232,7 @@ def test_the_rating_never_reads_the_season_it_describes(editions) -> None:
         *curve_rows("2021"),
         *curve_rows("2122"),
     )
-    players.loc[
-        (players["Player"] == "old 0") & (players["Season"] == "2122"), "rating"
-    ] = 99.0
+    players.loc[(players["Player"] == "old 0") & (players["Season"] == "2122"), "rating"] = 99.0
 
     roster, _ = rosters(players, editions)
     keeper = roster[(roster["Season"] == "2122") & (roster["Player"] == "old 0")]
@@ -250,9 +247,7 @@ def test_include_current_reads_it_and_is_not_the_default(editions) -> None:
         *curve_rows("2021"),
         *curve_rows("2122"),
     )
-    players.loc[
-        (players["Player"] == "old 0") & (players["Season"] == "2122"), "rating"
-    ] = 99.0
+    players.loc[(players["Player"] == "old 0") & (players["Season"] == "2122"), "rating"] = 99.0
 
     roster, _ = rosters(players, editions, include_current=True)
     keeper = roster[(roster["Season"] == "2122") & (roster["Player"] == "old 0")]

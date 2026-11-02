@@ -103,9 +103,7 @@ OVERALL_LINES = {"goalkeeper": 1, "defence": 4, "midfield": 3, "attack": 3}
 _LINE_ORDER = ("goalkeeper", "defence", "midfield", "attack")
 
 
-def select_eleven(
-    players: pd.DataFrame, formation: dict[str, int] | None = None
-) -> pd.DataFrame:
+def select_eleven(players: pd.DataFrame, formation: dict[str, int] | None = None) -> pd.DataFrame:
     """Pick the most likely starting eleven for one team-season.
 
     Slots are filled by minutes played, not by rating. That distinction matters:
@@ -255,9 +253,7 @@ def team_strength(
     elif method == "best_n":
         by = [c for c in _BEST_N_ORDER if c in players.columns]
         selected = (
-            players.sort_values(
-                by, ascending=[_BEST_N_ORDER[c] for c in by], kind="stable"
-            )
+            players.sort_values(by, ascending=[_BEST_N_ORDER[c] for c in by], kind="stable")
             .groupby(keys, observed=True)
             .head(best_n)
         )
@@ -298,7 +294,9 @@ def team_strength(
         logger.info(
             "Dropping %d team-season(s) with fewer than %d rated players "
             "(seasons %s) -- too early in the season to rate a squad",
-            int(thin.sum()), min_players, ", ".join(seasons),
+            int(thin.sum()),
+            min_players,
+            ", ".join(seasons),
         )
         wide = wide[~thin]
 

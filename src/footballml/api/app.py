@@ -293,7 +293,9 @@ def _load_state(startup: bool = False) -> dict[str, int]:
             "Refusing to load model %s: it expects %d feature(s) this process "
             "cannot build, e.g. %s. Still serving %s. This usually means the "
             "feature code changed since the server started -- restart it.",
-            metadata.version, len(missing), missing[:3],
+            metadata.version,
+            len(missing),
+            missing[:3],
             state.metadata.version if state.metadata else "nothing",
         )
         raise IncompatibleModelError(metadata.version, missing)
@@ -303,7 +305,9 @@ def _load_state(startup: bool = False) -> dict[str, int]:
         logger.error(
             "Model %s expects %d feature(s) the API cannot build, e.g. %s -- "
             "predictions will fail; retrain with `python -m pipelines.train`",
-            metadata.version, len(missing), missing[:3],
+            metadata.version,
+            len(missing),
+            missing[:3],
         )
 
     state.model, state.metadata = model, metadata
@@ -331,10 +335,7 @@ def _load_state(startup: bool = False) -> dict[str, int]:
         state.squads["Season"] = state.squads["Season"].astype(str)
         logger.info("Loaded %d pre-season squad ratings", len(state.squads))
     else:
-        logger.info(
-            "No pre-season squad ratings; run "
-            "`python -m pipelines.build_squad_strength`"
-        )
+        logger.info("No pre-season squad ratings; run `python -m pipelines.build_squad_strength`")
 
     european_path = PROCESSED_DIR / "european_predictions.csv"
     if european_path.exists():
@@ -350,7 +351,8 @@ def _load_state(startup: bool = False) -> dict[str, int]:
         state.league_offsets = offsets
         logger.info(
             "Cross-league correction loaded for %d leagues: %s",
-            len(offsets), ", ".join(f"{k} {v:+.3f}" for k, v in sorted(offsets.items())),
+            len(offsets),
+            ", ".join(f"{k} {v:+.3f}" for k, v in sorted(offsets.items())),
         )
         fitted_against = fitted_model_version()
         if metadata is not None and fitted_against is None:
@@ -375,12 +377,11 @@ def _load_state(startup: bool = False) -> dict[str, int]:
                 "Cross-league correction was fitted against model %s, serving %s. "
                 "Re-run `pipelines.validate_european` then "
                 "`pipelines.fit_league_adjustment`.",
-                fitted_against, metadata.version,
+                fitted_against,
+                metadata.version,
             )
     else:
-        logger.info(
-            "No cross-league correction; run `python -m pipelines.fit_league_adjustment`"
-        )
+        logger.info("No cross-league correction; run `python -m pipelines.fit_league_adjustment`")
 
     projection_path = PROCESSED_DIR / "season_projection.csv"
     if projection_path.exists():
@@ -479,9 +480,7 @@ def _likely_scores(row: pd.Series) -> list[LikelyScore]:
         home, away, prob = (row.get(f"score_{k}_{part}") for part in ("home", "away", "prob"))
         if pd.isna(home) or pd.isna(away) or pd.isna(prob):
             continue
-        out.append(
-            LikelyScore(home=int(home), away=int(away), probability=round(float(prob), 4))
-        )
+        out.append(LikelyScore(home=int(home), away=int(away), probability=round(float(prob), 4)))
     return out
 
 
@@ -494,9 +493,7 @@ def _likely_scores(row: pd.Series) -> list[LikelyScore]:
 SCORE_GRID_MAX = 5
 
 
-def _scoreline_detail(
-    mu_home: float, mu_away: float, modal_home: int, modal_away: int
-) -> dict:
+def _scoreline_detail(mu_home: float, mu_away: float, modal_home: int, modal_away: int) -> dict:
     """Scoreline grid, likely scores and modal probability from two goal rates.
 
     For rows that come from the prediction store rather than the scored frame.
@@ -521,7 +518,8 @@ def _scoreline_detail(
         return {}
 
     matrix = score_matrix(
-        np.array([mu_home]), np.array([mu_away]),
+        np.array([mu_home]),
+        np.array([mu_away]),
         rho=getattr(model, "rho_", 0.0),
         max_goals=getattr(model, "max_goals", 10),
     )[0]
@@ -533,10 +531,7 @@ def _scoreline_detail(
         ((float(matrix[h][a]), h, a) for h in range(len(matrix)) for a in range(len(matrix[0]))),
         reverse=True,
     )
-    likely = [
-        LikelyScore(home=h, away=a, probability=round(p, 4))
-        for p, h, a in flat[:TOP_SCORES]
-    ]
+    likely = [LikelyScore(home=h, away=a, probability=round(p, 4)) for p, h, a in flat[:TOP_SCORES]]
 
     modal = None
     if 0 <= modal_home < len(matrix) and 0 <= modal_away < len(matrix[0]):
@@ -584,7 +579,8 @@ def _score_grid(mu_home: float, mu_away: float) -> list[list[float]]:
     if model is None or not np.isfinite([mu_home, mu_away]).all():
         return []
     matrix = score_matrix(
-        np.array([mu_home]), np.array([mu_away]),
+        np.array([mu_home]),
+        np.array([mu_away]),
         rho=getattr(model, "rho_", 0.0),
         max_goals=getattr(model, "max_goals", 10),
     )[0]
@@ -668,7 +664,6 @@ def _to_predictions(
     return out
 
 
-
 #: Matches in the form window on the projected table.
 #:
 #: Five is what a football reader means by "recent form", and it is short
@@ -720,9 +715,7 @@ def _season_form(league: str, season: str) -> pd.DataFrame:
     if tmh.empty:
         return pd.DataFrame()
 
-    rows = tmh[
-        (tmh["League"] == league) & (tmh["Season"].astype(str) == str(season))
-    ].copy()
+    rows = tmh[(tmh["League"] == league) & (tmh["Season"].astype(str) == str(season))].copy()
     rows = rows.dropna(subset=["GoalsFor", "GoalsAgainst"])
     if rows.empty:
         return pd.DataFrame()
@@ -761,8 +754,10 @@ def _season_form(league: str, season: str) -> pd.DataFrame:
         away_xp = keyed.rename(columns={"AwayTeam": "Team", "HomeTeam": "Opponent"})
         away_xp["expected"] = 3 * away_xp["prob_away"] + away_xp["prob_draw"]
         expectations = pd.concat(
-            [home_xp[["Date", "Team", "Opponent", "expected"]],
-             away_xp[["Date", "Team", "Opponent", "expected"]]],
+            [
+                home_xp[["Date", "Team", "Opponent", "expected"]],
+                away_xp[["Date", "Team", "Opponent", "expected"]],
+            ],
             ignore_index=True,
         )
         rows = rows.merge(expectations, on=["Date", "Team", "Opponent"], how="left")
@@ -789,6 +784,7 @@ def _season_form(league: str, season: str) -> pd.DataFrame:
     mean_elo = rows["opponent_elo"].astype("Float64").mean()
     out["league_mean_elo"] = float(mean_elo) if pd.notna(mean_elo) else None
     return out
+
 
 @app.get("/projections", response_model=SeasonProjection)
 def projections(league: str = Query(..., description="Division code, e.g. E0")) -> SeasonProjection:
@@ -954,7 +950,6 @@ def against_the_run(
     ]
 
 
-
 #: The recorded leave-one-family-out result for squad strength: what the model
 #: loses when the twelve strength features are taken away entirely.
 #:
@@ -1058,9 +1053,7 @@ def _one_player() -> OnePlayerInsight | None:
     """
     path = PROCESSED_DIR / "rating_insights.json"
     if not path.exists():
-        logger.info(
-            "No %s; run `python -m pipelines.build_squad_strength`", path.name
-        )
+        logger.info("No %s; run `python -m pipelines.build_squad_strength`", path.name)
         return None
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))["one_player"]
@@ -1105,6 +1098,7 @@ def rating_insights() -> RatingInsights:
             one_player=_one_player(),
         )
     return state._rating_insights
+
 
 @app.get("/leagues")
 def leagues() -> dict[str, str]:
@@ -1352,9 +1346,7 @@ def _upcoming_european() -> pd.DataFrame:
     if schedule.empty:
         return pd.DataFrame()
 
-    kept, _ = big_five_only(
-        schedule.assign(FTHG=pd.NA, FTAG=pd.NA, FTR=pd.NA), state.tmh
-    )
+    kept, _ = big_five_only(schedule.assign(FTHG=pd.NA, FTAG=pd.NA, FTR=pd.NA), state.tmh)
     if kept.empty:
         return pd.DataFrame()
     return pd.DataFrame(
@@ -1468,41 +1460,43 @@ def _recent_from_store(known_through: pd.Timestamp, league: str | None) -> list[
         goals_home, goals_away = r.get("actual_home_goals"), r.get("actual_away_goals")
         modal_home, modal_away = int(r["modal_score_home"]), int(r["modal_score_away"])
         entry = Prediction(
-                league=str(r["League"]),
-                date=str(r["Date"].date()),
-                home_team=str(r["HomeTeam"]),
-                away_team=str(r["AwayTeam"]),
-                competition=str(r.get("competition") or store.DOMESTIC),
-                expected_goals_home=float(r["expected_goals_home"]),
-                expected_goals_away=float(r["expected_goals_away"]),
-                prob_home_win=float(r["prob_home_win"]),
-                prob_draw=float(r["prob_draw"]),
-                prob_away_win=float(r["prob_away_win"]),
-                predicted_outcome=str(r["predicted_outcome"]),
-                modal_score_home=modal_home,
-                modal_score_away=modal_away,
-                prob_over_2_5=float(r["prob_over_2_5"]),
-                prob_btts=float(r["prob_btts"]),
-                predicted_before_kickoff=True,
-                # Rebuilt from the stored goal rates, so the expanded card for
-                # a European tie shows the same analysis as a domestic one.
-                **_scoreline_detail(
-                    float(r["expected_goals_home"]), float(r["expected_goals_away"]),
-                    modal_home, modal_away,
-                ),
-                **_stored_market(r),
-                actual_home_goals=None if pd.isna(goals_home) else int(goals_home),
-                actual_away_goals=None if pd.isna(goals_away) else int(goals_away),
-                actual_result=str(r["actual_result"]),
-                # Without this the card reads "no prior matches" beside Lille,
-                # which is false and reads as a data error rather than as the
-                # results feed being behind. The index only reaches as far as
-                # the feature table does, so this is the form going into the
-                # *last match we have*, not into this one -- which is the same
-                # limitation the rest of the row already has.
-                form_home=_form_for(str(r["HomeTeam"]), r["Date"]),
-                form_away=_form_for(str(r["AwayTeam"]), r["Date"]),
-            )
+            league=str(r["League"]),
+            date=str(r["Date"].date()),
+            home_team=str(r["HomeTeam"]),
+            away_team=str(r["AwayTeam"]),
+            competition=str(r.get("competition") or store.DOMESTIC),
+            expected_goals_home=float(r["expected_goals_home"]),
+            expected_goals_away=float(r["expected_goals_away"]),
+            prob_home_win=float(r["prob_home_win"]),
+            prob_draw=float(r["prob_draw"]),
+            prob_away_win=float(r["prob_away_win"]),
+            predicted_outcome=str(r["predicted_outcome"]),
+            modal_score_home=modal_home,
+            modal_score_away=modal_away,
+            prob_over_2_5=float(r["prob_over_2_5"]),
+            prob_btts=float(r["prob_btts"]),
+            predicted_before_kickoff=True,
+            # Rebuilt from the stored goal rates, so the expanded card for
+            # a European tie shows the same analysis as a domestic one.
+            **_scoreline_detail(
+                float(r["expected_goals_home"]),
+                float(r["expected_goals_away"]),
+                modal_home,
+                modal_away,
+            ),
+            **_stored_market(r),
+            actual_home_goals=None if pd.isna(goals_home) else int(goals_home),
+            actual_away_goals=None if pd.isna(goals_away) else int(goals_away),
+            actual_result=str(r["actual_result"]),
+            # Without this the card reads "no prior matches" beside Lille,
+            # which is false and reads as a data error rather than as the
+            # results feed being behind. The index only reaches as far as
+            # the feature table does, so this is the form going into the
+            # *last match we have*, not into this one -- which is the same
+            # limitation the rest of the row already has.
+            form_home=_form_for(str(r["HomeTeam"]), r["Date"]),
+            form_away=_form_for(str(r["AwayTeam"]), r["Date"]),
+        )
 
         # Read exactly as the domestic path reads it, off the joined frame.
         for side in ("home", "away"):
@@ -1540,7 +1534,6 @@ def _stored_market(row: pd.Series) -> dict[str, float]:
     }
 
 
-
 def _form_for(team: str, before: pd.Timestamp) -> TeamForm | None:
     """Recent form for a card served from the store, or None if unknown."""
     try:
@@ -1549,9 +1542,7 @@ def _form_for(team: str, before: pd.Timestamp) -> TeamForm | None:
         return None
 
 
-def _european_matches(
-    competition: str | None, limit: int, offset: int
-) -> list[Prediction]:
+def _european_matches(competition: str | None, limit: int, offset: int) -> list[Prediction]:
     """Played European ties, already scored.
 
     ``competition`` of ``None`` means every shown one. Anything outside
@@ -1572,8 +1563,9 @@ def _european_matches(
     # because they are fit to display -- we can rate 14% and 6% of their ties,
     # so a page of them would be 86-94% holes. The endpoint already refuses to
     # pass one; this is the second lock on the same door.
-    wanted = [c for c in ([competition] if competition else SHOWN_COMPETITIONS)
-              if c in SHOWN_COMPETITIONS]
+    wanted = [
+        c for c in ([competition] if competition else SHOWN_COMPETITIONS) if c in SHOWN_COMPETITIONS
+    ]
     rows = state.european[state.european["competition"].isin(wanted)]
     rows = rows[rows["FTR"].notna()]
     window = rows.sort_values("Date", ascending=False).iloc[offset : offset + limit]
@@ -1695,7 +1687,8 @@ def _division_of(team: str, fallback: str) -> str:
         logger.warning(
             "No division known for %r and the fixture is labelled %r, which is not "
             "a division -- the cross-league correction will not apply to it",
-            team, fallback,
+            team,
+            fallback,
         )
     return fallback
 
@@ -1747,9 +1740,7 @@ def accuracy(league: str | None = Query(None)) -> Accuracy:
         by_competition=_by_competition(rows),
         calibration=[
             CalibrationBin(**row)
-            for row in calibration_table(actual, probs)
-            .drop(columns=["gap"])
-            .to_dict("records")
+            for row in calibration_table(actual, probs).drop(columns=["gap"]).to_dict("records")
         ],
     )
 
@@ -1759,13 +1750,27 @@ def accuracy(league: str | None = Query(None)) -> Accuracy:
 
 #: Sub-rating and stat columns surfaced by the player endpoints.
 _PLAYER_SUBS = (
-    "finishing", "creation", "involvement", "volume", "defending",
+    "finishing",
+    "creation",
+    "involvement",
+    "volume",
+    "defending",
     "team_defence",
-    "shot_stopping", "reliability", "workload", "penalties",
+    "shot_stopping",
+    "reliability",
+    "workload",
+    "penalties",
 )
 _PLAYER_STATS = (
-    "goals", "assists", "np_xg", "xa", "key_passes_per90",
-    "interceptions_per90", "tackles_won_per90", "save_pct", "goals_against_per90",
+    "goals",
+    "assists",
+    "np_xg",
+    "xa",
+    "key_passes_per90",
+    "interceptions_per90",
+    "tackles_won_per90",
+    "save_pct",
+    "goals_against_per90",
 )
 
 #: EA's attributes, without the `fifa_` prefix the CSV carries.
@@ -1828,9 +1833,7 @@ def _stat_percentiles(row: pd.Series) -> dict[str, float]:
     return out
 
 
-def _to_player(
-    row: pd.Series, percentiles: dict[str, float] | None = None
-) -> PlayerRating:
+def _to_player(row: pd.Series, percentiles: dict[str, float] | None = None) -> PlayerRating:
     """Convert one rating row into an API response."""
 
     def num(column: str, cast: type) -> int | float | None:
@@ -1848,9 +1851,7 @@ def _to_player(
         minutes=int(row["minutes"]),
         rating=num("rating", int),
         rated=bool(row.get("rated", False)),
-        unrated_reason=(
-            None if pd.isna(row.get("unrated_reason")) else str(row["unrated_reason"])
-        ),
+        unrated_reason=(None if pd.isna(row.get("unrated_reason")) else str(row["unrated_reason"])),
         fifa_overall=num("fifa_overall", int),
         performance_rating=num("performance_rating", int),
         fifa_on_our_scale=num("fifa_on_our_scale", int),
@@ -1888,12 +1889,25 @@ def _to_player(
 #: The sub-ratings are here even though they are position-dependent -- a
 #: forward has no `sub_defending` -- because sorting by one is meaningful once
 #: the caller has filtered to a position, which is exactly what the page does.
-SORTABLE: frozenset[str] = frozenset({
-    "rating", "minutes", "fifa_overall", "performance_rating",
-    "position_group", "role", "Player", "Team", "League", "Season",
-    "goals", "assists", "np_xg", "xa",
-    *(f"sub_{name}" for name in _PLAYER_SUBS),
-})
+SORTABLE: frozenset[str] = frozenset(
+    {
+        "rating",
+        "minutes",
+        "fifa_overall",
+        "performance_rating",
+        "position_group",
+        "role",
+        "Player",
+        "Team",
+        "League",
+        "Season",
+        "goals",
+        "assists",
+        "np_xg",
+        "xa",
+        *(f"sub_{name}" for name in _PLAYER_SUBS),
+    }
+)
 
 MIN_SEASON_SHARE = 0.5
 
@@ -1973,9 +1987,7 @@ def players(
     return PlayerPage(
         total=len(rows),
         players=[_to_player(r) for _, r in rows.iloc[offset : offset + limit].iterrows()],
-        seasons=sorted(
-            {str(s) for s in state.players["Season"].dropna().unique()}, reverse=True
-        ),
+        seasons=sorted({str(s) for s in state.players["Season"].dropna().unique()}, reverse=True),
         season=shown,
     )
 
@@ -2091,8 +2103,7 @@ def _publishable_seasons(teams: pd.DataFrame) -> list[str]:
     settled = counts.drop(index=counts.index.max()) if len(counts) > 1 else counts
     yardstick = float(settled.median())
     return [
-        s for s in sorted(counts.index, reverse=True)
-        if counts[s] >= SEASON_COVERAGE * yardstick
+        s for s in sorted(counts.index, reverse=True) if counts[s] >= SEASON_COVERAGE * yardstick
     ]
 
 
@@ -2155,15 +2166,17 @@ def teams(
 ) -> TeamStrengthPage:
     """Team ratings built from player ratings, strongest first."""
     if state.teams.empty and state.squads.empty:
-        raise HTTPException(
-            404, "No team ratings loaded. Run `python -m pipelines.build_players`."
-        )
+        raise HTTPException(404, "No team ratings loaded. Run `python -m pipelines.build_players`.")
 
     # Over both ratings: the season in progress is publishable on the
     # pre-season column alone, which is the case that column exists for.
-    offered = state.teams if state.squads.empty else pd.concat(
-        [state.teams[["League", "Season", "Team"]], state.squads[["League", "Season", "Team"]]]
-    ).drop_duplicates()
+    offered = (
+        state.teams
+        if state.squads.empty
+        else pd.concat(
+            [state.teams[["League", "Season", "Team"]], state.squads[["League", "Season", "Team"]]]
+        ).drop_duplicates()
+    )
     seasons = _publishable_seasons(offered)
     # An explicit `season=` is still honoured, including one held back below:
     # the rows are real, they are only too thin to put in front of someone who
@@ -2233,9 +2246,7 @@ def league_strength(
     are wider than these.
     """
     if state.teams.empty:
-        raise HTTPException(
-            404, "No team ratings loaded. Run `python -m pipelines.build_players`."
-        )
+        raise HTTPException(404, "No team ratings loaded. Run `python -m pipelines.build_players`.")
 
     rows = state.teams
     # The same coverage floor `/teams` applies, and for a sharper reason: a
@@ -2416,7 +2427,7 @@ def team_squad(
     if season is None:
         counts = rows.groupby("Season").size()
         enough = counts[counts >= MIN_RATED_PLAYERS]
-        season = (enough.index.max() if not enough.empty else counts.index.max())
+        season = enough.index.max() if not enough.empty else counts.index.max()
     rows = rows[rows["Season"].astype(str) == str(season)]
     return [_to_player(r) for _, r in rows.sort_values("minutes", ascending=False).iterrows()]
 
@@ -2448,8 +2459,7 @@ _BACKTEST_COLUMNS = {
 def _to_match_result(row: pd.Series, source: str, columns: dict[str, str]) -> MatchResult:
     """Build one settled-match row from whichever source it came from."""
     probs = {
-        key: float(row[columns[key]])
-        for key in ("prob_home_win", "prob_draw", "prob_away_win")
+        key: float(row[columns[key]]) for key in ("prob_home_win", "prob_draw", "prob_away_win")
     }
     actual = str(row[columns["actual_result"]])
 
@@ -2517,7 +2527,8 @@ def _backtest_freshness() -> tuple[str | None, bool | None]:
 
     recorded = meta.get("inputs") or {}
     moved = [
-        name for name, digest in recorded.items()
+        name
+        for name, digest in recorded.items()
         if digest is not None and _digest(PROCESSED_DIR / name) != digest
     ]
     if moved:
@@ -2613,8 +2624,18 @@ def _retrodict_all(tmh: pd.DataFrame) -> pd.DataFrame:
     top of a board titled "against the run of play", which is exactly the
     confident-but-empty number the site exists not to publish.
     """
-    needed = {"Venue", "Team", "Opponent", "Date", "xGFor", "xGAgainst",
-              "GoalsFor", "GoalsAgainst", "League", "Season"}
+    needed = {
+        "Venue",
+        "Team",
+        "Opponent",
+        "Date",
+        "xGFor",
+        "xGAgainst",
+        "GoalsFor",
+        "GoalsAgainst",
+        "League",
+        "Season",
+    }
     if tmh.empty or not needed <= set(tmh.columns):
         return pd.DataFrame()
 
@@ -2724,9 +2745,7 @@ def _per_group(
             n=metrics["n"],
             accuracy=round(metrics["accuracy"], 4),
             rps=round(metrics["rps"], 4),
-            rps_base_rate=round(
-                evaluate(actual, base_rate_probs(actual, len(block)))["rps"], 4
-            ),
+            rps_base_rate=round(evaluate(actual, base_rate_probs(actual, len(block)))["rps"], 4),
         )
     return out
 
@@ -2746,9 +2765,7 @@ def _summarise(rows: pd.DataFrame, prob_cols: list[str], actual_col: str) -> Acc
         priced = rows[list(ODDS_COLUMNS)].notna().all(axis=1)
         if priced.any():
             sub = rows[priced]
-            favourite = np.array(OUTCOMES)[
-                odds_implied_probs(sub, ODDS_COLUMNS).argmax(axis=1)
-            ]
+            favourite = np.array(OUTCOMES)[odds_implied_probs(sub, ODDS_COLUMNS).argmax(axis=1)]
             accuracy_market = round(float((favourite == sub[actual_col]).mean()), 4)
 
     return Accuracy(

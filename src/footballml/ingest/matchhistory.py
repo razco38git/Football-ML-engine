@@ -76,24 +76,24 @@ def _get(url: str, *, attempts: int = DOWNLOAD_ATTEMPTS) -> requests.Response:
     last: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
-            response = requests.get(
-                url, timeout=60, headers={"User-Agent": "footballml"}
-            )
+            response = requests.get(url, timeout=60, headers={"User-Agent": "footballml"})
         except (requests.ConnectionError, requests.Timeout) as exc:
             last = exc
         else:
             if response.status_code == 404 or response.status_code < 500:
                 return response
-            last = requests.HTTPError(
-                f"{response.status_code} from {url}", response=response
-            )
+            last = requests.HTTPError(f"{response.status_code} from {url}", response=response)
 
         if attempt == attempts:
             break
         wait = BACKOFF_BASE_SECONDS * 2 ** (attempt - 1)
         logger.warning(
             "Attempt %d/%d for %s failed (%s); retrying in %.0fs",
-            attempt, attempts, url, type(last).__name__, wait,
+            attempt,
+            attempts,
+            url,
+            type(last).__name__,
+            wait,
         )
         time.sleep(wait)
 
@@ -110,6 +110,7 @@ def current_season_label(today: pd.Timestamp | None = None) -> str:
     today = today or pd.Timestamp.today()
     start_year = today.year if today.month >= 7 else today.year - 1
     return f"{start_year % 100:02d}{(start_year + 1) % 100:02d}"
+
 
 #: football-data.co.uk division codes to soccerdata league identifiers.
 LEAGUES = {
@@ -209,7 +210,9 @@ def fetch_match_history(
                         "Download failed for %s %s (%s); falling back to the "
                         "cached copy from %s. Rows after that date come from "
                         "the FBref top-up, not football-data.",
-                        code, season, type(exc).__name__,
+                        code,
+                        season,
+                        type(exc).__name__,
                         _modified(path),
                     )
                 else:
@@ -235,7 +238,10 @@ def fetch_match_history(
                             "%s %s came back as %d bytes that are not a "
                             "football-data CSV (%s); keeping the cached copy "
                             "from %s rather than overwriting it.",
-                            code, season, len(response.content), exc,
+                            code,
+                            season,
+                            len(response.content),
+                            exc,
                             _modified(path),
                         )
                     else:

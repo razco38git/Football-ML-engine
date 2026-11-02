@@ -48,23 +48,37 @@ def _soon(days: int = 2) -> str:
 def _prediction(home: str = "Arsenal", away: str = "Chelsea"):
     """A minimal scored fixture, built the way the endpoint returns them."""
     return api.Prediction(
-        league="E0", date=_soon(), home_team=home, away_team=away,
-        expected_goals_home=1.6, expected_goals_away=1.1,
-        prob_home_win=0.5, prob_draw=0.26, prob_away_win=0.24,
-        predicted_outcome="H", competition="domestic",
-        modal_score_home=1, modal_score_away=1,
-        prob_over_2_5=0.52, prob_btts=0.54,
+        league="E0",
+        date=_soon(),
+        home_team=home,
+        away_team=away,
+        expected_goals_home=1.6,
+        expected_goals_away=1.1,
+        prob_home_win=0.5,
+        prob_draw=0.26,
+        prob_away_win=0.24,
+        predicted_outcome="H",
+        competition="domestic",
+        modal_score_home=1,
+        modal_score_away=1,
+        prob_over_2_5=0.52,
+        prob_btts=0.54,
     )
 
 
 # --- the odds fetch must not take the endpoint down ---------------------------
 
+
 def test_failing_odds_still_returns_fixtures(monkeypatch) -> None:
     """A dead odds source costs the market row, not the board."""
-    fixtures = pd.DataFrame({
-        "League": ["E0"], "Date": [pd.Timestamp(_soon())],
-        "HomeTeam": ["Arsenal"], "AwayTeam": ["Chelsea"],
-    })
+    fixtures = pd.DataFrame(
+        {
+            "League": ["E0"],
+            "Date": [pd.Timestamp(_soon())],
+            "HomeTeam": ["Arsenal"],
+            "AwayTeam": ["Chelsea"],
+        }
+    )
     monkeypatch.setattr(schedule, "upcoming_fixtures", lambda *a, **k: fixtures)
     monkeypatch.setattr(api, "_upcoming_european", lambda: pd.DataFrame())
 
@@ -83,10 +97,14 @@ def test_failing_odds_still_returns_fixtures(monkeypatch) -> None:
 
 def test_working_odds_are_still_merged(monkeypatch) -> None:
     """The guard must not have disabled the feature it protects."""
-    fixtures = pd.DataFrame({
-        "League": ["E0"], "Date": [pd.Timestamp(_soon())],
-        "HomeTeam": ["Arsenal"], "AwayTeam": ["Chelsea"],
-    })
+    fixtures = pd.DataFrame(
+        {
+            "League": ["E0"],
+            "Date": [pd.Timestamp(_soon())],
+            "HomeTeam": ["Arsenal"],
+            "AwayTeam": ["Chelsea"],
+        }
+    )
     odds = fixtures.assign(B365H=1.8, B365D=3.6, B365A=4.2)
     monkeypatch.setattr(schedule, "upcoming_fixtures", lambda *a, **k: fixtures)
     monkeypatch.setattr(api, "_upcoming_european", lambda: pd.DataFrame())
@@ -97,6 +115,7 @@ def test_working_odds_are_still_merged(monkeypatch) -> None:
 
 
 # --- the request path must not rebuild when it has something to serve ---------
+
 
 def test_a_stale_cache_is_served_rather_than_rebuilt(monkeypatch) -> None:
     """Freshness belongs to the warmer; a visitor should never wait on a scrape."""
@@ -167,6 +186,7 @@ def test_an_entirely_past_board_empties_rather_than_misleads(monkeypatch) -> Non
 
 def test_no_cache_and_a_failing_build_is_a_503(monkeypatch) -> None:
     """A 503 tells the caller to retry; a 500 tells them it is broken."""
+
     def dead():
         raise ConnectionError("remote host closed the connection")
 

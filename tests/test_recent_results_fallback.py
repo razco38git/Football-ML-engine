@@ -30,6 +30,7 @@ api = importlib.import_module("footballml.api.app")
 
 # --- the schedule must stop discarding the score ------------------------------
 
+
 def test_score_regex_captures_both_goals() -> None:
     """`_SCORE` always had two groups; only group 0 was ever used."""
     found = pd.Series(["2–1", "0–0", "10–3"]).str.extract(schedule._SCORE)
@@ -58,33 +59,37 @@ def test_a_fixture_list_never_carries_result_columns() -> None:
 
 # --- /matches falls back to the store -----------------------------------------
 
+
 def _stored(dates: list[str]) -> pd.DataFrame:
-    return pd.DataFrame({
-        "League": ["E0"] * len(dates),
-        "competition": ["domestic"] * len(dates),
-        "Date": pd.to_datetime(dates),
-        "HomeTeam": [f"Home{i}" for i in range(len(dates))],
-        "AwayTeam": [f"Away{i}" for i in range(len(dates))],
-        "expected_goals_home": [1.5] * len(dates),
-        "expected_goals_away": [1.1] * len(dates),
-        "prob_home_win": [0.5] * len(dates),
-        "prob_draw": [0.26] * len(dates),
-        "prob_away_win": [0.24] * len(dates),
-        "predicted_outcome": ["H"] * len(dates),
-        "modal_score_home": [1] * len(dates),
-        "modal_score_away": [1] * len(dates),
-        "prob_over_2_5": [0.52] * len(dates),
-        "prob_btts": [0.54] * len(dates),
-        "actual_home_goals": [2.0] * len(dates),
-        "actual_away_goals": [1.0] * len(dates),
-        "actual_result": ["H"] * len(dates),
-    })
+    return pd.DataFrame(
+        {
+            "League": ["E0"] * len(dates),
+            "competition": ["domestic"] * len(dates),
+            "Date": pd.to_datetime(dates),
+            "HomeTeam": [f"Home{i}" for i in range(len(dates))],
+            "AwayTeam": [f"Away{i}" for i in range(len(dates))],
+            "expected_goals_home": [1.5] * len(dates),
+            "expected_goals_away": [1.1] * len(dates),
+            "prob_home_win": [0.5] * len(dates),
+            "prob_draw": [0.26] * len(dates),
+            "prob_away_win": [0.24] * len(dates),
+            "predicted_outcome": ["H"] * len(dates),
+            "modal_score_home": [1] * len(dates),
+            "modal_score_away": [1] * len(dates),
+            "prob_over_2_5": [0.52] * len(dates),
+            "prob_btts": [0.54] * len(dates),
+            "actual_home_goals": [2.0] * len(dates),
+            "actual_away_goals": [1.0] * len(dates),
+            "actual_result": ["H"] * len(dates),
+        }
+    )
 
 
 def test_only_matches_newer_than_the_feature_table_are_added(monkeypatch) -> None:
     """The store must top up, never duplicate what has already been re-scored."""
     monkeypatch.setattr(
-        api.store, "settled",
+        api.store,
+        "settled",
         lambda *a, **k: _stored(["2026-09-19", "2026-09-20", "2026-10-10"]),
     )
     out = api._recent_from_store(pd.Timestamp("2026-09-20"), None)
@@ -138,7 +143,8 @@ def test_a_partial_price_is_treated_as_no_price(monkeypatch) -> None:
 
 def test_rows_are_newest_first(monkeypatch) -> None:
     monkeypatch.setattr(
-        api.store, "settled",
+        api.store,
+        "settled",
         lambda *a, **k: _stored(["2026-10-01", "2026-10-10", "2026-10-05"]),
     )
     out = api._recent_from_store(pd.Timestamp("2026-09-20"), None)
@@ -159,6 +165,7 @@ def test_a_caught_up_feature_table_adds_nothing(monkeypatch) -> None:
 
 def test_an_unreadable_store_does_not_break_the_page(monkeypatch) -> None:
     """Recent results without the top-up beats no recent results at all."""
+
     def broken(*_a, **_k):
         raise OSError("predictions.csv is locked")
 
@@ -183,6 +190,7 @@ def test_an_empty_store_adds_nothing(monkeypatch) -> None:
 # today's model, and the test that matters is the one below pinning that the
 # reconstruction agrees with what the prediction itself recorded.
 
+
 @pytest.fixture
 def scoring_model(monkeypatch):
     """A model stub, because the grid is rebuilt through the Dixon-Coles matrix.
@@ -191,16 +199,18 @@ def scoring_model(monkeypatch):
     the goal rates come from the stored prediction and nothing else about
     today's model enters the reconstruction.
     """
-    monkeypatch.setattr(
-        api.state, "model", SimpleNamespace(rho_=-0.0567642328, max_goals=10)
-    )
+    monkeypatch.setattr(api.state, "model", SimpleNamespace(rho_=-0.0567642328, max_goals=10))
 
 
 def _european(home: str = "Roma", away: str = "Real Madrid") -> pd.DataFrame:
     rows = _stored(["2026-10-14"])
     return rows.assign(
-        competition="UCL", League="I1", HomeTeam=home, AwayTeam=away,
-        expected_goals_home=1.7, expected_goals_away=1.42,
+        competition="UCL",
+        League="I1",
+        HomeTeam=home,
+        AwayTeam=away,
+        expected_goals_home=1.7,
+        expected_goals_away=1.42,
     )
 
 
@@ -247,14 +257,16 @@ def test_squad_strength_reaches_both_sides_of_a_european_tie(monkeypatch) -> Non
     league as well, the away side would match nothing and be shown with no
     strength at all.
     """
-    strength = pd.DataFrame({
-        "League": ["I1", "SP1"],
-        "Season": ["2526", "2526"],
-        "Team": ["Roma", "Real Madrid"],
-        "strength_overall": [75.2, 81.5],
-        "strength_attack": [75.2, 84.2],
-        "strength_defence": [75.6, 78.9],
-    })
+    strength = pd.DataFrame(
+        {
+            "League": ["I1", "SP1"],
+            "Season": ["2526", "2526"],
+            "Team": ["Roma", "Real Madrid"],
+            "strength_overall": [75.2, 81.5],
+            "strength_attack": [75.2, 84.2],
+            "strength_defence": [75.6, 78.9],
+        }
+    )
     monkeypatch.setattr(api.store, "settled", lambda *a, **k: _european())
     monkeypatch.setattr(api.state, "strength", strength)
 
@@ -271,10 +283,16 @@ def test_strength_comes_from_the_previous_season(monkeypatch) -> None:
     none. Joining the match's own season would show an empty panel on every
     current fixture, which is what the first attempt at this did.
     """
-    strength = pd.DataFrame({
-        "League": ["I1"], "Season": ["2526"], "Team": ["Roma"],
-        "strength_overall": [75.2], "strength_attack": [75.2], "strength_defence": [75.6],
-    })
+    strength = pd.DataFrame(
+        {
+            "League": ["I1"],
+            "Season": ["2526"],
+            "Team": ["Roma"],
+            "strength_overall": [75.2],
+            "strength_attack": [75.2],
+            "strength_defence": [75.6],
+        }
+    )
     monkeypatch.setattr(api.store, "settled", lambda *a, **k: _european())
     monkeypatch.setattr(api.state, "strength", strength)
 
@@ -290,10 +308,16 @@ def test_club_names_are_translated_before_the_join(monkeypatch) -> None:
     a NaN -- so without the alias map the biggest clubs are exactly the ones
     that show no strength.
     """
-    strength = pd.DataFrame({
-        "League": ["E0"], "Season": ["2526"], "Team": ["Manchester City"],
-        "strength_overall": [80.8], "strength_attack": [83.7], "strength_defence": [78.0],
-    })
+    strength = pd.DataFrame(
+        {
+            "League": ["E0"],
+            "Season": ["2526"],
+            "Team": ["Manchester City"],
+            "strength_overall": [80.8],
+            "strength_attack": [83.7],
+            "strength_defence": [78.0],
+        }
+    )
     rows = _european(home="Man City", away="Paris SG").assign(League="E0")
     monkeypatch.setattr(api.store, "settled", lambda *a, **k: rows)
     monkeypatch.setattr(api.state, "strength", strength)
@@ -314,10 +338,16 @@ def test_no_strength_table_is_not_an_error(monkeypatch, scoring_model) -> None:
 
 def test_an_unrated_club_simply_has_no_strength(monkeypatch) -> None:
     """A newly promoted side has no previous-season row in its new league."""
-    strength = pd.DataFrame({
-        "League": ["I1"], "Season": ["2526"], "Team": ["Roma"],
-        "strength_overall": [75.2], "strength_attack": [75.2], "strength_defence": [75.6],
-    })
+    strength = pd.DataFrame(
+        {
+            "League": ["I1"],
+            "Season": ["2526"],
+            "Team": ["Roma"],
+            "strength_overall": [75.2],
+            "strength_attack": [75.2],
+            "strength_defence": [75.6],
+        }
+    )
     monkeypatch.setattr(api.store, "settled", lambda *a, **k: _european())
     monkeypatch.setattr(api.state, "strength", strength)
 
@@ -335,24 +365,38 @@ def test_an_unrated_club_simply_has_no_strength(monkeypatch) -> None:
 
 
 def _scored_european(rows: list[tuple[str, str, str, str]]) -> pd.DataFrame:
-    return pd.DataFrame([
-        {
-            "competition": comp, "Date": pd.Timestamp(date),
-            "HomeTeam": home, "AwayTeam": away,
-            "FTHG": 2.0, "FTAG": 1.0, "FTR": "H",
-            "home_league": "E0", "away_league": "SP1",
-            "expected_goals_home": 1.6, "expected_goals_away": 1.1,
-            "prob_home_win": 0.5, "prob_draw": 0.26, "prob_away_win": 0.24,
-            "predicted_outcome": "H", "modal_score_home": 1, "modal_score_away": 1,
-            "prob_over_2_5": 0.5, "prob_btts": 0.5,
-        }
-        for date, home, away, comp in rows
-    ])
+    return pd.DataFrame(
+        [
+            {
+                "competition": comp,
+                "Date": pd.Timestamp(date),
+                "HomeTeam": home,
+                "AwayTeam": away,
+                "FTHG": 2.0,
+                "FTAG": 1.0,
+                "FTR": "H",
+                "home_league": "E0",
+                "away_league": "SP1",
+                "expected_goals_home": 1.6,
+                "expected_goals_away": 1.1,
+                "prob_home_win": 0.5,
+                "prob_draw": 0.26,
+                "prob_away_win": 0.24,
+                "predicted_outcome": "H",
+                "modal_score_home": 1,
+                "modal_score_away": 1,
+                "prob_over_2_5": 0.5,
+                "prob_btts": 0.5,
+            }
+            for date, home, away, comp in rows
+        ]
+    )
 
 
 def test_a_played_tie_is_reachable_without_changing_the_filter(monkeypatch) -> None:
     monkeypatch.setattr(
-        api.state, "european",
+        api.state,
+        "european",
         _scored_european([("2026-10-21", "Bayern Munich", "Arsenal", "UCL")]),
     )
 
@@ -366,12 +410,15 @@ def test_the_unshown_competitions_stay_unshown(monkeypatch) -> None:
     the cross-league correction, not because they are fit to display -- we can
     rate 14% and 6% of their ties. Widening the merge must not widen that."""
     monkeypatch.setattr(
-        api.state, "european",
-        _scored_european([
-            ("2026-10-22", "Bournemouth", "Milan", "UEL"),
-            ("2026-10-22", "Monaco", "Freiburg", "UECL"),
-            ("2026-10-21", "Bayern Munich", "Arsenal", "UCL"),
-        ]),
+        api.state,
+        "european",
+        _scored_european(
+            [
+                ("2026-10-22", "Bournemouth", "Milan", "UEL"),
+                ("2026-10-22", "Monaco", "Freiburg", "UECL"),
+                ("2026-10-21", "Bayern Munich", "Arsenal", "UCL"),
+            ]
+        ),
     )
 
     out = api._european_matches(None, 10, 0)
@@ -383,11 +430,14 @@ def test_an_unshown_competition_returns_nothing_however_it_is_asked_for(monkeypa
     """Second lock on the same door: the endpoint refuses to pass one, and the
     helper refuses to serve one."""
     monkeypatch.setattr(
-        api.state, "european",
-        _scored_european([
-            ("2026-10-21", "Bayern Munich", "Arsenal", "UCL"),
-            ("2026-10-22", "Bournemouth", "Milan", "UEL"),
-        ]),
+        api.state,
+        "european",
+        _scored_european(
+            [
+                ("2026-10-21", "Bayern Munich", "Arsenal", "UCL"),
+                ("2026-10-22", "Bournemouth", "Milan", "UEL"),
+            ]
+        ),
     )
 
     assert {p.competition for p in api._european_matches("UCL", 10, 0)} == {"UCL"}
@@ -411,14 +461,19 @@ def test_no_european_results_is_not_an_error(monkeypatch) -> None:
 def scored_match(monkeypatch):
     """One settled match whose own xG is known."""
     monkeypatch.setattr(
-        api.state, "match_xg",
+        api.state,
+        "match_xg",
         {(pd.Timestamp("2026-10-19").date(), "Arsenal", "Chelsea"): (2.40, 0.60)},
     )
     monkeypatch.setattr(api.state, "metadata", SimpleNamespace(rho=-0.0567))
-    return pd.Series({
-        "Date": pd.Timestamp("2026-10-19"),
-        "HomeTeam": "Arsenal", "AwayTeam": "Chelsea", "FTR": "H",
-    })
+    return pd.Series(
+        {
+            "Date": pd.Timestamp("2026-10-19"),
+            "HomeTeam": "Arsenal",
+            "AwayTeam": "Chelsea",
+            "FTR": "H",
+        }
+    )
 
 
 def test_the_chances_favour_the_side_that_created_them(scored_match) -> None:
@@ -459,7 +514,8 @@ def test_an_abandoned_match_is_gated_out(monkeypatch, scored_match) -> None:
     so both sides record 0.00 xG. One match in 21,933, and without the gate the
     page would tell a reader that result had a 0.0% chance."""
     monkeypatch.setattr(
-        api.state, "match_xg",
+        api.state,
+        "match_xg",
         {(pd.Timestamp("2026-10-19").date(), "Arsenal", "Chelsea"): (0.0, 0.0)},
     )
     assert api._retrodiction(scored_match) is None
@@ -469,7 +525,8 @@ def test_the_gate_lets_a_genuinely_quiet_match_through(monkeypatch, scored_match
     """The floor has to catch the degenerate case and nothing else. The 0.1%
     quantile of combined match xG is 0.431, well clear of 0.1."""
     monkeypatch.setattr(
-        api.state, "match_xg",
+        api.state,
+        "match_xg",
         {(pd.Timestamp("2026-10-19").date(), "Arsenal", "Chelsea"): (0.25, 0.20)},
     )
     assert api._retrodiction(scored_match) is not None
@@ -478,12 +535,26 @@ def test_the_gate_lets_a_genuinely_quiet_match_through(monkeypatch, scored_match
 def test_the_lookup_reads_both_sides_off_the_home_row() -> None:
     """`xGAgainst` on the home row equals the away row's `xGFor` on all 29,239
     rows, so there is nothing to merge -- and merging would risk duplicating."""
-    tmh = pd.DataFrame([
-        {"Date": pd.Timestamp("2026-10-19"), "Team": "Arsenal", "Opponent": "Chelsea",
-         "Venue": "Home", "xGFor": 2.4, "xGAgainst": 0.6},
-        {"Date": pd.Timestamp("2026-10-19"), "Team": "Chelsea", "Opponent": "Arsenal",
-         "Venue": "Away", "xGFor": 0.6, "xGAgainst": 2.4},
-    ])
+    tmh = pd.DataFrame(
+        [
+            {
+                "Date": pd.Timestamp("2026-10-19"),
+                "Team": "Arsenal",
+                "Opponent": "Chelsea",
+                "Venue": "Home",
+                "xGFor": 2.4,
+                "xGAgainst": 0.6,
+            },
+            {
+                "Date": pd.Timestamp("2026-10-19"),
+                "Team": "Chelsea",
+                "Opponent": "Arsenal",
+                "Venue": "Away",
+                "xGFor": 0.6,
+                "xGAgainst": 2.4,
+            },
+        ]
+    )
 
     lookup = api._match_xg_lookup(tmh)
 
@@ -505,22 +576,35 @@ def test_a_history_without_xg_columns_is_survivable() -> None:
 
 def _history(rows: list[tuple[str, str, float, float, int, int]]) -> pd.DataFrame:
     """Home-perspective rows: (season, league, xgF, xgA, goalsF, goalsA)."""
-    return pd.DataFrame([
-        {
-            "Season": s, "League": lg, "Date": pd.Timestamp(f"2026-10-{i + 1:02d}"),
-            "Team": f"H{i}", "Opponent": f"A{i}", "Venue": "Home",
-            "xGFor": xf, "xGAgainst": xa, "GoalsFor": gf, "GoalsAgainst": ga,
-        }
-        for i, (s, lg, xf, xa, gf, ga) in enumerate(rows)
-    ])
+    return pd.DataFrame(
+        [
+            {
+                "Season": s,
+                "League": lg,
+                "Date": pd.Timestamp(f"2026-10-{i + 1:02d}"),
+                "Team": f"H{i}",
+                "Opponent": f"A{i}",
+                "Venue": "Home",
+                "xGFor": xf,
+                "xGAgainst": xa,
+                "GoalsFor": gf,
+                "GoalsAgainst": ga,
+            }
+            for i, (s, lg, xf, xa, gf, ga) in enumerate(rows)
+        ]
+    )
 
 
 def test_the_board_puts_the_least_likely_result_first(monkeypatch) -> None:
     monkeypatch.setattr(api.state, "metadata", SimpleNamespace(rho=-0.0567))
-    out = api._retrodict_all(_history([
-        ("2526", "E0", 1.2, 1.1, 1, 1),   # even chances, a draw -- unremarkable
-        ("2526", "E0", 3.5, 0.2, 0, 1),   # hammered them and lost
-    ]))
+    out = api._retrodict_all(
+        _history(
+            [
+                ("2526", "E0", 1.2, 1.1, 1, 1),  # even chances, a draw -- unremarkable
+                ("2526", "E0", 3.5, 0.2, 0, 1),  # hammered them and lost
+            ]
+        )
+    )
 
     assert len(out) == 2
     assert out.nsmallest(1, "prob_actual").iloc[0]["xg_home"] == 3.5
@@ -530,10 +614,14 @@ def test_a_match_with_no_chances_is_kept_off_the_board(monkeypatch) -> None:
     """The abandoned match again. Top of a board titled "against the run of
     play" is the worst place for a 0.0%."""
     monkeypatch.setattr(api.state, "metadata", SimpleNamespace(rho=-0.0567))
-    out = api._retrodict_all(_history([
-        ("1617", "F1", 0.0, 0.0, 0, 3),
-        ("1617", "F1", 1.4, 1.2, 2, 0),
-    ]))
+    out = api._retrodict_all(
+        _history(
+            [
+                ("1617", "F1", 0.0, 0.0, 0, 3),
+                ("1617", "F1", 1.4, 1.2, 2, 0),
+            ]
+        )
+    )
 
     assert len(out) == 1
     assert out.iloc[0]["xg_home"] == 1.4

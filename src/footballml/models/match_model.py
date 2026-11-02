@@ -139,7 +139,8 @@ class MatchPredictor:
         if dropped:
             logger.info(
                 "Ignoring %d feature(s) with no values in training: %s",
-                len(dropped), dropped[:6],
+                len(dropped),
+                dropped[:6],
             )
 
         self.feature_names_ = usable
@@ -225,9 +226,7 @@ class MatchPredictor:
                 # is read as the forecast and looks like it contradicts a 50%
                 # win probability -- Roma 1-1 beside "Roma Win" -- when the two
                 # answer different questions.
-                "prob_modal_score": matrix[
-                    np.arange(len(modal)), modal[:, 0], modal[:, 1]
-                ],
+                "prob_modal_score": matrix[np.arange(len(modal)), modal[:, 0], modal[:, 1]],
                 **{
                     f"score_{k}_{part}": values
                     for k in range(TOP_SCORES)
@@ -307,12 +306,14 @@ def feature_columns(df: pd.DataFrame) -> list[str]:
     excellent for it.
     """
     excluded = {
-        "League", "Season", "Date", "HomeTeam", "AwayTeam",
-        "FTHG", "FTAG", "FTR",
+        "League",
+        "Season",
+        "Date",
+        "HomeTeam",
+        "AwayTeam",
+        "FTHG",
+        "FTAG",
+        "FTR",
         *ODDS_COLUMNS,
     }
-    return [
-        c
-        for c in df.columns
-        if c not in excluded and pd.api.types.is_numeric_dtype(df[c])
-    ]
+    return [c for c in df.columns if c not in excluded and pd.api.types.is_numeric_dtype(df[c])]

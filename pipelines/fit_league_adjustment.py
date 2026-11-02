@@ -36,9 +36,7 @@ logger = logging.getLogger("fit_league_adjustment")
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reference", default=REFERENCE)
-    parser.add_argument(
-        "--dry-run", action="store_true", help="Fit and report without writing."
-    )
+    parser.add_argument("--dry-run", action="store_true", help="Fit and report without writing.")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
@@ -63,7 +61,8 @@ def main() -> int:
         logger.error(
             "Could not record the model version (%s). Refusing to save an "
             "adjustment that cannot be checked against the model serving it; "
-            "the previous correction is unchanged.", exc,
+            "the previous correction is unchanged.",
+            exc,
         )
         return 1
 
@@ -95,7 +94,8 @@ def main() -> int:
             "`python -m pipelines.validate_european` first.",
             PREDICTIONS.name,
             ", ".join(recorded) + (f" (+{unstamped} row(s) with no stamp)" if unstamped else "")
-            if recorded or unstamped else "no recorded model",
+            if recorded or unstamped
+            else "no recorded model",
             serving,
         )
         return 1

@@ -101,9 +101,7 @@ def fetch_understat_team_match(
     away = _side_frame(raw, "away", "home", "Away")
     long_df = pd.concat([home, away], ignore_index=True)
 
-    long_df = resolve_teams(
-        long_df, ["Team", "Opponent"], source="understat", known=known_teams
-    )
+    long_df = resolve_teams(long_df, ["Team", "Opponent"], source="understat", known=known_teams)
     return long_df.sort_values(["Date", "League", "Team"]).reset_index(drop=True)
 
 
@@ -128,9 +126,7 @@ def _side_frame(raw: pd.DataFrame, side: str, other: str, venue: str) -> pd.Data
     return out.drop(columns=["PPDAAgainst", "DeepCompletionsAgainst"], errors="ignore")
 
 
-def merge_xg(
-    tmh: pd.DataFrame, xg: pd.DataFrame, validate_dates: bool = True
-) -> pd.DataFrame:
+def merge_xg(tmh: pd.DataFrame, xg: pd.DataFrame, validate_dates: bool = True) -> pd.DataFrame:
     """Attach Understat metrics to the football-data team-match history.
 
     Joined on ``(League, Season, Team, Opponent, Venue)`` rather than on date. In
@@ -155,9 +151,7 @@ def merge_xg(
         drift = (merged.loc[matched, "Date"] - merged.loc[matched, "Date_xg"]).abs()
         off = drift > pd.Timedelta(days=1)
         if off.any():
-            logger.warning(
-                "%d matched rows disagree on date by more than a day", int(off.sum())
-            )
+            logger.warning("%d matched rows disagree on date by more than a day", int(off.sum()))
 
     coverage = matched.mean()
     logger.info("xG coverage: %.1f%% of %d team-matches", coverage * 100, len(merged))

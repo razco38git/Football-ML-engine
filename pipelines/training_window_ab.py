@@ -100,8 +100,9 @@ def metrics_for(preds: pd.DataFrame) -> dict[str, float]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--start-season", type=int, default=1516)
-    parser.add_argument("--train-from", type=int, default=XG_ERA_START,
-                        help="Oldest training season for arm B.")
+    parser.add_argument(
+        "--train-from", type=int, default=XG_ERA_START, help="Oldest training season for arm B."
+    )
     parser.add_argument("--n-boot", type=int, default=10_000)
     parser.add_argument("--out-dir", type=Path, default=OUT_DIR)
     args = parser.parse_args()
@@ -136,7 +137,11 @@ def main() -> None:
         preds_by_arm[name] = preds
         logger.info(
             "%-16s RPS %.5f  acc %.4f  median train rows %6d  %.0fs",
-            name, row["rps"], row["accuracy"], row["median_train_rows"], elapsed,
+            name,
+            row["rps"],
+            row["accuracy"],
+            row["median_train_rows"],
+            elapsed,
         )
 
     a_name, b_name = list(arms)
@@ -157,7 +162,11 @@ def main() -> None:
         boots.append(result)
         logger.info(
             "  %-28s n=%5d  delta %+.5f [%+.5f, %+.5f]  %s",
-            label, result["n"], result["delta"], result["lo"], result["hi"],
+            label,
+            result["n"],
+            result["delta"],
+            result["lo"],
+            result["hi"],
             "SIGNIFICANT" if result["excludes_zero"] else "not significant",
         )
 
@@ -186,7 +195,8 @@ def main() -> None:
 
     primary = boots[0]
     verdict = (
-        "ADOPT arm B" if primary["excludes_zero"] and primary["delta"] < 0
+        "ADOPT arm B"
+        if primary["excludes_zero"] and primary["delta"] < 0
         else "REJECT: keep production (arm A)"
     )
     logger.info("\nVerdict on the primary endpoint: %s", verdict)

@@ -70,8 +70,11 @@ def test_reversing_the_fixture_reverses_the_shift() -> None:
 
 def test_it_vectorises_over_a_batch() -> None:
     home, away = adjust(
-        np.array([1.5, 1.5]), np.array([1.5, 1.5]),
-        np.array(["E0", "E0"]), np.array(["F1", "E0"]), OFFSETS,
+        np.array([1.5, 1.5]),
+        np.array([1.5, 1.5]),
+        np.array(["E0", "E0"]),
+        np.array(["F1", "E0"]),
+        OFFSETS,
     )
     assert home[0] > 1.5
     assert home[1] == pytest.approx(1.5)
@@ -100,14 +103,21 @@ def _synthetic(n: int = 600, true_gap: float = 0.4, seed: int = 5) -> pd.DataFra
         gap = true_gap if home_league == "E0" else -true_gap
         mu_h, mu_a = 1.4 * np.exp(0.5 * gap), 1.4 * np.exp(-0.5 * gap)
         hg, ag = rng.poisson(mu_h), rng.poisson(mu_a)
-        rows.append({
-            "Season": f"{2000 + i % 6}",
-            "home_league": home_league, "away_league": away_league,
-            "expected_goals_home": 1.4, "expected_goals_away": 1.4,
-            "prob_home_win": 0.4, "prob_draw": 0.27, "prob_away_win": 0.33,
-            "FTHG": hg, "FTAG": ag,
-            "FTR": "H" if hg > ag else "A" if ag > hg else "D",
-        })
+        rows.append(
+            {
+                "Season": f"{2000 + i % 6}",
+                "home_league": home_league,
+                "away_league": away_league,
+                "expected_goals_home": 1.4,
+                "expected_goals_away": 1.4,
+                "prob_home_win": 0.4,
+                "prob_draw": 0.27,
+                "prob_away_win": 0.33,
+                "FTHG": hg,
+                "FTAG": ag,
+                "FTR": "H" if hg > ag else "A" if ag > hg else "D",
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -153,8 +163,12 @@ def test_a_missing_file_loads_as_no_correction(tmp_path) -> None:
 def _payload(**over) -> dict:
     """A saveable adjustment. `model_version` is required, not decoration."""
     return {
-        "offsets": OFFSETS, "reference": "E0", "n_matches": 10,
-        "holdout": {}, "model_version": "20261018-abc", **over,
+        "offsets": OFFSETS,
+        "reference": "E0",
+        "n_matches": 10,
+        "holdout": {},
+        "model_version": "20261018-abc",
+        **over,
     }
 
 

@@ -58,10 +58,8 @@ def test_every_declared_arm_is_present() -> None:
     assert set(rho.ARMS) == {"production", "per-league", "shrunk", "per-lambda"}
 
 
-PER_LEAGUE = pd.Series({"D1": -0.130, "E0": -0.043, "F1": -0.045,
-                        "I1": -0.052, "SP1": -0.033})
-COUNTS = pd.Series({"D1": 3402, "E0": 4239, "F1": 3911,
-                    "I1": 4230, "SP1": 4256})
+PER_LEAGUE = pd.Series({"D1": -0.130, "E0": -0.043, "F1": -0.045, "I1": -0.052, "SP1": -0.033})
+COUNTS = pd.Series({"D1": 3402, "E0": 4239, "F1": 3911, "I1": 4230, "SP1": 4256})
 
 
 def test_shrinkage_pulls_a_noisy_league_toward_the_pool() -> None:
@@ -117,9 +115,9 @@ def test_the_exact_score_margin_is_the_declared_constant() -> None:
 
 
 def test_exact_score_is_judged_on_the_interval_not_the_point_estimate() -> None:
-    """"Does not fall" would reject an arm over one match in twenty thousand."""
-    assert rho.exact_score_passes(0.10)      # a decline inside the margin
-    assert rho.exact_score_passes(-0.30)     # an improvement
+    """ "Does not fall" would reject an arm over one match in twenty thousand."""
+    assert rho.exact_score_passes(0.10)  # a decline inside the margin
+    assert rho.exact_score_passes(-0.30)  # an improvement
     assert not rho.exact_score_passes(0.40)  # a decline past it
 
 
@@ -151,21 +149,31 @@ def test_four_of_five_leagues_is_the_declared_requirement() -> None:
 
 def test_the_experiment_cannot_write_anything() -> None:
     source = "\n".join(
-        line
-        for line in inspect.getsource(rho).split("\n")
-        if not line.lstrip().startswith("#")
+        line for line in inspect.getsource(rho).split("\n") if not line.lstrip().startswith("#")
     )
     for forbidden in (
-        "to_csv", "to_pickle", "to_parquet", "to_json", "to_hdf", "shutil",
-        "os.replace", "os.remove", "os.rename", "unlink(", "write_text",
-        "write_bytes", "mkdir(", "savetxt", "np.save",
+        "to_csv",
+        "to_pickle",
+        "to_parquet",
+        "to_json",
+        "to_hdf",
+        "shutil",
+        "os.replace",
+        "os.remove",
+        "os.rename",
+        "unlink(",
+        "write_text",
+        "write_bytes",
+        "mkdir(",
+        "savetxt",
+        "np.save",
     ):
         assert forbidden not in source, f"the experiment must not call {forbidden}"
     for line in source.splitlines():
         if "open(" in line and "fileno" not in line:
-            assert not any(
-                mode in line for mode in ('"w"', "'w'", '"a"', "'a'", '"x"', "'x'")
-            ), line
+            assert not any(mode in line for mode in ('"w"', "'w'", '"a"', "'a'", '"x"', "'x'")), (
+                line
+            )
 
 
 def test_the_experiment_does_not_import_the_thing_that_writes_production() -> None:

@@ -22,8 +22,15 @@ MEASURED = pd.DataFrame(
         ("E0", "2627", "Man City", 77.0, 76.0, 75.0, 78.0, 79.0, 12),
     ],
     columns=[
-        "League", "Season", "Team", "strength_overall", "strength_goalkeeper",
-        "strength_defence", "strength_midfield", "strength_attack", "n_players",
+        "League",
+        "Season",
+        "Team",
+        "strength_overall",
+        "strength_goalkeeper",
+        "strength_defence",
+        "strength_midfield",
+        "strength_attack",
+        "n_players",
     ],
 )
 
@@ -36,9 +43,17 @@ PRE_SEASON = pd.DataFrame(
         ("E0", "2627", "Burnley", 70.0, 69.0, 68.0, 71.0, 72.0, 15, 6, "Burnley"),
     ],
     columns=[
-        "League", "Season", "Team", "squad_overall", "squad_goalkeeper",
-        "squad_defence", "squad_midfield", "squad_attack", "n_players",
-        "n_from_history", "ea_label",
+        "League",
+        "Season",
+        "Team",
+        "squad_overall",
+        "squad_goalkeeper",
+        "squad_defence",
+        "squad_midfield",
+        "squad_attack",
+        "n_players",
+        "n_from_history",
+        "ea_label",
     ],
 )
 
@@ -177,8 +192,14 @@ FORM_MATCHES_PLAYED = pd.DataFrame(
         ("E0", "2627", "Man City", "Rival F", "away", "2026-09-05", 2, 2),
     ],
     columns=[
-        "League", "Season", "Team", "Opponent", "Venue", "Date",
-        "GoalsFor", "GoalsAgainst",
+        "League",
+        "Season",
+        "Team",
+        "Opponent",
+        "Venue",
+        "Date",
+        "GoalsFor",
+        "GoalsAgainst",
     ],
 )
 

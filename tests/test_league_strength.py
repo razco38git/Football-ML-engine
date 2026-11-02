@@ -23,9 +23,11 @@ api = importlib.import_module("footballml.api.app")
 TEAMS = pd.DataFrame(
     [
         # Two seasons, so "latest by default" is actually exercised.
-        ("E0", "2526", "Man City", 81.0), ("E0", "2526", "Arsenal", 79.0),
+        ("E0", "2526", "Man City", 81.0),
+        ("E0", "2526", "Arsenal", 79.0),
         ("E0", "2526", "Burnley", 67.0),
-        ("F1", "2526", "Paris SG", 82.0), ("F1", "2526", "Metz", 64.0),
+        ("F1", "2526", "Paris SG", 82.0),
+        ("F1", "2526", "Metz", 64.0),
         ("E0", "2425", "Man City", 50.0),
     ],
     columns=["League", "Season", "Team", "strength_overall"],
@@ -100,8 +102,13 @@ def test_no_ratings_at_all_says_what_to_run(monkeypatch: pytest.MonkeyPatch) -> 
 def test_the_latest_season_is_still_the_default(client: TestClient) -> None:
     page = client.get("/teams").json()
     assert page["season"] == "2526"
-    assert {t["team"] for t in page["teams"]} == {"Man City", "Arsenal", "Burnley",
-                                                  "Paris SG", "Metz"}
+    assert {t["team"] for t in page["teams"]} == {
+        "Man City",
+        "Arsenal",
+        "Burnley",
+        "Paris SG",
+        "Metz",
+    }
 
 
 def test_every_season_with_ratings_is_offered(client: TestClient) -> None:

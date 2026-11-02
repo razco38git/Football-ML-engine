@@ -127,9 +127,7 @@ def club_candidates(reader, seasons: list[str] | None = None) -> dict[tuple, tup
         try:
             # no_cache=False: `read_player_season_stats` has already fetched and
             # stored this exact payload, so this is a read of those bytes.
-            data = read_league_season(
-                str(row["url"]), row["league_id"], row["season_id"], False
-            )
+            data = read_league_season(str(row["url"]), row["league_id"], row["season_id"], False)
             players = data["playersData"]
         except Exception as exc:  # noqa: BLE001 - one bad season, not the run
             logger.warning("Understat %s %s club list unavailable: %s", code, season, exc)
@@ -144,9 +142,7 @@ def club_candidates(reader, seasons: list[str] | None = None) -> dict[tuple, tup
                 candidates[(code, season, int(player["id"]))] = clubs
 
     if candidates:
-        logger.info(
-            "Understat lists several clubs for %d player-season(s)", len(candidates)
-        )
+        logger.info("Understat lists several clubs for %d player-season(s)", len(candidates))
     return candidates
 
 
@@ -319,9 +315,7 @@ def resolve_club_attribution(
 
         # Only clubs Understat itself put forward are eligible.
         present = {
-            club: evidence[canonical(club)]
-            for club in listed
-            if canonical(club) in evidence
+            club: evidence[canonical(club)] for club in listed if canonical(club) in evidence
         }
         filed = str(out.at[idx, team_column])
         if not present or filed in present:
@@ -338,11 +332,16 @@ def resolve_club_attribution(
     for season, league, name, filed, best in sorted(moves):
         logger.info(
             "%s %s: %s refiled to %s -- no FBref appearance for %s",
-            season, league, name, best, filed,
+            season,
+            league,
+            name,
+            best,
+            filed,
         )
     logger.info(
-        "Club attribution: %d of %d multi-club player-season(s) refiled, "
-        "%d with no FBref evidence",
-        len(moves), len(candidates), blind,
+        "Club attribution: %d of %d multi-club player-season(s) refiled, %d with no FBref evidence",
+        len(moves),
+        len(candidates),
+        blind,
     )
     return out

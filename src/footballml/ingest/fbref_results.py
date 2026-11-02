@@ -82,16 +82,26 @@ RETRY_AFTER = timedelta(days=7)
 #: row before it is allowed into the match history -- see `fetch_fbref_results`.
 #: The xG family is merged separately by `build_dataset` and checked there.
 FEATURE_COLUMNS = [
-    "GoalsFor", "GoalsAgainst",
-    "ShotsFor", "ShotsAgainst",
-    "ShotsOnTargetFor", "ShotsOnTargetAgainst",
+    "GoalsFor",
+    "GoalsAgainst",
+    "ShotsFor",
+    "ShotsAgainst",
+    "ShotsOnTargetFor",
+    "ShotsOnTargetAgainst",
 ]
 
 #: What this module can fill. Everything else football-data brings is either
 #: supplied by Understat or never used as a feature.
 COLUMNS = [
-    *KEY, "Venue", "GoalsFor", "GoalsAgainst", "Result",
-    "ShotsFor", "ShotsAgainst", "ShotsOnTargetFor", "ShotsOnTargetAgainst",
+    *KEY,
+    "Venue",
+    "GoalsFor",
+    "GoalsAgainst",
+    "Result",
+    "ShotsFor",
+    "ShotsAgainst",
+    "ShotsOnTargetFor",
+    "ShotsOnTargetAgainst",
 ]
 
 
@@ -172,9 +182,7 @@ def _shooting(leagues: list[str], seasons: list[str]) -> pd.DataFrame:
     enough -- a row is then "whoever played *against* Y, at home or away", and
     the schedule says who that was.
     """
-    reader = _matchlog_reader(
-        [UNDERSTAT_LEAGUES[c] for c in leagues], list(seasons)
-    )
+    reader = _matchlog_reader([UNDERSTAT_LEAGUES[c] for c in leagues], list(seasons))
     raw = _flatten(reader.read_team_match_stats(stat_type="shooting").reset_index())
 
     needed = {"league", "season", "date", "venue", "opponent", "Sh", "SoT"}
@@ -275,7 +283,9 @@ def fetch_fbref_results(
                 "All %d missing match(es) were already tried and could not be "
                 "completed (%s); next attempt once a record is %d days old. "
                 "Skipping the shooting scrape.",
-                len(missing), _describe(missing), RETRY_AFTER.days,
+                len(missing),
+                _describe(missing),
+                RETRY_AFTER.days,
             )
             return pd.DataFrame(columns=COLUMNS)
 
@@ -291,22 +301,31 @@ def fetch_fbref_results(
     # vice versa. This is what recovers the identity `team` lost.
     on_home = ["League", "Season", "Date", "AwayTeam"]
     on_away = ["League", "Season", "Date", "HomeTeam"]
-    home = shots[shots["Venue"] == "Home"].rename(
-        columns={"Against": "AwayTeam", "Shots": "HS", "ShotsOnTarget": "HST"}
-    )[[*on_home, "HS", "HST"]].drop_duplicates(on_home)
-    away = shots[shots["Venue"] == "Away"].rename(
-        columns={"Against": "HomeTeam", "Shots": "AS", "ShotsOnTarget": "AST"}
-    )[[*on_away, "AS", "AST"]].drop_duplicates(on_away)
+    home = (
+        shots[shots["Venue"] == "Home"]
+        .rename(columns={"Against": "AwayTeam", "Shots": "HS", "ShotsOnTarget": "HST"})[
+            [*on_home, "HS", "HST"]
+        ]
+        .drop_duplicates(on_home)
+    )
+    away = (
+        shots[shots["Venue"] == "Away"]
+        .rename(columns={"Against": "HomeTeam", "Shots": "AS", "ShotsOnTarget": "AST"})[
+            [*on_away, "AS", "AST"]
+        ]
+        .drop_duplicates(on_away)
+    )
 
     results["Season"] = results["Season"].astype(str)
-    wide = (
-        results.merge(home, on=on_home, how="left", validate="one_to_one")
-        .merge(away, on=on_away, how="left", validate="one_to_one")
+    wide = results.merge(home, on=on_home, how="left", validate="one_to_one").merge(
+        away, on=on_away, how="left", validate="one_to_one"
     )
     resolved = wide[["HS", "AS"]].notna().all(axis=1).sum()
     logger.info(
         "FBref results: %d played match(es) to %s, shots resolved for %d",
-        len(wide), wide["Date"].max().date(), resolved,
+        len(wide),
+        wide["Date"].max().date(),
+        resolved,
     )
     _park_what_failed(wide, eligible, deferred, now)
 
@@ -318,19 +337,26 @@ def fetch_fbref_results(
         sides.append(
             pd.DataFrame(
                 {
-                    "League": wide["League"], "Season": wide["Season"].astype(str),
-                    "Date": wide["Date"], "Team": wide[team], "Opponent": wide[opp],
+                    "League": wide["League"],
+                    "Season": wide["Season"].astype(str),
+                    "Date": wide["Date"],
+                    "Team": wide[team],
+                    "Opponent": wide[opp],
                     "Venue": venue,
-                    "GoalsFor": wide[gf], "GoalsAgainst": wide[ga],
-                    "ShotsFor": wide[sf], "ShotsAgainst": wide[sa],
-                    "ShotsOnTargetFor": wide[stf], "ShotsOnTargetAgainst": wide[sta],
+                    "GoalsFor": wide[gf],
+                    "GoalsAgainst": wide[ga],
+                    "ShotsFor": wide[sf],
+                    "ShotsAgainst": wide[sa],
+                    "ShotsOnTargetFor": wide[stf],
+                    "ShotsOnTargetAgainst": wide[sta],
                 }
             )
         )
 
     out = pd.concat(sides, ignore_index=True)
     out["Result"] = np.where(
-        out["GoalsFor"] > out["GoalsAgainst"], "W",
+        out["GoalsFor"] > out["GoalsAgainst"],
+        "W",
         np.where(out["GoalsFor"] < out["GoalsAgainst"], "L", "D"),
     )
 
@@ -358,7 +384,9 @@ def fetch_fbref_results(
             "Dropping %d of %d team-match row(s) missing a feature column "
             "(league(s) %s). They will be picked up by a later run; a partial "
             "row must not reach the model.",
-            len(dropped), len(out), sorted(dropped["League"].dropna().unique()),
+            len(dropped),
+            len(out),
+            sorted(dropped["League"].dropna().unique()),
         )
     return out.loc[complete, COLUMNS].reset_index(drop=True)
 
@@ -401,13 +429,9 @@ def _seen(known: pd.DataFrame | None) -> set[tuple] | None:
     if known is None or known.empty:
         return None
 
-    have = known.assign(
-        Date=pd.to_datetime(known["Date"]), Season=known["Season"].astype(str)
-    )
+    have = known.assign(Date=pd.to_datetime(known["Date"]), Season=known["Season"].astype(str))
     # The history is one row per team; a match is present if either side is.
-    return set(
-        zip(have["League"], have["Season"], have["Date"], have["Team"], strict=True)
-    )
+    return set(zip(have["League"], have["Season"], have["Date"], have["Team"], strict=True))
 
 
 def _missing_matches(results: pd.DataFrame, known: pd.DataFrame | None) -> pd.DataFrame:
@@ -437,9 +461,7 @@ def _missing_matches(results: pd.DataFrame, known: pd.DataFrame | None) -> pd.Da
     return results[absent].copy()
 
 
-def _load_deferred(
-    path: Path | None = None, seen: set[tuple] | None = None
-) -> pd.DataFrame:
+def _load_deferred(path: Path | None = None, seen: set[tuple] | None = None) -> pd.DataFrame:
     """Matches a working scrape has already failed to complete.
 
     Pruned against the history on the way in: once a match arrives from either
@@ -459,7 +481,8 @@ def _load_deferred(
     except (OSError, ValueError) as exc:
         logger.warning(
             "Could not read %s (%s); every missing match is eligible again",
-            path.name, exc,
+            path.name,
+            exc,
         )
         return empty
 
@@ -467,7 +490,8 @@ def _load_deferred(
     if absent:
         logger.warning(
             "%s is missing column(s) %s; every missing match is eligible again",
-            path.name, absent,
+            path.name,
+            absent,
         )
         return empty
 
@@ -523,7 +547,8 @@ def _record_deferred(
 
     record: dict[tuple, tuple[int, pd.Timestamp]] = {
         (row.League, row.Season, row.Date, row.HomeTeam, row.AwayTeam): (
-            int(row.attempts), row.last_attempt,
+            int(row.attempts),
+            row.last_attempt,
         )
         for row in deferred.itertuples()
     }
@@ -534,9 +559,12 @@ def _record_deferred(
     out = pd.DataFrame(
         [
             {
-                "League": league, "Season": season,
+                "League": league,
+                "Season": season,
                 "Date": pd.Timestamp(date).date().isoformat(),
-                "HomeTeam": home, "AwayTeam": away, "attempts": attempts,
+                "HomeTeam": home,
+                "AwayTeam": away,
+                "attempts": attempts,
                 "last_attempt": pd.Timestamp(last).date().isoformat(),
             }
             for (league, season, date, home, away), (attempts, last) in sorted(
@@ -576,8 +604,7 @@ def _park_what_failed(
         # Only what this run was actually trying to add -- `wide` carries the
         # league's whole season, most of which the history already has.
         unfillable = unresolved[
-            unresolved["League"].isin(worked)
-            & _key_series(unresolved).isin(_keys(eligible))
+            unresolved["League"].isin(worked) & _key_series(unresolved).isin(_keys(eligible))
         ]
         if unfillable.empty and deferred.empty:
             return
@@ -588,7 +615,9 @@ def _park_what_failed(
                 "FBref has no shooting line for %d missing match(es) (%s). "
                 "Parked for %d days: the row cannot be completed, and without "
                 "this the division counts as behind every morning.",
-                len(unfillable), _describe(unfillable), RETRY_AFTER.days,
+                len(unfillable),
+                _describe(unfillable),
+                RETRY_AFTER.days,
             )
     except Exception as exc:  # noqa: BLE001 - a bookkeeping file must not break the build
         logger.warning("Could not record deferred matches (%s)", exc)
@@ -636,6 +665,8 @@ def top_up(tmh: pd.DataFrame, extra: pd.DataFrame) -> pd.DataFrame:
 
     logger.info(
         "Topping up %d team-match row(s) from FBref (to %s, primary source ends %s)",
-        len(fresh), fresh["Date"].max().date(), have["Date"].max().date(),
+        len(fresh),
+        fresh["Date"].max().date(),
+        have["Date"].max().date(),
     )
     return pd.concat([have, fresh.assign(source=FBREF)], ignore_index=True)

@@ -270,8 +270,16 @@ def build_features(
     # Truth comes from the *whole* input, not just what was rebuilt -- taking it
     # from `pending` would silently drop every cached match.
     columns = [
-        "League", "Season", "Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "FTR",
-        "home_league", "away_league",
+        "League",
+        "Season",
+        "Date",
+        "HomeTeam",
+        "AwayTeam",
+        "FTHG",
+        "FTAG",
+        "FTR",
+        "home_league",
+        "away_league",
     ]
     if "Round" in european.columns:
         columns.append("Round")
@@ -288,7 +296,8 @@ def build_features(
     if len(joined) < len(truth):
         logger.warning(
             "%d of %d matches had no features and were dropped",
-            len(truth) - len(joined), len(truth),
+            len(truth) - len(joined),
+            len(truth),
         )
     return joined, raw
 
@@ -319,15 +328,22 @@ def predict_with(features: pd.DataFrame, model, league_code_from: str = "home") 
     keep = [
         c
         for c in [
-            "competition", "Season", "Date", "HomeTeam", "AwayTeam",
-            "FTHG", "FTAG", "FTR", "Round", "home_league", "away_league",
+            "competition",
+            "Season",
+            "Date",
+            "HomeTeam",
+            "AwayTeam",
+            "FTHG",
+            "FTAG",
+            "FTR",
+            "Round",
+            "home_league",
+            "away_league",
             *strength,
         ]
         if c in frame.columns
     ]
-    return pd.concat(
-        [frame[keep].reset_index(drop=True), predicted.reset_index(drop=True)], axis=1
-    )
+    return pd.concat([frame[keep].reset_index(drop=True), predicted.reset_index(drop=True)], axis=1)
 
 
 def domestic_reference(
@@ -339,9 +355,7 @@ def domestic_reference(
     even though neither number is an out-of-sample estimate.
     """
     features = build_match_features(tmh, strength=strength)
-    features = features[
-        features["FTR"].notna() & features["Season"].astype(str).isin(seasons)
-    ]
+    features = features[features["FTR"].notna() & features["Season"].astype(str).isin(seasons)]
     if features.empty:
         return None
     predicted = model.predict_frame(features[model.feature_names_])
@@ -359,7 +373,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--competitions", nargs="+", default=None)
     parser.add_argument(
-        "--limit-dates", type=int, default=None,
+        "--limit-dates",
+        type=int,
+        default=None,
         help="Score only the first N matchdays. For timing the full run.",
     )
     parser.add_argument("--no-domestic-reference", action="store_true")
@@ -419,7 +435,10 @@ def main() -> int:
             return 0
 
     features, raw = build_features(
-        european, tmh, strength, cached=cached,
+        european,
+        tmh,
+        strength,
+        cached=cached,
         fingerprint=None if args.no_cache else fingerprint,
     )
     if features.empty:

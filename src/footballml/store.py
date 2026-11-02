@@ -60,9 +60,7 @@ def _competition(frame: pd.DataFrame) -> pd.Series:
     return frame["competition"].astype("object").fillna(DOMESTIC).replace("", DOMESTIC)
 
 
-def append(
-    predictions: pd.DataFrame, model_version: str, path: Path | None = None
-) -> int:
+def append(predictions: pd.DataFrame, model_version: str, path: Path | None = None) -> int:
     """Store new predictions, ignoring any already recorded for this version.
 
     Args:
@@ -102,9 +100,7 @@ def append(
         return 0
 
     combined = (
-        pd.concat([existing, incoming], ignore_index=True)
-        if not existing.empty
-        else incoming
+        pd.concat([existing, incoming], ignore_index=True) if not existing.empty else incoming
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     combined.to_csv(path, index=False)

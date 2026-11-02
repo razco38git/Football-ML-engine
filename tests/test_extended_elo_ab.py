@@ -113,14 +113,24 @@ def test_the_experiment_cannot_write_anything() -> None:
     API serving them.
     """
     source = "\n".join(
-        line
-        for line in inspect.getsource(ab).split("\n")
-        if not line.lstrip().startswith("#")
+        line for line in inspect.getsource(ab).split("\n") if not line.lstrip().startswith("#")
     )
     for forbidden in (
-        "to_csv", "to_pickle", "to_parquet", "to_json", "to_hdf", "shutil",
-        "os.replace", "os.remove", "os.rename", "unlink(", "write_text",
-        "write_bytes", "mkdir(", "savetxt", "np.save",
+        "to_csv",
+        "to_pickle",
+        "to_parquet",
+        "to_json",
+        "to_hdf",
+        "shutil",
+        "os.replace",
+        "os.remove",
+        "os.rename",
+        "unlink(",
+        "write_text",
+        "write_bytes",
+        "mkdir(",
+        "savetxt",
+        "np.save",
     ):
         assert forbidden not in source, f"the experiment must not call {forbidden}"
     for line in source.splitlines():

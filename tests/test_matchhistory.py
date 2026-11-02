@@ -38,9 +38,9 @@ def _csv(*rows: str, encoding: str = "utf-8") -> bytes:
     ("date", "expected"),
     [
         ("2026-09-30", "2627"),
-        ("2026-07-01", "2627"),   # July belongs to the season about to start
-        ("2026-06-30", "2526"),   # June still belongs to the one ending
-        ("2027-01-15", "2627"),   # January is the back half of 26/27
+        ("2026-07-01", "2627"),  # July belongs to the season about to start
+        ("2026-06-30", "2526"),  # June still belongs to the one ending
+        ("2027-01-15", "2627"),  # January is the back half of 26/27
         ("2019-12-31", "1920"),
         ("2020-01-01", "1920"),
     ],
@@ -178,7 +178,7 @@ def test_results_are_oriented_per_team(matches: pd.DataFrame) -> None:
     the away side rather than the 'A' the source recorded."""
     long_df = to_team_match_history(matches).set_index(["Team", "Date"])
     d = pd.Timestamp("2026-09-21")
-    assert long_df.loc[("Brentford", d), "Result"] == "W"   # won 3-1 away
+    assert long_df.loc[("Brentford", d), "Result"] == "W"  # won 3-1 away
     assert long_df.loc[("Leeds", d), "Result"] == "L"
     draw = pd.Timestamp("2026-09-20")
     assert long_df.loc[("Everton", draw), "Result"] == "D"
@@ -276,7 +276,8 @@ def test_the_backoff_grows_and_is_bounded(monkeypatch) -> None:
     waits = []
 
     monkeypatch.setattr(
-        matchhistory.requests, "get",
+        matchhistory.requests,
+        "get",
         lambda url, **kw: (_ for _ in ()).throw(requests.ConnectionError("reset")),
     )
     monkeypatch.setattr(matchhistory.time, "sleep", waits.append)

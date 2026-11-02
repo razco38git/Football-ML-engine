@@ -90,8 +90,17 @@ EUROPEAN_ALIASES = {"Hertha BSC": "Hertha"}
 FIRST_SEASON = "1617"
 
 _OUT_COLUMNS = [
-    "League", "Season", "Date", "HomeTeam", "AwayTeam",
-    "FTHG", "FTAG", "FTR", "Round", "home_league", "away_league",
+    "League",
+    "Season",
+    "Date",
+    "HomeTeam",
+    "AwayTeam",
+    "FTHG",
+    "FTAG",
+    "FTR",
+    "Round",
+    "home_league",
+    "away_league",
 ]
 
 #: Rounds played over two legs. The second leg is not an independent match --
@@ -100,8 +109,13 @@ _OUT_COLUMNS = [
 #: Carried so the validation can report with and without them rather than
 #: assuming either way.
 TWO_LEGGED = (
-    "Round of 32", "Round of 16", "Quarter-finals", "Semi-finals",
-    "Knockout phase play-offs", "Knockout round play-offs", "Play-off round",
+    "Round of 32",
+    "Round of 16",
+    "Quarter-finals",
+    "Semi-finals",
+    "Knockout phase play-offs",
+    "Knockout round play-offs",
+    "Play-off round",
 )
 
 #: Single match at a neutral ground, so the home-advantage term is wrong for it.
@@ -257,7 +271,10 @@ def fetch_european_matches(
         played = frame["FTHG"].notna() & frame["FTAG"].notna() & frame["Date"].notna()
         logger.info(
             "%s: %d played across %d season(s); %d unplayed or undated, dropped",
-            code, int(played.sum()), frame["Season"].nunique(), int((~played).sum()),
+            code,
+            int(played.sum()),
+            frame["Season"].nunique(),
+            int((~played).sum()),
         )
         frames.append(frame[played])
 
@@ -269,16 +286,10 @@ def fetch_european_matches(
     out["FTR"] = pd.Series("D", index=out.index).mask(home > away, "H").mask(away > home, "A")
     out["home_league"] = pd.NA
     out["away_league"] = pd.NA
-    return (
-        out[_OUT_COLUMNS]
-        .sort_values(["Date", "League", "HomeTeam"])
-        .reset_index(drop=True)
-    )
+    return out[_OUT_COLUMNS].sort_values(["Date", "League", "HomeTeam"]).reset_index(drop=True)
 
 
-def big_five_only(
-    matches: pd.DataFrame, tmh: pd.DataFrame
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+def big_five_only(matches: pd.DataFrame, tmh: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Split into the matches we can score and the ones we cannot.
 
     A match is keepable only when *both* clubs played in one of the five leagues
@@ -320,14 +331,19 @@ def big_five_only(
         if pd.isna(a)
         else f"home club {home!r} not in the big five this season"
         for h, a, home, away in zip(
-            dropped["home_league"], dropped["away_league"],
-            dropped["HomeTeam"], dropped["AwayTeam"], strict=True,
+            dropped["home_league"],
+            dropped["away_league"],
+            dropped["HomeTeam"],
+            dropped["AwayTeam"],
+            strict=True,
         )
     ]
 
     logger.info(
         "Big five vs big five: kept %d of %d (%d dropped)",
-        int(keep.sum()), len(out), int((~keep).sum()),
+        int(keep.sum()),
+        len(out),
+        int((~keep).sum()),
     )
     return out[keep].reset_index(drop=True), dropped.reset_index(drop=True)
 

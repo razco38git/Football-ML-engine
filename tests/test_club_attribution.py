@@ -63,9 +63,7 @@ def test_a_player_is_moved_off_a_club_he_never_played_for() -> None:
     players = understat((1, "Charlie Cresswell", "Paris Saint Germain"))
     candidates = {("F1", "2627", 1): ("Paris Saint Germain", "Rennes")}
 
-    out = resolve_club_attribution(
-        players, fbref(("Charlie Cresswell", "Rennes", 9.0)), candidates
-    )
+    out = resolve_club_attribution(players, fbref(("Charlie Cresswell", "Rennes", 9.0)), candidates)
 
     assert out.at[0, "team"] == "Rennes"
 
@@ -108,9 +106,7 @@ def test_no_fbref_row_leaves_the_club_alone() -> None:
     players = understat((4, "Mousa Al Tamari", "Paris Saint Germain"))
     candidates = {("F1", "2627", 4): ("Paris Saint Germain", "Rennes")}
 
-    out = resolve_club_attribution(
-        players, fbref(("Musa Al-Taamari", "Rennes", 9.0)), candidates
-    )
+    out = resolve_club_attribution(players, fbref(("Musa Al-Taamari", "Rennes", 9.0)), candidates)
 
     assert out.at[0, "team"] == "Paris Saint Germain"
 
@@ -124,9 +120,7 @@ def test_the_club_names_are_translated_before_they_are_compared() -> None:
     players = understat((5, "Achraf Hakimi", "Paris Saint Germain"))
     candidates = {("F1", "2627", 5): ("Paris Saint Germain", "Rennes")}
 
-    out = resolve_club_attribution(
-        players, fbref(("Achraf Hakimi", "Paris SG", 8.0)), candidates
-    )
+    out = resolve_club_attribution(players, fbref(("Achraf Hakimi", "Paris SG", 8.0)), candidates)
 
     assert out.at[0, "team"] == "Paris Saint Germain"
 
@@ -146,9 +140,7 @@ def test_a_name_one_source_prints_shorter_still_resolves() -> None:
         ("F1", "2627", 6): ("Paris Saint Germain", "Rennes"),
         ("F1", "2627", 7): ("Paris Saint Germain", "Rennes"),
     }
-    evidence = fbref(
-        ("Willian Pacho", "Paris SG", 6.0), ("Fabián Ruiz Peña", "Paris SG", 7.0)
-    )
+    evidence = fbref(("Willian Pacho", "Paris SG", 6.0), ("Fabián Ruiz Peña", "Paris SG", 7.0))
 
     out = resolve_club_attribution(players, evidence, candidates)
 
@@ -222,9 +214,7 @@ def test_only_multi_club_players_become_candidates() -> None:
                 ]
             }
 
-    assert club_candidates(Reader()) == {
-        ("F1", "2627", 1): ("Paris Saint Germain", "Rennes")
-    }
+    assert club_candidates(Reader()) == {("F1", "2627", 1): ("Paris Saint Germain", "Rennes")}
 
 
 def test_a_season_the_caller_did_not_ask_for_is_skipped() -> None:
@@ -260,9 +250,7 @@ def test_one_unreadable_season_does_not_lose_the_others() -> None:
         def _read_league_season(self, url, league_id, season_id, no_cache):
             if url == "bad":
                 raise RuntimeError("payload moved")
-            return {
-                "playersData": [{"id": "3", "team_title": "Arsenal,Chelsea"}]
-            }
+            return {"playersData": [{"id": "3", "team_title": "Arsenal,Chelsea"}]}
 
     assert club_candidates(Reader()) == {("E0", "2627", 3): ("Arsenal", "Chelsea")}
 
@@ -305,9 +293,7 @@ def test_no_club_season_holds_another_clubs_squad() -> None:
     rated = players[players["rated"].fillna(False).astype(bool)]
 
     contaminated = [
-        r
-        for r in resolve(rated, FIFA_DIR)
-        if r.runner_up and r.runner_up[1] > MIN_VOTES
+        r for r in resolve(rated, FIFA_DIR) if r.runner_up and r.runner_up[1] > MIN_VOTES
     ]
 
     assert not contaminated, "\n".join(

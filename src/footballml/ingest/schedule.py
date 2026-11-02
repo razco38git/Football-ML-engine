@@ -120,7 +120,9 @@ def _cache_is_fresh(reader, max_age: timedelta | None) -> bool:
     if stale:
         logger.info(
             "Re-scraping the schedule: %d of %d cached page(s) older than %s",
-            len(stale), len(pages), max_age,
+            len(stale),
+            len(pages),
+            max_age,
         )
         return False
     return True
@@ -179,9 +181,7 @@ def fetch_schedule(
     if uefa:
         _register(uefa)
 
-    reader = sd.FBref(
-        leagues=[known[c] for c in codes], seasons=list(seasons), headless=headless()
-    )
+    reader = sd.FBref(leagues=[known[c] for c in codes], seasons=list(seasons), headless=headless())
     # `force_cache` is all soccerdata offers; the age test is ours.
     raw = reader.read_schedule(force_cache=_cache_is_fresh(reader, max_age)).reset_index()
     if raw.empty:
@@ -191,9 +191,7 @@ def fetch_schedule(
     aliases = load_aliases("fbref")
     # Both capture groups, kept as numbers. A row FBref has not scored yet gives
     # NaN in both, which is what `played` is derived from.
-    goals = (
-        raw["score"].astype(str).str.extract(_SCORE).apply(pd.to_numeric, errors="coerce")
-    )
+    goals = raw["score"].astype(str).str.extract(_SCORE).apply(pd.to_numeric, errors="coerce")
 
     out = pd.DataFrame(
         {
@@ -210,7 +208,9 @@ def fetch_schedule(
     out = out.dropna(subset=["Date", "League"])
     logger.info(
         "Schedule: %d fixtures across %d league-season(s), %d already played",
-        len(out), out.groupby(["League", "Season"]).ngroups, int(out["played"].sum()),
+        len(out),
+        out.groupby(["League", "Season"]).ngroups,
+        int(out["played"].sum()),
     )
     return out.sort_values(["Date", "League", "HomeTeam"]).reset_index(drop=True)
 
@@ -238,7 +238,9 @@ def window_fixtures(
     ]
     logger.info(
         "%d unplayed fixture(s) between %s and %s",
-        len(window), today.date(), horizon.date(),
+        len(window),
+        today.date(),
+        horizon.date(),
     )
     return window.drop(columns=_RESULT_ONLY, errors="ignore").reset_index(drop=True)
 
@@ -277,7 +279,8 @@ def played_results(
     )
     logger.info(
         "FBref results: %d played match(es), latest %s",
-        len(done), done["Date"].max().date(),
+        len(done),
+        done["Date"].max().date(),
     )
     return done.drop(columns=["played"]).reset_index(drop=True)
 
