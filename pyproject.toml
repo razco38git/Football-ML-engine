@@ -59,11 +59,18 @@ postgres = [
     "alembic>=1.13",
     "psycopg[binary]>=3.1",
 ]
+# Upper bounds on the three tools whose *output* decides whether CI is green.
+# A formatter's style, a type checker's inference and a stub package's precision
+# all move between releases, so unpinned they make the badge's colour depend on
+# the date rather than on the code: a release with no commit here can turn it
+# red, which is roughly how this suite came to be failing on `main` unnoticed.
+# Bump them deliberately and fix what the bump finds. `pytest` needs no bound --
+# a new pytest does not invent new opinions about this code.
 dev = [
     "pytest>=8.0",
-    "ruff>=0.5",
-    "mypy>=1.10",
-    "pandas-stubs",
+    "ruff>=0.16.7,<0.17",
+    "mypy>=2.3,<2.4",
+    "pandas-stubs>=3.0,<3.1",
 ]
 
 [tool.hatch.build.targets.wheel]
