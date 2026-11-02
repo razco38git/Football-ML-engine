@@ -250,6 +250,45 @@ class HiddenGems(BaseModel):
     #: them, so their performance half is not comparable with a modern one.
     excluded_seasons: list[str] = Field(default_factory=list)
 
+class AchievementPoint(BaseModel):
+    """One season of a club's run, for the sparkline beside its row."""
+
+    season: str
+    over: float
+
+
+class ClubAchievement(BaseModel):
+    """A club-season measured against the points its squad rating implied.
+
+    ``expected`` is read off a least-squares line fitted **within that
+    league-season**, through that division's own clubs: ratings are not
+    league-relative but points are, and the relationship moves between years.
+
+    ``history`` is the club's whole run of residuals, because a single large
+    one reads as a verdict on the club and is not one. Leicester is the proof
+    -- every other Leicester season sits inside plus or minus eight.
+    """
+
+    season: str
+    league: str
+    team: str
+    squad_rating: float
+    points: int
+    expected: float
+    over: float
+    history: list[AchievementPoint] = Field(default_factory=list)
+
+
+class Achievement(BaseModel):
+    """Both ends of the board, and the spread they should be read against."""
+
+    over: list[ClubAchievement]
+    under: list[ClubAchievement]
+    #: Standard deviation of the residual, in points. Without it "+35" has no
+    #: scale attached.
+    residual_sd: float
+    club_seasons: int
+
 class Prediction(BaseModel):
     league: str
     date: date

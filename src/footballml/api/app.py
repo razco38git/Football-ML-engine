@@ -33,10 +33,14 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from footballml import registry, store
+from footballml.achievement import club_histories, expected_points
 from footballml.api.schemas import (
     Accuracy,
+    Achievement,
+    AchievementPoint,
     AgainstTheRun,
     CalibrationBin,
+    ClubAchievement,
     CompetitionAccuracy,
     Driver,
     EloHistory,
@@ -225,6 +229,10 @@ class State:
     #: reader filtering by role does not recompute the statistic that
     #: justifies the board.
     _gems: tuple[pd.DataFrame, dict] | None = None
+    #: The fitted achievement rows and every club's run, cached together:
+    #: the sparklines are the same fit the board is read off, so computing
+    #: them twice could only make them disagree.
+    _achievement: tuple[pd.DataFrame, dict] | None = None
 
     @property
     def upcoming_is_stale(self) -> bool:
@@ -424,6 +432,7 @@ def _load_state(startup: bool = False) -> dict[str, int]:
     state._upcoming_at = None
     state._rating_insights = None
     state._gems = None
+    state._achievement = None
 
     logger.info("Loaded %d matches, %d teams", len(state.features), len(state.form_index))
     return {
@@ -1203,6 +1212,66 @@ def hidden_gems_board(
         excluded_seasons=sorted(INCOMPLETE_SEASONS),
     )
 
+#: Rows per end of the achievement board.
+ACHIEVEMENT_LIMIT = 8
+
+
+@app.get("/insights/achievement", response_model=Achievement)
+def achievement_board(
+    limit: int = Query(ACHIEVEMENT_LIMIT, ge=1, le=25),
+) -> Achievement:
+    """Clubs that took more -- or fewer -- points than their squad explains.
+
+    The squad rating says how good the players are and the table says what
+    happened; this is the gap, fitted inside each league-season so that
+    neither a division's scoring level nor a particular year's spread can
+    masquerade as a club overachieving.
+
+    Each row carries the club's own history, because the board would otherwise
+    invite exactly the wrong reading: Leicester 2015/16 is the largest residual
+    of 762 club-seasons, and every other Leicester season is inside eight
+    points of its line.
+    """
+    if state.teams.empty or state.tmh.empty:
+        raise HTTPException(
+            404,
+            "No team ratings loaded. Run `python -m pipelines.build_players`.",
+        )
+
+    if state._achievement is None:
+        outcomes = _season_points(state.tmh)
+        fitted = expected_points(state.teams, outcomes)
+        state._achievement = (fitted, club_histories(fitted))
+    fitted, histories = state._achievement
+
+    if fitted.empty:
+        raise HTTPException(404, "No league-season has enough clubs to compare.")
+
+    def rows(block: pd.DataFrame) -> list[ClubAchievement]:
+        return [
+            ClubAchievement(
+                season=str(r["Season"]),
+                league=str(r["League"]),
+                team=str(r["Team"]),
+                squad_rating=round(float(r["strength_overall"]), 1),
+                points=int(round(float(r["pts"]))),
+                expected=round(float(r["expected"]), 1),
+                over=round(float(r["over"]), 1),
+                history=[
+                    AchievementPoint(season=season, over=round(value, 1))
+                    for season, value in histories.get((str(r["League"]), str(r["Team"])), [])
+                ],
+            )
+            for _, r in block.iterrows()
+        ]
+
+    return Achievement(
+        over=rows(fitted.nlargest(limit, "over")),
+        under=rows(fitted.nsmallest(limit, "over")),
+        residual_sd=round(float(fitted["over"].std()), 2),
+        club_seasons=int(len(fitted)),
+    )
+
 @app.get("/leagues")
 def leagues() -> dict[str, str]:
     """Division codes to full names."""
@@ -1957,8 +2026,17 @@ def _to_player(row: pd.Series, percentiles: dict[str, float] | None = None) -> P
     """Convert one rating row into an API response."""
 
     def num(column: str, cast: Callable[[Any], _NumT]) -> _NumT | None:
+        """Cast a stored value for display, rounding rather than truncating.
+
+        `int` truncates, which published a `fifa_on_our_scale` of 51.99 as 51
+        -- and then the player panel's own gap came out a point wider than the
+        hidden-gems board, which computes it from the stored floats. One
+        quantity, two numbers, and nothing on either page to explain it.
+        """
         value = row.get(column)
-        return None if pd.isna(value) else cast(value)
+        if pd.isna(value):
+            return None
+        return cast(round(float(value)) if cast is int else value)
 
     # The sub-rating and per-90 fields are named from `_PLAYER_SUBS` and
     # `_PLAYER_STATS` rather than written out, so nothing can line them up with

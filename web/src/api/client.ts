@@ -210,6 +210,33 @@ export interface HiddenGems {
   excluded_seasons: string[];
 }
 
+/** One season of a club's run, for the sparkline beside its row. */
+export interface AchievementPoint {
+  season: string;
+  over: number;
+}
+
+/** A club-season measured against the points its squad rating implied. */
+export interface ClubAchievement {
+  season: string;
+  league: string;
+  team: string;
+  squad_rating: number;
+  points: number;
+  expected: number;
+  /** Points above the line fitted through that league-season's own clubs. */
+  over: number;
+  history: AchievementPoint[];
+}
+
+export interface Achievement {
+  over: ClubAchievement[];
+  under: ClubAchievement[];
+  /** Spread of the residual, in points -- the scale to read `over` against. */
+  residual_sd: number;
+  club_seasons: number;
+}
+
 export interface Retrodiction {
   /** The chances each side created, as xG. Penalties included. */
   xg_home: number;
@@ -314,6 +341,9 @@ export const api = {
 
   /** Two measured answers: which line matters, and what one player is worth. */
   ratingInsights: () => get<RatingInsights>('/insights/ratings'),
+
+  /** Clubs that took more -- or fewer -- points than their squad explains. */
+  achievement: (limit = 8) => get<Achievement>(`/insights/achievement?limit=${limit}`),
 
   /** Seasons we rated far above EA, with EA's own next edition beside them. */
   hiddenGems: (limit = 10, role?: string) => {

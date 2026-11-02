@@ -349,3 +349,90 @@ def test_no_ratings_is_a_404_naming_the_pipeline(monkeypatch: pytest.MonkeyPatch
 
     assert response.status_code == 404
     assert "build_players" in response.json()["detail"]
+
+
+ACH_STRENGTH = pd.DataFrame(
+    [("E0", "2324", f"club {i}", 60.0 + i) for i in range(12)]
+    + [("E0", "2425", f"club {i}", 60.0 + i) for i in range(12)],
+    columns=["League", "Season", "Team", "strength_overall"],
+)
+
+#: Points sit exactly on a line through the ratings, except club 0 in 2324,
+#: which took thirty more than its squad implies.
+#: Points sit on a line through the ratings, except club 0 in 2324, which won
+#: ten more than its squad implies. Seasons are long enough to count: a points
+#: total from a part-played season is not comparable with a finished one.
+def _season_matches(season: str) -> pd.DataFrame:
+    rows = []
+    for i in range(12):
+        wins = i + (10 if season == "2324" and i == 0 else 0)
+        for match in range(24):
+            won = match < wins
+            rows.append(
+                {
+                    "League": "E0",
+                    "Season": season,
+                    "Team": f"club {i}",
+                    "GoalsFor": 3 if won else 0,
+                    "GoalsAgainst": 0 if won else 1,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+ACH_MATCHES = pd.concat(
+    [_season_matches("2324"), _season_matches("2425")], ignore_index=True
+)
+
+
+@pytest.fixture
+def achievement_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    monkeypatch.setattr(api.state, "teams", ACH_STRENGTH)
+    monkeypatch.setattr(api.state, "tmh", ACH_MATCHES)
+    monkeypatch.setattr(api.state, "_achievement", None)
+    return TestClient(api.app)
+
+
+def test_the_overachiever_leads_the_board(achievement_client: TestClient) -> None:
+    payload = achievement_client.get("/insights/achievement").json()
+
+    top = payload["over"][0]
+    assert top["team"] == "club 0"
+    assert top["season"] == "2324"
+    assert top["over"] > 0
+
+
+def test_every_row_carries_the_clubs_own_run(achievement_client: TestClient) -> None:
+    """Without it, one large residual reads as a verdict on the club."""
+    top = achievement_client.get("/insights/achievement").json()["over"][0]
+
+    assert [point["season"] for point in top["history"]] == ["2324", "2425"]
+
+
+def test_the_scale_the_numbers_sit_on_is_published(
+    achievement_client: TestClient,
+) -> None:
+    payload = achievement_client.get("/insights/achievement").json()
+
+    assert payload["club_seasons"] == 24
+    assert payload["residual_sd"] > 0
+
+
+def test_both_ends_come_back_and_disagree_in_sign(
+    achievement_client: TestClient,
+) -> None:
+    payload = achievement_client.get("/insights/achievement").json()
+
+    assert payload["over"][0]["over"] > 0
+    assert payload["under"][0]["over"] < 0
+
+
+def test_no_team_ratings_is_a_404_naming_the_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(api.state, "teams", pd.DataFrame())
+    monkeypatch.setattr(api.state, "_achievement", None)
+    response = TestClient(api.app).get("/insights/achievement")
+
+    assert response.status_code == 404
+    assert "build_players" in response.json()["detail"]

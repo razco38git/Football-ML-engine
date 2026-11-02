@@ -257,6 +257,119 @@ function PerformancePercentiles({ values }: { values: Record<string, number> }) 
   );
 }
 
+/**
+ * The two halves of a player's rating, season by season.
+ *
+ * The career bars above show the published `rating`, which is the two halves
+ * already blended — so a player whose measured season ran far ahead of EA's
+ * opinion of him looks unremarkable there, because the blend has averaged the
+ * disagreement away. This splits them again.
+ *
+ * Both lines are on our 0-99 scale and genuinely comparable: EA's overall is
+ * ranked within the player's role and season before it is mapped there, so
+ * the vertical distance between the lines is the quantity the Discover tab's
+ * hidden-gems board is built from.
+ */
+function RatingHalves({ career, season, team }: {
+  career: PlayerRating[];
+  season: string;
+  team: string;
+}) {
+  const points = career.filter(
+    h => h.performance_rating != null && h.fifa_on_our_scale != null,
+  );
+  if (points.length < 2) return null;
+
+  const values = points.flatMap(h => [h.performance_rating as number, h.fifa_on_our_scale as number]);
+  const low = Math.min(...values) - 3;
+  const span = Math.max(...values) + 3 - low || 1;
+  const width = 100;
+  const height = 60;
+  const x = (i: number) => (points.length === 1 ? width / 2 : (i / (points.length - 1)) * width);
+  const y = (value: number) => height - ((value - low) / span) * height;
+  const line = (pick: (h: PlayerRating) => number) =>
+    points.map((h, i) => `${x(i)},${y(pick(h))}`).join(' ');
+
+  const here = points.findIndex(h => h.season === season && h.team === team);
+  const widest = points.reduce(
+    (best, h) =>
+      Math.abs((h.performance_rating as number) - (h.fifa_on_our_scale as number)) >
+      Math.abs((best.performance_rating as number) - (best.fifa_on_our_scale as number))
+        ? h
+        : best,
+    points[0],
+  );
+  const widestGap =
+    (widest.performance_rating as number) - (widest.fifa_on_our_scale as number);
+
+  return (
+    <>
+      <div
+        className="text-xs font-display font-bold uppercase tracking-wider mb-2"
+        style={{ color: 'var(--muted-foreground)' }}
+      >
+        What we measured, against what EA said
+      </div>
+
+      <svg width="100%" height={height + 14} viewBox={`0 ${-7} ${width} ${height + 14}`} preserveAspectRatio="none">
+        {/* The gap itself, shaded, because it is the subject rather than the
+            two lines that bound it. */}
+        <polygon
+          points={`${line(h => h.performance_rating as number)} ${points
+            .map((h, i) => `${x(points.length - 1 - i)},${y(points[points.length - 1 - i].fifa_on_our_scale as number)}`)
+            .join(' ')}`}
+          fill="rgba(0,230,118,0.12)"
+        />
+        <polyline
+          points={line(h => h.fifa_on_our_scale as number)}
+          fill="none"
+          stroke="#f59e0b"
+          strokeWidth={1.2}
+          vectorEffect="non-scaling-stroke"
+        />
+        <polyline
+          points={line(h => h.performance_rating as number)}
+          fill="none"
+          stroke="#00e676"
+          strokeWidth={1.2}
+          vectorEffect="non-scaling-stroke"
+        />
+        {here >= 0 && (
+          <line
+            x1={x(here)}
+            x2={x(here)}
+            y1={-7}
+            y2={height}
+            stroke="var(--foreground)"
+            strokeWidth={0.5}
+            strokeDasharray="2 2"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
+      </svg>
+
+      <div className="flex justify-between mb-1" style={{ fontSize: 8, color: 'var(--muted-foreground)' }}>
+        {points.map(h => (
+          <span key={`${h.season}-${h.team}`}>{h.season.slice(2)}</span>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 mb-6" style={{ fontSize: 10 }}>
+        <span style={{ color: '#00e676' }}>— what we measured</span>
+        <span style={{ color: '#f59e0b' }}>— EA, on the same scale</span>
+        <span style={{ color: 'var(--muted-foreground)' }}>
+          widest in {seasonLabel(widest.season)}:{' '}
+          <strong style={{ color: 'var(--foreground)' }}>
+            {widestGap >= 0 ? '+' : '−'}
+            {Math.abs(widestGap).toFixed(0)}
+          </strong>{' '}
+          {widestGap >= 0 ? 'our way' : 'EA’s way'}
+        </span>
+      </div>
+    </>
+  );
+}
+
 function PlayerDetailPanel({ player, onClose }: { player: PlayerRating; onClose: () => void }) {
   const attributes = ATTRIBUTES[player.position] ?? [];
   const color = teamColor(player.team);
@@ -359,6 +472,8 @@ function PlayerDetailPanel({ player, onClose }: { player: PlayerRating; onClose:
               </div>
             </>
           )}
+
+          <RatingHalves career={career} season={player.season} team={player.team} />
 
           <div className="text-xs font-display font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--muted-foreground)' }}>
             Rating breakdown · ranked against {POSITIONS[player.position]?.toLowerCase()}s

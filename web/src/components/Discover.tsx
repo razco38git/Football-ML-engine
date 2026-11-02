@@ -1,5 +1,12 @@
 import { useState } from 'react';
-import { api, competitionLabel, seasonLabel, type Prediction } from '../api/client';
+import {
+  api,
+  competitionLabel,
+  seasonLabel,
+  type AchievementPoint,
+  type ClubAchievement,
+  type Prediction,
+} from '../api/client';
 import { confidence, formatDate, pct, teamColor, verdict } from '../api/display';
 import { useAsync } from '../api/hooks';
 
@@ -127,6 +134,157 @@ function Figure({ label, value, color }: { label: string; value: string; color?:
  * site that shows player ratings and match probabilities invites the inference
  * that the two are closely connected. They are not, and the numbers say so.
  */
+/**
+ * One club's run of residuals, as a baseline with a bar per season.
+ *
+ * The sparkline is the honest half of the row. A club shown at +35 reads as a
+ * verdict on the club; the run shows it is an event — Leicester's other nine
+ * seasons all sit inside eight points of their line, and the shape says that
+ * faster than any sentence could.
+ */
+function AchievementRun({
+  history,
+  season,
+  scale,
+}: {
+  history: AchievementPoint[];
+  season: string;
+  scale: number;
+}) {
+  if (history.length < 2) return null;
+  return (
+    <div className="flex items-center gap-px" style={{ height: 22 }} aria-hidden>
+      {history.map(point => {
+        const here = point.season === season;
+        const height = Math.max(1, (Math.abs(point.over) / scale) * 10);
+        return (
+          <div
+            key={point.season}
+            title={`${seasonLabel(point.season)} · ${point.over >= 0 ? '+' : '−'}${Math.abs(point.over).toFixed(1)}`}
+            className="flex flex-col justify-center"
+            style={{ width: 5, height: 22 }}
+          >
+            {/* Two halves around a shared midline, so above and below read
+                as opposite directions rather than as different sizes. */}
+            <div style={{ height: 11, display: 'flex', alignItems: 'flex-end' }}>
+              <div
+                style={{
+                  width: '100%',
+                  height: point.over > 0 ? height : 0,
+                  background: here ? '#00e676' : 'rgba(0,230,118,0.4)',
+                }}
+              />
+            </div>
+            <div style={{ height: 11 }}>
+              <div
+                style={{
+                  width: '100%',
+                  height: point.over < 0 ? height : 0,
+                  background: here ? '#f44336' : 'rgba(244,67,54,0.4)',
+                }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function AchievementRow({ club, scale }: { club: ClubAchievement; scale: number }) {
+  const good = club.over > 0;
+  return (
+    <div
+      className="flex items-center gap-3 py-1.5"
+      style={{ borderBottom: '1px solid var(--border)' }}
+    >
+      <div style={{ minWidth: 0, flex: '1 1 auto' }}>
+        <div className="text-sm truncate" style={{ color: 'var(--foreground)' }}>
+          {club.team}
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>
+          {seasonLabel(club.season)} · squad {club.squad_rating.toFixed(1)} · {club.points} pts,
+          {' '}expected {club.expected.toFixed(0)}
+        </div>
+      </div>
+      <AchievementRun history={club.history} season={club.season} scale={scale} />
+      <span
+        className="font-data text-sm font-bold text-right flex-shrink-0"
+        style={{ color: good ? '#00e676' : '#f44336', width: 54 }}
+      >
+        {good ? '+' : '−'}
+        {Math.abs(club.over).toFixed(1)}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Clubs that took more — or fewer — points than their squad rating explains.
+ *
+ * The squad rating says how good the players are and the table says what
+ * happened. This is the gap, and it is fitted inside each league-season
+ * because ratings are not league-relative but points are: a 70-rated side in
+ * Ligue 1 plays different opponents from a 70-rated side in England, and
+ * eighteen clubs take fewer points between them than twenty do.
+ */
+function AchievementCard() {
+  const [end, setEnd] = useState<'over' | 'under'>('over');
+  const { data } = useAsync(() => api.achievement(8), []);
+  if (!data || data.over.length === 0) return null;
+
+  const shown = end === 'over' ? data.over : data.under;
+  // One scale across both ends, so a bar means the same thing in either list.
+  const scale = Math.max(
+    ...[...data.over, ...data.under].flatMap(c => c.history.map(h => Math.abs(h.over))),
+    1,
+  );
+
+  return (
+    <Card
+      title="Overachievers — and the other kind"
+      blurb="Points a club took against the points a squad of its rating took in that same division that season. The line is fitted inside each league-season, so neither a division's scoring level nor a particular year's spread can pass for a club overachieving."
+    >
+      <div className="flex gap-1 mb-1">
+        {(['over', 'under'] as const).map(option => (
+          <button
+            key={option}
+            onClick={() => setEnd(option)}
+            className="px-2 py-0.5 rounded text-xs font-display"
+            style={{
+              background: option === end ? 'rgba(0,230,118,0.15)' : 'var(--secondary)',
+              color: option === end ? '#00e676' : 'var(--muted-foreground)',
+            }}
+          >
+            {option === 'over' ? 'Overachieved' : 'Underachieved'}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex flex-col">
+        {shown.map(club => (
+          <AchievementRow key={`${club.league}-${club.season}-${club.team}`} club={club} scale={scale} />
+        ))}
+      </div>
+
+      <div className="text-xs leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
+        Across {data.club_seasons.toLocaleString()} finished club-seasons the spread of this
+        number is{' '}
+        <strong style={{ color: 'var(--foreground)' }}>
+          {data.residual_sd.toFixed(1)} points
+        </strong>
+        , so Leicester&rsquo;s +35.2 is four and a half of those — the largest in the data by a
+        distance. The bars beside each row are that club&rsquo;s other seasons, and they are
+        there to stop the row reading as a verdict on the club: every other Leicester season
+        sits inside eight points of its own line. Our rating had that squad{' '}
+        <strong style={{ color: 'var(--foreground)' }}>15th of 20</strong>, roughly where EA
+        had them — 18th — and where the bookmakers had them at 5000-1. The rating was
+        right about the players; the season was the outlier.
+      </div>
+    </Card>
+  );
+}
+
 /** The roles a reader can narrow the gems board to, in pitch order. */
 const GEM_ROLES = ['All', 'GK', 'CB', 'FB', 'DM', 'MID', 'AMW', 'FWD'];
 
@@ -365,6 +523,8 @@ function InsightsZone() {
         )}
 
         <HiddenGemsCard />
+
+        <AchievementCard />
       </div>
     </div>
   );
