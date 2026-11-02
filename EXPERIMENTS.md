@@ -2660,3 +2660,244 @@ arrivals are worth -0.010 on `ovr>pts`, not the gain the spread suggested.
   vintages; the gaps here are 0.05-0.08, which is twenty times that
   sensitivity, so the decomposition is safe even though a 0.007 difference in
   it would not be.
+
+# Should the model fall back to the pre-season squad rating?
+
+**No. The gap is real, the fallback fills 99.3% of it with a value that
+genuinely carries signal, and the match model still cannot use it.** Pooled
+RPS moved **-0.00001 [-0.00022, +0.00021]** on 20,194 walk-forward fixtures,
+and **-0.00020 [-0.00067, +0.00027]** on the 5,375 fixtures it can actually
+touch. Both straddle zero; the secondary criterion improved on 2 of 3 lines.
+The default is the status quo, so `preseason` stays off.
+
+## Why
+
+`add_team_strength` joins the **previous** season's measured strength and
+leaves the rest NaN, and the rest is not a rounding error. Counting team-sides
+in `matches_all.csv` whose season *and* its predecessor are inside Understat's
+coverage, across 1516-2627:
+
+| | team-sides |
+|---|---|
+| total | 40,334 |
+| no previous-season measured strength | **5,674 (14.1%)** |
+| of those, covered by the current season's pre-season rating | **5,636 (99.3%)** |
+
+Steady at 13-15% in every single season, and the clubs are not random:
+
+| club | affected team-sides |
+|---|---|
+| Metz | 134 |
+| Frosinone | 123 |
+| Troyes | 122 |
+| Norwich | 114 |
+| Burnley | 114 |
+| Fulham | 114 |
+| Valladolid | 114 |
+
+Promoted and yo-yo sides. The measured rating *structurally* cannot reach
+them: a club that was in Ligue 2 last season has no top-flight season to
+measure. This is not a coverage bug to be fixed by better name matching.
+
+It is live, too, not only historical. For 2026/27, `team_strength.csv` carries
+**36** of the 96 clubs -- the minutes gate means most are unrated this early --
+while `squad_strength.csv` carries all **96**. Fourteen of those 96 have no
+2025/26 measured row at all, so the site serves Coventry, Hull, Ipswich,
+Schalke, Le Mans, Malaga and seven others with no squad strength whatever.
+
+`squad_strength.csv` has existed since the published squad rating shipped, and
+the model never read it.
+
+## The leak, which is the whole risk
+
+The fallback joins a **season-S** rating onto a **season-S** match. That is the
+one place in the feature build where a match reads its own season on purpose,
+so a leak here would inflate the backtest and look exactly like the change
+working. Two things make it safe, and both are now pinned by tests in
+`tests/test_strength_leakage.py` rather than argued:
+
+- **Rated players.** `squad_rating._latest_before` takes the most recent
+  `(rating, minutes)` *strictly before* `season`, and `include_current=False`
+  is the default that `pipelines.build_squad_strength` relies on. A test
+  asserts the default on both `squad_strength` and `rosters`, because flipping
+  it would leak into the model through this fallback without a single call site
+  changing.
+- **Unrated players.** A youth player or a signing from outside the big five is
+  placed by mapping EA's `overall` through the published `fifa_on_our_scale`
+  curve for his `(role, season)`. That curve is the *rank of EA overalls within
+  that pool* -- EA's September judgement and nothing else. No performance data
+  reaches it. A test feeds `_curves` a `rating` column deliberately
+  anti-correlated with the curve and asserts the mapping comes back monotone in
+  EA's overall.
+
+What does remain is a **roster-composition anachronism**, and it is worth
+stating rather than hiding: EA ships an edition in September, after one or two
+matchdays and after the window shuts, so for those fixtures the roster is a few
+weeks ahead of what was knowable. It is **269 of the 5,674 filled team-sides
+(4.7%)** within a fortnight of a season's first match and 638 (11.2%) within
+five weeks, and it carries no information about any result -- EA's ratings are
+set before a ball is kicked. It was left uncorrected deliberately: withholding
+the fallback from the opening weeks removes it from precisely the fixtures
+where a promoted side has no form either, which is where it could help most.
+Since the measured result is "no effect", the anachronism cannot be what is
+holding the result up.
+
+## The design, chosen before the run
+
+`home_`/`away_strength_*` are **filled, not replaced** -- a side with a
+measured rating keeps it untouched -- and two new columns,
+`home_`/`away_strength_is_preseason`, record where each side's number came
+from. 237 features instead of 235.
+
+Verified mechanically: switching the fallback on moves exactly the 12 squad
+columns (four per side plus their four diffs), every move is NaN to a value,
+and **no existing value changes**. Strictly additive.
+
+The alternative was to pass the pre-season rating as its own four columns and
+leave the measured ones NaN. Rejected on the shape of the data: that leaves the
+measured columns NaN on 14% of team-sides *and* adds four columns populated on
+only 14%, which is what a gradient booster handles worst -- too few rows in any
+leaf to earn a split, for exactly the clubs the fallback exists to cover. The
+flag is the cheaper way to let the model learn that the two populations have
+different error, which is the real objection to blending them.
+
+Filling is **whole-row**, never column-by-column. 1,113 team-sides have a
+measured rating whose `strength_goalkeeper` is NaN, mostly 2015/16 where FBref
+served no `keeper` table. Patching that one column from EA would mix a measured
+attack with a projected keeper inside a single row -- the thing the flag exists
+to let the booster avoid -- and it is a different gap, with a different answer.
+A marker column on each join decides this, rather than testing which values
+happen to be NaN.
+
+## Pre-specified endpoints
+
+Fixed in `pipelines/preseason_fallback_ab.py`'s docstring before the run, with
+the expectation stated up front that pooled RPS would probably not resolve it:
+the whole `squad` family, all twelve columns on every fixture, is worth
+**-0.00015 [-0.00032, +0.00001]** in the ablation ladder above and does not
+clear zero. This change does not add a family; it raises one family's coverage
+from 86% to 99%.
+
+    ship         an RPS interval excludes zero on the better side; or
+                 both RPS intervals straddle zero (no harm, upper bound within
+                 the +0.0005 measurement floor) AND validity improves on all
+                 three lines
+    no-ship      an RPS interval excludes zero on the worse side, or validity
+                 degrades on any line
+    inconclusive -> no-ship; the default is the status quo
+
+Endpoint 2 -- the subgroup where the change can act at all -- was declared
+there, with its mask defined as `home_` or `away_strength_is_preseason`, so it
+could not be re-cut afterwards once the headline disappointed.
+
+## Determinism
+
+`pipelines.backtest --all-leagues` was run twice unchanged before anything was
+built: **bit-identical**, pooled RPS 0.19911 on n=20,194 against a market
+0.19498. The A/B's `baseline` arm reproduces that 0.19911 exactly, and its
+`control` arm -- `baseline` a second time -- came back with a maximum per-match
+difference of **0.0**. So the movements below are the change and not drift.
+
+## Results
+
+| arm | n | RPS | accuracy |
+|---|---|---|---|
+| baseline | 20,194 | 0.19911 | 53.03% |
+| control | 20,194 | 0.19911 | 53.03% |
+| fallback | 20,194 | 0.19911 | 53.05% |
+
+| endpoint | n | ΔRPS | 95% CI | |
+|---|---|---|---|---|
+| 1. pooled | 20,194 | **-0.00001** | [-0.00022, +0.00021] | straddles zero |
+| 2. fixtures with a filled side | 5,375 | **-0.00020** | [-0.00067, +0.00027] | straddles zero |
+| the 14,819 it cannot touch directly | 14,819 | +0.00006 | [-0.00017, +0.00030] | straddles zero |
+
+The third row is not zero because both arms retrain on a different feature set,
+so the fallback perturbs every fixture a little. That it is the same size as
+the targeted effect is itself the finding.
+
+Per season, neutral-or-better in **5 of 12**: a coin flip.
+
+| season | n | ΔRPS | | season | n | ΔRPS |
+|---|---|---|---|---|---|---|
+| 1516 | 1,826 | -0.00060 | | 2122 | 1,826 | -0.00047 |
+| 1617 | 1,826 | +0.00002 | | 2223 | 1,826 | +0.00016 |
+| 1718 | 1,826 | +0.00060 | | 2324 | 1,752 | +0.00028 |
+| 1819 | 1,826 | +0.00010 | | 2425 | 1,752 | -0.00005 |
+| 1920 | 1,725 | -0.00017 | | 2526 | 1,752 | +0.00020 |
+| 2021 | 1,826 | -0.00020 | | 2627 | 431 | +0.00030 |
+
+### Endpoint 3: next-season validity
+
+| strength as the model reads it | `atk>GF` | `def>GA` | `ovr>pts` |
+|---|---|---|---|
+| measured only (baseline) | +0.7379 | -0.5288 | +0.7556 |
+| with pre-season fallback | +0.7361 | **-0.5518** | **+0.7594** |
+| improvement | **-0.0018** | +0.0230 | +0.0038 |
+
+Two of three. `def>GA` improves clearly and `ovr>pts` slightly; `atk>GF` gets
+marginally worse, which fails the criterion as declared.
+
+## Interpretation
+
+**The fallback values are not noise.** Split by population -- the diagnostic
+`validity_by_population` prints, which is why the pooled row above can be read
+at all:
+
+| population | `atk>GF` | `def>GA` | `ovr>pts` | n |
+|---|---|---|---|---|
+| pre-season, on the rows it **fills** | +0.6319 | -0.5089 | +0.6944 | 186 |
+| pre-season, on rows already covered | +0.7354 | -0.5081 | +0.7475 | 671 |
+| measured, on its own rows | +0.7379 | -0.5288 | +0.7556 | 672 |
+
+On the clubs it covers, the pre-season rating points the right way on all three
+lines. Weaker than the measured rating on established clubs, which is what a
+promoted side ought to look like -- they are genuinely less predictable -- but
+clearly informative.
+
+That also explains the pooled `atk>GF` dip. The rows the fallback adds are a
+*harder* population, not a wrong one, and a pooled correlation cannot tell
+those two apart. Read on its own, -0.0018 looks like the fallback degrading the
+feature; read beside the split, it is the arithmetic of adding 186 rows that
+correlate at +0.63 to 672 that correlate at +0.74.
+
+So the honest conclusion is not "the pre-season rating is bad". It is that
+**the model already knows this from somewhere else.** Elo crosses league
+boundaries and accumulates over years, so a promoted side arrives with a rating
+earned in the division below; and the 19-match form window rolls over the
+summer by design, so August fixtures are not starting from nothing either.
+Squad strength was already the weakest of the four feature families
+(-0.00015, not significant); improving its coverage on the 14% of team-sides
+where two stronger features are already doing the work has nothing left to add.
+
+## What was deliberately not done
+
+**No tuning.** The flag-plus-fill design was declared before the run and
+measured once. A second arm -- value without the flag, or the pre-season rating
+as separate columns, or the fallback restricted to October onward -- would very
+likely have found a configuration whose interval sits on the good side of zero,
+on a metric whose floor is 0.0005 and whose point estimates here span 0.00026.
+That is not a measurement, it is a search. The code is kept off by default so
+the question has a recorded answer instead of being re-opened.
+
+## Limitations
+
+- **The pooled RPS cannot resolve an effect this size, and was not expected
+  to.** 0.0005 is this harness's floor; the targeted interval is 0.00094 wide
+  on 5,375 fixtures. A real gain of 0.0002 on a quarter of the fixtures would
+  be invisible here. The claim is "not detectable", not "exactly zero".
+- **One data vintage.** The arms are exactly reproducible within it and the
+  squad-size sweep's own replication failure shows figures this close can move
+  between vintages.
+- **Endpoint 3 as declared was the pooled correlation**, and pooling two
+  populations of different difficulty is a confounded statistic. The split is a
+  diagnostic added to explain the pooled number, not a replacement criterion --
+  had it been declared as the criterion, the verdict would still be no-ship,
+  because the primary endpoint is RPS and RPS did not move.
+- **Hyperparameters are the full model's**, tuned for 235 features. The
+  fallback arm runs 237 on the same budget, so a tiny cost from the extra
+  capacity is bundled into its delta. It is not retuned, for the same reason
+  the ablation ladder does not retune its rungs: that would answer a different
+  question.
+- The 186 team-seasons behind the filled-population correlations are the subset
+  with a comparable finished season; the full fill is 261 team-seasons.

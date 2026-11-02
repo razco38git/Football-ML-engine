@@ -47,6 +47,34 @@ def load_team_strength(path: Path | None = None) -> pd.DataFrame:
     return df
 
 
+SQUAD_STRENGTH = PROCESSED_DIR / "squad_strength.csv"
+
+
+def load_squad_strength(path: Path | None = None) -> pd.DataFrame:
+    """Load the **pre-season** squad rating per team-season, or an empty frame.
+
+    The companion to :func:`load_team_strength`, and a different quantity: that
+    one rates the squad a club *had* last season, measured from how its players
+    actually performed; this one rates the squad a club *has now*, read off EA's
+    September roster with each player carrying his most recent rating from
+    before this season. See :mod:`footballml.players.squad_rating`.
+
+    It exists in the feature path for one reason -- it covers the clubs the
+    measured rating structurally cannot, namely a promoted side with no prior
+    top-flight season. See :func:`footballml.features.build.add_team_strength`.
+
+    Returns empty rather than raising, for the same reason
+    :func:`load_team_strength` does: the match pipeline has to run before
+    `pipelines.build_squad_strength` ever has.
+    """
+    path = path or SQUAD_STRENGTH
+    if not path.exists():
+        return pd.DataFrame()
+    df = pd.read_csv(path)
+    df["Season"] = df["Season"].astype(str)
+    return df
+
+
 EUROPEAN_MATCHES = PROCESSED_DIR / "european_matches.csv"
 
 
