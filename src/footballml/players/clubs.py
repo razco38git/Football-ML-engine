@@ -40,12 +40,21 @@ Understat's candidates a player actually appeared for. The rule is:
     the row to whichever candidate FBref gives him the most minutes.
 
 That fires on a false attribution and stays silent on a genuine transfer, where
-FBref has a row at the filed club too. Measured on the twelve cached seasons it
-moves 45 rows, one to seven a season; on 2026/27 it moves 14 of the 15 Rennes
-players back. Picking by minutes *among* genuine transfers -- which would move a
-further 393 rows, since the alphabetically first club is the right one barely
-half the time -- is a separate question about data quality rather than a false
-attribution, and is deliberately left alone.
+FBref has a row at the filed club too. **Counted on a full rebuild of all twelve
+seasons, it refiles 34 of the 927**: fourteen of them in 2026/27, which is the
+PSG case, and two to five a season across 1415-2122. The rest of the 927 keep
+Understat's own first choice.
+
+Those are the figures the pipeline reports, and they are the ones to quote. An
+earlier estimate in this docstring said 45, from a throwaway script that matched
+FBref on exact normalised names only; the implementation also uses the
+first-plus-last, initial-plus-last and containment tiers, so it finds evidence
+for far more players and refiles fewer of them. The same script put the
+"pick by minutes among genuine transfers" question at a further 393 rows -- that
+number is a **lower bound measured the weaker way**, and re-deriving it properly
+is part of that open question rather than something settled here. Either way it
+is a judgement about data quality, not a false attribution, and is deliberately
+left alone.
 
 **The one it does not fix is a name.** Mousa Al Tamari is a Rennes player, and
 FBref spells him ``Musa Al-Taamari``. Normalised, that is ``musa al taamari``
@@ -56,8 +65,9 @@ player-season still filed at Paris Saint-Germain, where the audit in
 :func:`footballml.players.ea_squads.resolve` now reports a runner-up of one
 rather than fifteen.
 
-Absence of FBref evidence is always left alone rather than guessed at: 120 of
-the 927 have no FBref row at all. A false negative here costs nothing, because
+Absence of FBref evidence is always left alone rather than guessed at, which on
+a full rebuild is 17 of the 927 -- FBref has no row this module can reach for
+them under any tier. A false negative here costs nothing, because
 it leaves the behaviour exactly as it was; a false positive would move a row
 that was right. That asymmetry is why presence is what the rule turns on.
 
