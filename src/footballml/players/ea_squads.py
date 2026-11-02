@@ -15,26 +15,39 @@ rows one at a time: for a club-season, look at where EA puts the players we
 know played there, and take the label they point at. Three things make that
 work, and each of them is here because it failed without it.
 
-**History first.** A plurality vote alone breaks where a club's rated players
-do not all belong to it. Paris Saint-Germain's 2026/27 vote splits
-``Stade Rennais FC`` 7 against ``Paris SG`` 6, so the naive rule hands PSG
-Rennes' label and both squads are wrong.
+**History first -- and this one has outlived its cause.** A plurality vote
+alone breaks where a club's rated players do not all belong to it. Paris
+Saint-Germain's 2026/27 vote once split ``Stade Rennais FC`` 7 against
+``Paris SG`` 6, so the naive rule handed PSG Rennes' label and both squads were
+wrong. Preferring the label a club used most recently, when that label is still
+in this edition, is evidence of a different kind: a club that was ``Paris SG``
+last edition and has a ``Paris SG`` this edition is that club, whatever half of
+a borrowed squad says.
 
-The split turned out not to be sampling noise, and finding out why is the
-better argument for the rule. **Rennes' squad is merged into PSG's in our own
-player file**: 15 of the 39 player-seasons filed under `Paris Saint Germain`
-in 2026/27 carry `Stade Rennais FC` as their EA club, while `Rennes` itself
-holds six rows against every other Ligue 1 club's 21 to 27. Charlie Cresswell,
-Valentin Rongier and Brice Samba are published as PSG players. That is an
-ingest defect, it predates this module, and it is the only club-season in
-1,266 where the runner-up EA club holds more than three rated players -- the
-audit that says so is :func:`resolve`'s own `runner_up`.
+That split was never sampling noise. **Rennes' squad was merged into PSG's in
+our own player file** -- 15 of the 39 player-seasons filed under `Paris Saint
+Germain` in 2026/27 carried `Stade Rennais FC` as their EA club, against six
+rows under `Rennes` itself and 21 to 27 for every other Ligue 1 club. Charlie
+Cresswell, Valentin Rongier and Brice Samba were published as PSG players. It
+was an ingest defect, it predated this module, and it was the only club-season
+in 1,266 where the runner-up EA club held more than three rated players.
 
-So the vote is not merely thin here, it is *contaminated*, and no threshold on
-it would help. Preferring the label a club used most recently, when that label
-is still in this edition, is evidence of a different kind: a club that was
-``Paris SG`` last edition and has a ``Paris SG`` this edition is that club,
-whatever half of a borrowed squad says.
+**It is fixed at the ingest now**, in :mod:`footballml.players.clubs`: Understat
+comma-joins every club a player appeared for and tags all 31 participants of PSG
+2-2 Rennes with both, so the alphabetically first name took half of Rennes.
+PSG's 2026/27 squad is 25 player-seasons and Rennes' is 20; PSG resolves by a
+plain vote, 9 for ``Paris SG`` against a runner-up of 1, and no club-season has
+a runner-up above three. The guard against it coming back is
+`test_no_club_season_holds_another_clubs_squad`, which runs :func:`resolve`'s
+own `runner_up` over the published file.
+
+So the honest state of this rule: with the contamination gone it **no longer
+changes a single answer**. Measured on the rebuilt file, resolving every
+club-season by vote alone gives the same label for all 1,266, and no club-season
+reaches the yielding pass at all. It is kept because its premise is still true
+-- EA really does rename clubs between editions, and last edition's label is
+real evidence -- not because anything currently needs it. :data:`MIN_VOTES`,
+by contrast, still earns its place: dropping it to 1 changes five club-seasons.
 
 **A vote needs evidence behind it.** Spezia's 2020/21 promotion season has 22
 rated players whose EA clubs are AEK Athens, Cagliari, Empoli, Sampdoria,

@@ -229,7 +229,10 @@ def fetch_player_seasons(
     Args:
         leagues: Division codes. Defaults to all five.
         seasons: Season labels. Defaults to every season Understat covers.
-        with_fbref: Merge FBref's defensive and goalkeeping metrics.
+        with_fbref: Merge FBref's defensive and goalkeeping metrics. FBref also
+            settles which club a player-season belongs to where Understat names
+            several, so turning this off leaves that to Understat's own
+            ordering; see :mod:`footballml.players.clubs`.
         with_fifa: Blend in the EA exports and their detailed positions.
         use_cache: Serve finished seasons' FBref reads from
             :mod:`footballml.players.cache`. Only that read is cached, and
@@ -246,13 +249,10 @@ def fetch_player_seasons(
     codes = leagues or sorted(UNDERSTAT_LEAGUES)
     seasons = seasons or season_labels()
 
-    raw = (
-        sd.Understat(
-            leagues=[UNDERSTAT_LEAGUES[c] for c in codes], seasons=seasons
-        )
-        .read_player_season_stats()
-        .reset_index()
+    reader = sd.Understat(
+        leagues=[UNDERSTAT_LEAGUES[c] for c in codes], seasons=seasons
     )
+    raw = reader.read_player_season_stats().reset_index()
     logger.info("Fetched %d player-seasons", len(raw))
 
     inverse = {v: k for k, v in UNDERSTAT_LEAGUES.items()}
@@ -283,6 +283,26 @@ def fetch_player_seasons(
         (df["np_goals"] - df["np_xg"]).div(df["nineties"]).where(df["nineties"] > 0)
     )
 
+    # FBref is fetched here rather than after the frame is assembled, because
+    # club attribution has to be settled before anything is grouped by club.
+    # Understat files a player who appeared for two clubs under whichever one
+    # sorts first, and for Ligue 1 2026/27 it tags all 31 participants of PSG
+    # 2-2 Rennes with both clubs -- which put fifteen Rennes players into PSG's
+    # squad and so into PSG's team-relative shares. See
+    # :mod:`footballml.players.clubs`.
+    extra = None
+    if with_fbref:
+        from footballml.players.clubs import club_candidates, resolve_club_attribution
+        from footballml.players.fbref import fetch_fbref_stats
+
+        extra = fetch_fbref_stats(codes, seasons, use_cache=use_cache)
+        df = resolve_club_attribution(df, extra, club_candidates(reader, seasons))
+    else:
+        logger.info(
+            "No FBref read, so a player-season listing several clubs keeps "
+            "whichever club Understat named first."
+        )
+
     df = _add_team_relative(df)
 
     keep = [
@@ -298,13 +318,12 @@ def fetch_player_seasons(
     unique = [c for c in dict.fromkeys(keep) if c in df.columns]
     out = df[unique].rename(columns={"player": "Player", "team": "Team"})
 
-    if with_fbref:
+    if extra is not None:
         # FBref supplies the defensive and goalkeeping metrics Understat has
         # none of. Matched within league-season-team, so name collisions cannot
         # pair the wrong players.
-        from footballml.players.fbref import fetch_fbref_stats, match_players
+        from footballml.players.fbref import match_players
 
-        extra = fetch_fbref_stats(codes, seasons, use_cache=use_cache)
         out = match_players(
             out,
             extra,

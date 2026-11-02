@@ -87,10 +87,15 @@ def test_a_club_absent_from_the_edition_resolves_to_nothing(tmp_path) -> None:
 
 
 def test_history_outranks_a_thin_vote(tmp_path) -> None:
-    """PSG 2627: a six-player sample voted it Rennes' label.
+    """PSG 2627 as it used to read: a six-player sample voted it Rennes' label.
 
     The club was `Paris SG` last edition and this edition still has a
     `Paris SG`, which is better evidence than the sample.
+
+    The real split is gone -- it was an ingest defect that merged Rennes' squad
+    into PSG's, fixed in :mod:`footballml.players.clubs` -- so these numbers are
+    kept here as a fixture rather than read from the file. The rule itself no
+    longer changes any club-season's answer; see the module docstring.
     """
     write_edition(tmp_path, "2526", {"Paris SG": 30, "Stade Rennais FC": 30})
     write_edition(tmp_path, "2627", {"Paris SG": 29, "Stade Rennais FC": 28})
