@@ -104,6 +104,44 @@ STRENGTH_COLUMNS = (
     "strength_goalkeeper",
 )
 
+#: `squad_strength.csv`'s columns under the names the measured table publishes.
+#:
+#: Both tables rate the same four lines on the same 0-99 scale -- the pre-season
+#: rating is built by handing EA's September roster to the same
+#: `team_strength` aggregation, with each player carrying his most recent rating
+#: from *before* this season -- so one can fill a hole in the other without
+#: rescaling. `squad_midfield` has no measured counterpart in
+#: :data:`STRENGTH_COLUMNS` and is therefore not carried.
+PRESEASON_COLUMNS: dict[str, str] = {
+    "squad_overall": "strength_overall",
+    "squad_attack": "strength_attack",
+    "squad_defence": "strength_defence",
+    "squad_goalkeeper": "strength_goalkeeper",
+}
+
+#: Stem of the flag that records where a side's strength came from.
+#:
+#: ``1.0`` where it is the pre-season rating, ``0.0`` where it is the previous
+#: season's measured rating *or* where there is nothing at all. The value column
+#: already separates those last two -- one is a number, the other NaN -- so the
+#: flag does not need a third state, and a NaN in a boolean would only cost the
+#: booster a split.
+#:
+#: Why a flag rather than two separate families of columns: the two ratings
+#: answer the same question on the same scale but with different error -- one is
+#: measured from a season of football, the other projected from a roster -- so
+#: a single split threshold does mean slightly different things on either side
+#: of it. The flag is what lets the booster find that out. Keeping them apart
+#: instead was the alternative: it would leave the measured columns NaN on 14%
+#: of team-sides and add four columns populated on only 14%, which is the shape
+#: a gradient booster handles worst -- too few rows in any leaf to earn a split,
+#: for exactly the clubs the fallback exists to cover.
+PRESEASON_FLAG = "strength_is_preseason"
+
+#: Internal marker column: a side matched a row in the table being joined.
+#: Dropped before the frame is returned.
+_MATCHED = "_matched"
+
 #: Columns identifying a match rather than describing it.
 _ID_COLS = ("League", "Season", "Date", "HomeTeam", "AwayTeam")
 
@@ -119,6 +157,7 @@ def add_team_strength(
     matches: pd.DataFrame,
     strength: pd.DataFrame,
     previous_season: bool = True,
+    preseason: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Attach squad strength to each match, from the player ratings.
 
@@ -131,6 +170,12 @@ def add_team_strength(
         strength: ``team_strength.csv``, one row per team-season.
         previous_season: Join the *preceding* season's strength rather than the
             match's own. This is the leakage guard and the default.
+        preseason: Optional ``squad_strength.csv``. Where a side has no measured
+            strength, its **own** season's pre-season rating fills the hole and
+            ``home_``/``away_strength_is_preseason`` records that it did. Off by
+            default: the columns are absent unless a caller passes this, so the
+            feature-name guard on a trained artifact stays honest. See
+            :data:`PRESEASON_COLUMNS` and the note below.
 
     Returns:
         ``matches`` with ``home_``/``away_`` strength columns. Teams with no
@@ -159,6 +204,77 @@ def add_team_strength(
         ``False`` remains for analysis only. A promoted side has no
         previous-season row in its new league and gets NaN; the model was
         trained with exactly those gaps, so it degrades rather than breaks.
+
+    .. note:: ``preseason`` was measured and does **not** ship. Off by default.
+
+        The short version: the gap is real and the fallback fills 99.3% of it
+        with a value that genuinely carries signal, and the match model still
+        cannot use it. Pooled RPS moved **-0.00001 [-0.00022, +0.00021]** on
+        20,194 walk-forward fixtures; on the 5,375 fixtures it can actually
+        touch, **-0.00020 [-0.00067, +0.00027]**. Both straddle zero, it was
+        neutral-or-better in 5 of 12 seasons, and the secondary criterion
+        improved on 2 of 3 lines. The default is the status quo, so it stays
+        off. `pipelines/preseason_fallback_ab.py` and the EXPERIMENTS.md
+        section "Should the model fall back to the pre-season squad rating?"
+        carry the full numbers and the criteria, which were fixed before the
+        run. The parameter remains because the alternative had to be measured,
+        and a reader who wonders about this gap should find the answer rather
+        than re-run it.
+
+        The rest of this note is why it was worth measuring, and why the
+        measurement is trustworthy.
+
+        The gap it fills is not small: across 1516-2627, counting team-sides
+        whose season *and* its predecessor are inside Understat's coverage,
+        **5,674 of 40,334 (14.1%)** have no previous-season measured strength,
+        steady at 13-15% every season. They are not random -- Metz, Frosinone,
+        Troyes, Norwich, Burnley, Fulham -- they are promoted and yo-yo sides,
+        which the measured rating *structurally* cannot reach, because a club
+        that was in Ligue 2 last season has no top-flight season to measure.
+        The pre-season rating covers **5,636 of them, 99.3%**.
+
+        And the values are not noise. On the 186 team-seasons it fills that
+        have a comparable outcome, the pre-season rating points the right way
+        on all three lines -- attack against goals for **+0.63**, defence
+        against goals against **-0.51**, overall against points **+0.69**.
+        Weaker than the measured rating on its own population (+0.74, -0.53,
+        +0.76), which is what a promoted side should look like, but clearly
+        informative. That is also why the *pooled* attack correlation falls by
+        0.0018 when the fallback is switched on: the rows it adds are a harder
+        population, not a wrong one, and the pooled number cannot tell those
+        two apart. So the honest reading of the result is not "the pre-season
+        rating is bad" but "the model already knows this from Elo and from the
+        19-match form window, which carries across the summer."
+
+        Both objections above are against joining the match's **own season's
+        measured** strength, and the pre-season rating fails neither:
+
+        - **It exists when it is needed.** Measured strength needs a minimum
+          number of minutes, so it does not exist in August. The pre-season
+          rating needs none: it is EA's September roster with each player
+          carrying his most recent rating from a season *strictly before* this
+          one (``squad_rating._latest_before``). It is on disk for 2026/27 now.
+        - **Train and serve read the same quantity.** The rule is the same in
+          both: previous season's measured, else this season's pre-season.
+          Nothing is joined at serve time that was not joined in training.
+
+        The leak the warning guards against is also untouched, and that is the
+        whole reason this is safe: the pre-season rating is joined at the
+        match's own season, but contains nothing from it. Every rated player in
+        it was rated strictly before, and an unrated one is mapped from EA's
+        ``overall`` through a curve that is a rank of EA overalls within
+        (role, season) -- EA's numbers only, no results.
+        ``tests/test_strength_leakage.py`` pins both halves.
+
+        One real anachronism remains, and it is roster composition rather than
+        results: EA ships an edition in September, after one or two matchdays
+        and after the window shuts, so for those matches the roster is a few
+        weeks ahead of what was knowable. It is **269 of the 5,674 filled
+        team-sides (4.7%)** within a fortnight of a season's first match, 638
+        (11.2%) within five weeks, and it carries no information about any
+        result. It is noted rather than corrected because correcting it means
+        withholding the fallback from precisely the fixtures where a promoted
+        side has no form either.
     """
     out = matches.copy()
     available = [c for c in STRENGTH_COLUMNS if c in strength.columns]
@@ -169,7 +285,99 @@ def add_team_strength(
     # Callers compare seasons numerically (`run_backtest` filters `s >= start`),
     # so silently turning the column into strings breaks them well downstream of
     # here, with an error that points nowhere near this function.
-    lookup = strength[["League", "Season", "Team", *available]].copy()
+    #
+    # Keyed on season and team alone, *not* league -- see `_strength_lookup`,
+    # which also translates the club names. A club plays in exactly one league
+    # per season -- checked across all 1,072 team-seasons: no team name appears
+    # in two leagues, and no (season, team) pair repeats -- so for a real
+    # fixture, where both sides share the fixture's league, this joins exactly
+    # what including `League` did.
+    #
+    # It differs only for a pairing the fixture list never contains: `/predict`
+    # scores a hypothetical tie in the *home* side's league, which left the away
+    # side matching nothing and being scored with no squad strength at all --
+    # about a fifth of the model's influence on expected goals, silently absent.
+    lookup = _strength_lookup(strength, available)
+    out["_season_key"] = out["Season"].astype(str)
+
+    if previous_season:
+        # Shift the strength forward a season so a 2425 squad rating is what a
+        # 2526 match sees. Season labels are "2425"-style, so the successor of
+        # season YYZZ is ZZ(ZZ+1).
+        lookup["_season_key"] = lookup["_season_key"].map(_next_season)
+
+    for side in ("Home", "Away"):
+        prefixed = lookup.rename(
+            columns={
+                "Team": f"{side}Team",
+                _MATCHED: f"{side.lower()}{_MATCHED}",
+                **{c: f"{side.lower()}_{c}" for c in available},
+            }
+        )
+        out = out.merge(prefixed, on=["_season_key", f"{side}Team"], how="left", validate="m:1")
+
+    if preseason is not None:
+        out = _fill_from_preseason(out, preseason, available)
+
+    return out.drop(columns=["_season_key", f"home{_MATCHED}", f"away{_MATCHED}"])
+
+
+def _fill_from_preseason(
+    matches: pd.DataFrame, preseason: pd.DataFrame, available: Sequence[str]
+) -> pd.DataFrame:
+    """Fill missing measured strength from the match's **own** season's roster.
+
+    Own season deliberately, and it is the one line in this module where that is
+    not a leak: see the note on :func:`add_team_strength`. ``_season_key`` is
+    already the match's own season here -- :func:`add_team_strength` shifts the
+    *lookup* forward a season, never the matches -- so this merge needs no
+    shift, and adding one would hand a 2025/26 fixture the 2024/25 roster, which
+    is the measured rating again by a longer route.
+
+    Only holes are filled. A side with a measured rating keeps it untouched,
+    which is what makes this strictly additive: every value the model saw before
+    is still the value it sees.
+    """
+    out = matches
+    renamed = preseason.rename(columns=PRESEASON_COLUMNS)
+    usable = [c for c in available if c in renamed.columns]
+    if preseason.empty or not usable:
+        # The flag is still published, and false everywhere. Silently omitting
+        # it would change the feature *names* depending on whether a file
+        # happened to be on disk, which is how a trained artifact comes to
+        # disagree with the frame it is served.
+        for side in ("Home", "Away"):
+            out[f"{side.lower()}_{PRESEASON_FLAG}"] = 0.0
+        return out
+
+    lookup = _strength_lookup(renamed, usable)
+    for side in ("Home", "Away"):
+        prefix = side.lower()
+        temporary = {c: f"_pre_{c}" for c in usable} | {_MATCHED: f"_pre{_MATCHED}"}
+        pre = lookup.rename(columns={"Team": f"{side}Team", **temporary})
+        out = out.merge(pre, on=["_season_key", f"{side}Team"], how="left", validate="m:1")
+
+        # A whole row at a time, never a column at a time. Patching a measured
+        # side's missing goalkeeper from EA would mix two populations inside one
+        # row -- the thing the flag exists to let the booster avoid -- and it is
+        # not the gap this fallback is for.
+        use = out[f"{prefix}{_MATCHED}"].isna() & out[f"_pre{_MATCHED}"].notna()
+        for column in usable:
+            out.loc[use, f"{prefix}_{column}"] = out.loc[use, f"_pre_{column}"]
+        out[f"{prefix}_{PRESEASON_FLAG}"] = use.astype("float64")
+        out = out.drop(columns=list(temporary.values()))
+    return out
+
+
+def _strength_lookup(strength: pd.DataFrame, columns: Sequence[str]) -> pd.DataFrame:
+    """A ``(_season_key, Team, *columns)`` frame ready to merge onto matches.
+
+    Factored out of :func:`add_team_strength` so the pre-season table is keyed
+    exactly as the measured one is -- same alias translation, same string
+    season key, same dropped ``League``. A second hand-rolled copy of this is
+    how one of the two tables comes to reach Dortmund and the other not.
+    """
+    lookup = strength[["League", "Season", "Team", *columns]].copy()
 
     # Strength is built from player data, which carries Understat's club names
     # ("Borussia Dortmund", "Atletico Madrid"); matches carry football-data's
@@ -182,32 +390,13 @@ def add_team_strength(
     lookup["Team"] = lookup["Team"].replace(load_aliases("understat"))
     lookup["_season_key"] = lookup["Season"].astype(str)
 
-    # Keyed on season and team alone, *not* league. A club plays in exactly one
-    # league per season -- checked across all 1,072 team-seasons: no team name
-    # appears in two leagues, and no (season, team) pair repeats -- so for a
-    # real fixture, where both sides share the fixture's league, this joins
-    # exactly what including `League` did.
-    #
-    # It differs only for a pairing the fixture list never contains: `/predict`
-    # scores a hypothetical tie in the *home* side's league, which left the away
-    # side matching nothing and being scored with no squad strength at all --
-    # about a fifth of the model's influence on expected goals, silently absent.
-    lookup = lookup.drop(columns=["Season", "League"])
-    out["_season_key"] = out["Season"].astype(str)
-
-    if previous_season:
-        # Shift the strength forward a season so a 2425 squad rating is what a
-        # 2526 match sees. Season labels are "2425"-style, so the successor of
-        # season YYZZ is ZZ(ZZ+1).
-        lookup["_season_key"] = lookup["_season_key"].map(_next_season)
-
-    for side in ("Home", "Away"):
-        prefixed = lookup.rename(
-            columns={"Team": f"{side}Team", **{c: f"{side.lower()}_{c}" for c in available}}
-        )
-        out = out.merge(prefixed, on=["_season_key", f"{side}Team"], how="left")
-
-    return out.drop(columns=["_season_key"])
+    # Did this side match a row at all? Asked with a marker rather than by
+    # testing the values, because a measured row can legitimately carry a NaN
+    # goalkeeper -- 1,113 team-sides do, mostly 2015/16, where FBref served no
+    # `keeper` table -- and "no rating for the keeper" is a different gap from
+    # "no season to measure", with a different answer.
+    lookup[_MATCHED] = 1.0
+    return lookup.drop(columns=["Season", "League"])
 
 
 def _next_season(label: str) -> str:
@@ -312,6 +501,7 @@ def build_match_features(
     congestion_days: int = 14,
     strength: pd.DataFrame | None = None,
     previous_season_strength: bool = True,
+    preseason_strength: pd.DataFrame | None = None,
     european: pd.DataFrame | None | _Auto = AUTO,
 ) -> pd.DataFrame:
     """Build the wide, model-ready match feature table from long team-match rows.
@@ -327,6 +517,10 @@ def build_match_features(
         previous_season_strength: Join the preceding season's strength. Leave
             True for training and backtesting; pass False only for live
             prediction, where the current squad is the right one.
+        preseason_strength: Optional ``squad_strength.csv``, to fill the sides
+            with no measured strength. Adds two columns, so training and
+            serving must agree on whether it is passed -- the reload guard
+            compares feature names. See :func:`add_team_strength`.
 
     Returns:
         One row per match: identifiers, the actual result (``FTHG``, ``FTAG``,
@@ -376,7 +570,12 @@ def build_match_features(
     matches = matches.merge(away_feats, on=list(_ID_COLS), how="inner", validate="1:1")
 
     if strength is not None:
-        matches = add_team_strength(matches, strength, previous_season=previous_season_strength)
+        matches = add_team_strength(
+            matches,
+            strength,
+            previous_season=previous_season_strength,
+            preseason=preseason_strength,
+        )
 
     matches = _add_diffs(matches, windows)
     matches["league_code"] = matches["League"].map(LEAGUE_CODES).astype("float64")

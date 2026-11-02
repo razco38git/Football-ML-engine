@@ -82,6 +82,19 @@ so. It is also not a model feature and must not become one: removing squad
 strength from the model entirely costs +0.00015 RPS [-0.00001, +0.00032], which
 does not clear zero over 20,013 matches, so there is no prediction gain
 available here to chase. The model keeps reading `team_strength.csv`, untouched.
+
+That last paragraph has since been tested the other way round, rather than left
+as an inference from the ablation ladder. The measured rating is missing on
+**14.1%** of team-sides -- promoted and yo-yo clubs, which it structurally
+cannot reach -- and this module covers **99.3%** of them. Filling the gap with
+it moved pooled RPS by **-0.00001 [-0.00022, +0.00021]**, and by
+**-0.00020 [-0.00067, +0.00027]** on the 5,375 fixtures it can touch at all.
+Neither clears zero. So the ratings here do carry signal on the clubs they
+cover -- `ovr>pts` of **+0.69** on them -- the model simply already has it from
+Elo and from the 19-match form window. See
+:func:`footballml.features.build.add_team_strength`'s ``preseason`` parameter,
+which exists, is off, and stays off, and the EXPERIMENTS.md section "Should the
+model fall back to the pre-season squad rating?".
 """
 
 from __future__ import annotations
