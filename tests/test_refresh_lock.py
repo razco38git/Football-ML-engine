@@ -79,8 +79,18 @@ def test_the_lock_is_released_after_an_exception(lock_in_tmp) -> None:
 
 
 def test_a_stale_lock_is_broken(lock_in_tmp, monkeypatch) -> None:
-    """A reboot leaves a file behind; it must not block every future run."""
-    lock_in_tmp.write_text("weekly pid=1 since=long-ago", encoding="utf-8")
+    """A reboot leaves a file behind; it must not block every future run.
+
+    The owner is a real process that has exited, not `pid=1`. That shorthand
+    for "nobody" holds only on Windows -- on POSIX pid 1 is init, which is
+    always alive, so the lock read as held and the reboot case went unexercised
+    anywhere but a developer's machine.
+    """
+    done = subprocess.Popen([sys.executable, "-c", "pass"])
+    done.wait()
+    time.sleep(0.5)
+    monkeypatch.setattr(_lock, "BREAK_PATH", lock_in_tmp.with_name(".refresh.break"))
+    lock_in_tmp.write_text(f"weekly pid={done.pid} since=long-ago", encoding="utf-8")
     old = time.time() - (_lock.STALE_AFTER_SECONDS + 60)
     os.utime(lock_in_tmp, (old, old))
 
@@ -173,7 +183,17 @@ def test_a_reused_pid_is_not_the_owner(lock_in_tmp) -> None:
 
     This process is alive and holds the recorded pid, but it started long after
     a lock claiming to be two days old, so it cannot be that lock's owner.
+
+    Only checkable where the platform will say when a process started. `_process`
+    returns "POSIX: liveness without identity", so there the reuse branch cannot
+    fire and the lock is kept -- which is the documented answer for an ambiguous
+    case, not a failure. Keyed off what `_process` actually reports rather than
+    off `sys.platform`, so this starts running by itself if POSIX identity is
+    ever implemented.
     """
+    if _lock._process(os.getpid())[1] is None:
+        pytest.skip("this platform cannot report a process start time, so reuse is undetectable")
+
     taken = datetime.now(UTC) - timedelta(days=2)
     lock_in_tmp.write_text(_lock_text(os.getpid(), taken), encoding="utf-8")
     assert _lock._is_stale(lock_in_tmp)
@@ -304,9 +324,18 @@ def test_a_recovery_lock_with_no_pid_yet_falls_back_to_age(lock_in_tmp, monkeypa
 
 
 def test_an_abandoned_recovery_lock_cannot_wedge_recovery(lock_in_tmp, monkeypatch) -> None:
-    """A process dying inside the critical section must not block it forever."""
+    """A process dying inside the critical section must not block it forever.
+
+    A real exited pid, for the same reason as `test_a_stale_lock_is_broken`:
+    `pid=1` is only nobody on Windows. Its sibling
+    `test_a_recovery_lock_owned_by_someone_else_is_not_stolen` was already moved
+    off that shorthand; these two were missed.
+    """
     monkeypatch.setattr(_lock, "BREAK_PATH", lock_in_tmp.with_name(".refresh.break"))
-    _lock.BREAK_PATH.write_text("pid=1", encoding="utf-8")
+    done = subprocess.Popen([sys.executable, "-c", "pass"])
+    done.wait()
+    time.sleep(0.5)
+    _lock.BREAK_PATH.write_text(f"pid={done.pid}", encoding="utf-8")
     _age(_lock.BREAK_PATH, _lock.BREAK_STALE_AFTER_SECONDS + 60)
     _lock._recover()
     assert not _lock.BREAK_PATH.exists()
