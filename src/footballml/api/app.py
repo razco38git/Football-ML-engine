@@ -1882,9 +1882,14 @@ def _to_player(row: pd.Series, percentiles: dict[str, float] | None = None) -> P
         team=str(row["Team"]),
         league=str(row["League"]),
         season=str(row["Season"]),
-        # `role` is the detailed position (CB/FB/MID/AMW/FWD/GK) derived from
-        # EA data; `position_group` is the coarse Understat fallback.
-        position=str(row.get("role") or row.get("position_group") or "?"),
+        # `listed_position` is EA's reading of *this* edition and is what a
+        # reader should see; `role` is the same thing stabilised across a
+        # career for use as the rating-pool key, which is why it can disagree
+        # (see `attach_fifa`: Kimmich is a `DM` listed and an `FB` settled).
+        # `position_group` is the coarse Understat fallback behind both.
+        position=str(
+            row.get("listed_position") or row.get("role") or row.get("position_group") or "?"
+        ),
         minutes=int(row["minutes"]),
         rating=num("rating", int),
         rated=bool(row.get("rated", False)),

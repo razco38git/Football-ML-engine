@@ -774,6 +774,32 @@ def _match_loosely(merged: pd.DataFrame, fifa: pd.DataFrame, columns: list[str])
             candidates = possible([row for tokens, row in token_sets if sole_token in tokens])
             hit = at_club(candidates, team)
 
+        if hit is None and len(parts) > 1:
+            # The mirror of the tier above: EA writes one token and we write
+            # more, and that token is the player's *given* name.
+            #
+            # Every index here is keyed on the last token, so a single-token EA
+            # entry is reachable only when that token is a surname -- which is
+            # the usual case ("Alena", "Reguilon", "Granell") and is handled
+            # above. When EA stores the forename instead, nothing reaches it:
+            # the 2026/27 export calls Atlético's Giuliano Simeone simply
+            # ``"Giuliano"``, rated 82, and he was published with no EA rating
+            # at all while the entry sat in the same file.
+            #
+            # Guarded like the tier above, which is the weakest in the file,
+            # plus one restriction of its own: the token has to be our *first*
+            # name, not any of them. A surname landing here would be a case the
+            # containment rules already decided, and matching on any token
+            # would let a bare "Rodrigo" take a Rodriguez.
+            candidates = possible(
+                [
+                    row
+                    for tokens, row in token_sets
+                    if len(tokens) == 1 and next(iter(tokens)) == parts[0]
+                ]
+            )
+            hit = at_club(candidates, team)
+
         if hit is not None:
             for col in columns:
                 merged.at[idx, col] = hit[col]
@@ -1116,7 +1142,35 @@ def attach_fifa(players: pd.DataFrame, fifa: pd.DataFrame) -> pd.DataFrame:
     if "season_position" in merged.columns:
         fallback = merged["season_position"].fillna(fallback)
     merged["role"] = merged["role"].fillna(fallback.map(FALLBACK_ROLE))
+
+    # What position this player plays *now*, as against which pool he is rated
+    # in. The two want opposite things and `role` cannot be both.
+    #
+    # `role` is the rating-pool key, so it is deliberately stabilised across a
+    # career: :func:`_settle_reordered_roles` exists because EA re-sorts the
+    # same positions between editions and a player must not move between
+    # percentile pools when nothing about him changed. That stability is wrong
+    # for a *description*. Joshua Kimmich's 2025/26 entry reads ``"CDM, RB,
+    # CM"`` -- EA saying defensive midfielder -- but his ``{CDM, CM, RB}``
+    # seasons are 2019/20, 2024/25 and 2025/26, and two of those three list RB
+    # first, so the settled role is `FB` and the site called a defensive
+    # midfielder a full back.
+    #
+    # Making the settling recency-aware was tried and reverted. It fixed
+    # Kimmich and broke more than it fixed: splitting a position set at an
+    # interruption drops back to EA's raw per-edition ordering, which is the
+    # noise the settling absorbs, and Silvan Widmer, Marco Faraoni, Gabriel and
+    # Axel Witsel came back as AMW, AMW, FWD and DM against FB, FB, CB and CB.
+    # Neither the 983 tests nor the backtest noticed -- RPS moved 0.1991 to
+    # 0.1992, inside its own noise floor -- which is the argument for not
+    # touching the pools at all.
+    #
+    # So this is EA's reading of *this* edition, unsettled, falling back to
+    # `role` where EA has no entry for the season so a reader is never shown a
+    # blank. Nothing is rated on it.
+    listed = merged["fifa_positions"].map(primary_role) if "fifa_positions" in merged else None
     merged = _settle_reordered_roles(merged)
+    merged["listed_position"] = merged["role"] if listed is None else listed.fillna(merged["role"])
     return merged.drop(columns=["_norm"])
 
 

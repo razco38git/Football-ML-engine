@@ -1477,3 +1477,81 @@ def test_a_role_does_not_travel_across_a_career(tmp_path) -> None:
     assert roles["1415"] == "MID"
     # One season away: EA's is better evidence.
     assert roles["2223"] == "CB"
+
+
+def test_the_displayed_position_is_this_edition_not_the_settled_pool() -> None:
+    """Kimmich read `FB` on the site while EA's own edition said `CDM`.
+
+    `role` is the rating-pool key, so `_settle_reordered_roles` stabilises it
+    across a career: EA re-sorts the same positions between editions and a
+    player must not change percentile pool when nothing about him changed.
+    Applied to a description that is wrong. Kimmich's `{CDM, CM, RB}` seasons
+    are 2019/20, 2024/25 and 2025/26; two of the three list RB first, so the
+    settled role is `FB` even in the edition that leads with CDM.
+
+    Making the settling recency-aware instead was tried and reverted -- it
+    returned Widmer, Faraoni, Gabriel and Witsel as AMW, AMW, FWD and DM
+    against FB, FB, CB and CB, and neither the suite nor the backtest noticed.
+    So the pool is left alone and the *description* is taken from EA's reading
+    of this edition.
+    """
+    export = _export(
+        [
+            {
+                "fifa_name": "joshua kimmich",
+                "fifa_overall": 86.0,
+                "Season": "2324",
+                "role": "FB",
+                "fifa_positions": "RB, CDM, CM",
+            },
+            {
+                "fifa_name": "joshua kimmich",
+                "fifa_overall": 86.0,
+                "Season": "2425",
+                "role": "FB",
+                "fifa_positions": "RB, CDM, CM",
+            },
+            {
+                "fifa_name": "joshua kimmich",
+                "fifa_overall": 89.0,
+                "Season": "2526",
+                "role": "DM",
+                "fifa_positions": "CDM, RB, CM",
+            },
+        ]
+    )
+    players = pd.DataFrame(
+        {
+            "Player": ["joshua kimmich"] * 3,
+            "Season": ["2324", "2425", "2526"],
+            "season_position": ["D", "D", "M"],
+            "position_group": ["D", "D", "D"],
+        }
+    )
+
+    out = attach_fifa(players, export).set_index("Season")
+
+    # The pool is still stabilised -- this is the behaviour being preserved.
+    assert out["role"]["2526"] == "FB"
+    # What a reader is shown follows EA's own edition.
+    assert out["listed_position"]["2526"] == "DM"
+    # And agrees with it where the two never disagreed.
+    assert out["listed_position"]["2324"] == "FB"
+
+
+def test_the_displayed_position_falls_back_where_ea_has_no_entry() -> None:
+    """A player EA does not carry must still show a position, not a blank."""
+    export = _export([{"fifa_name": "someone else", "fifa_overall": 70.0, "Season": "2526"}])
+    players = pd.DataFrame(
+        {
+            "Player": ["unmatched player"],
+            "Season": ["2526"],
+            "season_position": ["M"],
+            "position_group": ["M"],
+        }
+    )
+
+    out = attach_fifa(players, export)
+
+    assert pd.isna(out["fifa_overall"].iloc[0])
+    assert out["listed_position"].iloc[0] == out["role"].iloc[0] == "MID"
