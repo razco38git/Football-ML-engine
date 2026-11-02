@@ -17,8 +17,6 @@ exactly the frame it would have produced without any of this.
 
 from __future__ import annotations
 
-import importlib.util
-
 import pandas as pd
 import pytest
 
@@ -418,19 +416,17 @@ def test_only_what_the_run_was_trying_to_add_is_parked(tmp_path, monkeypatch) ->
 # D1 and I1, ever.
 
 
-#: The tests below reach into soccerdata's own league table, so they need the
-#: `ingest` extra. CI installs without it on purpose -- soccerdata pulls
-#: seleniumbase and a full browser stack that linting and testing the model code
-#: has no use for (see `.github/workflows/ci.yml`) -- so there they skip, and
-#: they run for anyone who has it. Installing a browser on CI to satisfy six
-#: assertions about a league-name mapping would be the wrong trade.
-needs_soccerdata = pytest.mark.skipif(
-    importlib.util.find_spec("soccerdata") is None,
-    reason="soccerdata is not installed; it ships with the `ingest` extra",
-)
+# Everything below reaches into soccerdata's own league table, so it needs the
+# `ingest` extra. CI installs without it on purpose -- soccerdata pulls
+# seleniumbase and a full browser stack that linting and testing the model code
+# has no use for, which `.github/workflows/ci.yml` says in as many words -- so
+# there these skip, and they run for anyone who has it. Installing a browser on
+# CI to settle six assertions about a league-name mapping would be the wrong
+# trade. `importorskip` rather than a marker, to match `test_european.py`.
 
 
 def _translated(values: list[str]) -> list:
+    pytest.importorskip("soccerdata")
     reader = fb._matchlog_reader(["GER-Bundesliga", "ITA-Serie A", "ENG-Premier League"], ["2627"])
     frame = pd.DataFrame({"league": values})
     return list(type(reader)._translate_league(frame)["league"])
@@ -444,12 +440,10 @@ def test_the_matchlog_names_are_declared() -> None:
     }
 
 
-@needs_soccerdata
 def test_the_two_matchlog_spellings_translate() -> None:
     assert _translated(["Bundesliga", "Serie A"]) == ["GER-Bundesliga", "ITA-Serie A"]
 
 
-@needs_soccerdata
 def test_the_other_three_leagues_are_untouched() -> None:
     """They are spelled identically in both places, which is why they worked."""
     assert _translated(["Premier League", "Ligue 1", "La Liga"]) == [
@@ -459,7 +453,6 @@ def test_the_other_three_leagues_are_untouched() -> None:
     ]
 
 
-@needs_soccerdata
 def test_the_index_spellings_still_translate() -> None:
     """The alias is an addition, not a replacement: league *discovery* reads
     the index spelling, and overriding it finds no German teams at all."""
@@ -469,26 +462,24 @@ def test_the_index_spellings_still_translate() -> None:
     ]
 
 
-@needs_soccerdata
 def test_a_competition_we_do_not_follow_is_still_dropped() -> None:
     """A cup tie in the same match log must not be mistaken for league play."""
     out = _translated(["DFL-Supercup", "Coppa Italia", "FA Community Shield"])
     assert all(pd.isna(v) for v in out), out
 
 
-@needs_soccerdata
 def test_the_source_names_soccerdata_uses_for_discovery_are_unchanged() -> None:
     """The fix must not reach the league table every other reader shares."""
-    import soccerdata as sd
+    sd = pytest.importorskip("soccerdata")
 
     assert sd.FBref._all_leagues()["GER-Bundesliga"] == "Fußball-Bundesliga"
     assert sd.FBref._all_leagues()["ITA-Serie A"] == "Serie A (M)"
 
 
-@needs_soccerdata
 def test_the_subclass_can_still_see_its_leagues() -> None:
     """soccerdata keys its league table on `cls.__name__`, so a subclass of its
     own finds nothing and every league is rejected as invalid."""
+    pytest.importorskip("soccerdata")
     reader = fb._matchlog_reader(["GER-Bundesliga"], ["2627"])
     leagues = type(reader)._all_leagues()
     assert "GER-Bundesliga" in leagues
