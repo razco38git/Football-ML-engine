@@ -83,16 +83,14 @@ def test_a_pinned_frame_is_unchanged_when_the_live_season_grows() -> None:
 
 
 def test_the_fingerprint_ignores_row_order() -> None:
-    """"Is this the same data", not "is this the same file"."""
+    """ "Is this the same data", not "is this the same file"."""
     frame = _players("2425", "2526")
     assert vintage.fingerprint(frame) == vintage.fingerprint(frame.iloc[::-1])
 
 
 def test_the_fingerprint_ignores_column_order() -> None:
     frame = _players("2425")
-    assert vintage.fingerprint(frame) == vintage.fingerprint(
-        frame[list(reversed(frame.columns))]
-    )
+    assert vintage.fingerprint(frame) == vintage.fingerprint(frame[list(reversed(frame.columns))])
 
 
 def test_the_fingerprint_changes_when_a_value_changes() -> None:

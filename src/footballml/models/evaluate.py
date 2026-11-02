@@ -178,7 +178,15 @@ def evaluate(
         "accuracy": accuracy(y_true, probs),
         "n": int(len(probs)),
     }
-    if all(v is not None for v in (home_goals, away_goals, mu_home, mu_away)):
+    # Spelled out rather than `all(v is not None for v in ...)`: the generator
+    # form tells a reader the same thing but tells a type checker nothing, so
+    # the four arguments below stayed `ndarray | None` at the call.
+    if (
+        home_goals is not None
+        and away_goals is not None
+        and mu_home is not None
+        and mu_away is not None
+    ):
         metrics.update(goal_errors(home_goals, away_goals, mu_home, mu_away))
     return metrics
 

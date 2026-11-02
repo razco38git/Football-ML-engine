@@ -91,9 +91,9 @@ def fingerprint(frame: pd.DataFrame, columns: list[str] | None = None) -> str:
     f = frame[columns] if columns else frame
     f = f.reindex(sorted(f.columns), axis=1)
     f = f.sort_values(list(f.columns), kind="mergesort").reset_index(drop=True)
-    return hashlib.md5(
-        pd.util.hash_pandas_object(f, index=False).to_numpy().tobytes()
-    ).hexdigest()[:12]
+    return hashlib.md5(pd.util.hash_pandas_object(f, index=False).to_numpy().tobytes()).hexdigest()[
+        :12
+    ]
 
 
 def describe_inputs(**frames: pd.DataFrame) -> str:

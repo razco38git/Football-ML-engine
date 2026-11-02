@@ -100,10 +100,15 @@ def test_empty_feature_table_is_a_503(monkeypatch) -> None:
 
 def test_missing_elo_columns_is_a_503(monkeypatch) -> None:
     """A feature table built before Elo existed must fail loudly."""
-    frame = pd.DataFrame({
-        "League": ["E0"], "Season": ["2627"], "Date": [pd.Timestamp("2026-09-01")],
-        "HomeTeam": ["Arsenal"], "AwayTeam": ["Chelsea"],
-    })
+    frame = pd.DataFrame(
+        {
+            "League": ["E0"],
+            "Season": ["2627"],
+            "Date": [pd.Timestamp("2026-09-01")],
+            "HomeTeam": ["Arsenal"],
+            "AwayTeam": ["Chelsea"],
+        }
+    )
     monkeypatch.setattr(api.state, "features", frame)
     with pytest.raises(api.HTTPException) as caught:
         _call()

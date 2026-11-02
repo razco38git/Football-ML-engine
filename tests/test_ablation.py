@@ -129,6 +129,7 @@ def test_rung_columns_preserves_production_order() -> None:
 
 # --- the partition against the real feature table -----------------------------
 
+
 @pytest.fixture(scope="module")
 def production_columns() -> list[str]:
     """Model inputs from the real built feature table, or skip."""
@@ -198,14 +199,13 @@ def test_rung_frame_exposes_only_its_own_features(production_columns: list[str])
 
 # --- the evaluation primitives ------------------------------------------------
 
+
 def test_rps_per_match_means_to_the_headline_score() -> None:
     """One definition of RPS: the bootstrap and the headline cannot diverge."""
     rng = np.random.default_rng(0)
     probs = rng.dirichlet([2, 2, 2], size=500)
     y = rng.choice(["H", "D", "A"], size=500)
-    assert rps_per_match(y, probs).mean() == pytest.approx(
-        ranked_probability_score(y, probs)
-    )
+    assert rps_per_match(y, probs).mean() == pytest.approx(ranked_probability_score(y, probs))
 
 
 def test_rps_per_match_known_values() -> None:
@@ -317,9 +317,7 @@ def test_train_from_actually_restricts_training() -> None:
     )
 
     wide, wide_preds = run_backtest(frame, start_season=1213, calibrate=False)
-    narrow, narrow_preds = run_backtest(
-        frame, start_season=1213, calibrate=False, train_from=1112
-    )
+    narrow, narrow_preds = run_backtest(frame, start_season=1213, calibrate=False, train_from=1112)
     assert narrow["n_train"].iloc[0] < wide["n_train"].iloc[0]
     # Same fixtures predicted either way -- the precondition for pairing.
     pd.testing.assert_frame_equal(
@@ -336,6 +334,7 @@ def test_paired_bootstrap_demands_matched_fixtures() -> None:
 
 
 # --- the encoding that made RPS stop reading the result ----------------------
+
 
 def test_integer_encoded_outcomes_are_refused() -> None:
     """`FTR.map({"H": 0, "D": 1, "A": 2})` is a reasonable thing to write.

@@ -77,7 +77,10 @@ def project(
     table = current_table(tmh, league, season)
     logger.info(
         "%s: %d teams, %d played, %d remaining",
-        league, len(table), int(table["played"].sum() // 2), len(fixtures),
+        league,
+        len(table),
+        int(table["played"].sum() // 2),
+        len(fixtures),
     )
 
     if fixtures.empty:
@@ -93,7 +96,9 @@ def project(
             logger.warning(
                 "%s: features built for %d of %d fixtures; the rest are teams "
                 "the model has no history for",
-                league, len(scored), len(fixtures),
+                league,
+                len(scored),
+                len(fixtures),
             )
             fixtures = scored[["League", "Season", "HomeTeam", "AwayTeam"]]
         mu_home, mu_away = model.predict_goal_rates(scored[feature_names])
@@ -101,7 +106,10 @@ def project(
 
     rules = LEAGUE_RULES.get(league, {"relegation": 3, "top": 4})
     projected = simulate(
-        fixtures, matrices, table, n_sims=n_sims,
+        fixtures,
+        matrices,
+        table,
+        n_sims=n_sims,
         relegation_places=rules["relegation"],
     )
 
@@ -140,8 +148,7 @@ def main() -> None:
     for league, group in result.groupby("League"):
         top = group.nlargest(3, "projected_points")
         line = ", ".join(
-            f"{r.Team} {r.projected_points:.0f} ({r.title_pct:.0%})"
-            for r in top.itertuples()
+            f"{r.Team} {r.projected_points:.0f} ({r.title_pct:.0%})" for r in top.itertuples()
         )
         print(f"  {league}: {line}")
 

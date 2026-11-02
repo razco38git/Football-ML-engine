@@ -39,12 +39,20 @@ class _Meta:
 @pytest.fixture
 def serving(monkeypatch):
     """A state that is already serving a working model."""
-    features = pd.DataFrame({
-        "League": ["E0"], "Season": ["2627"], "Date": [pd.Timestamp("2026-09-01")],
-        "HomeTeam": ["Arsenal"], "AwayTeam": ["Chelsea"],
-        "FTHG": [1.0], "FTAG": [0.0], "FTR": ["H"],
-        "home_points_last_5": [2.0], "away_points_last_5": [1.0],
-    })
+    features = pd.DataFrame(
+        {
+            "League": ["E0"],
+            "Season": ["2627"],
+            "Date": [pd.Timestamp("2026-09-01")],
+            "HomeTeam": ["Arsenal"],
+            "AwayTeam": ["Chelsea"],
+            "FTHG": [1.0],
+            "FTAG": [0.0],
+            "FTR": ["H"],
+            "home_points_last_5": [2.0],
+            "away_points_last_5": [1.0],
+        }
+    )
     good = _Meta("good-model", ["home_points_last_5", "away_points_last_5"])
 
     api.state.model = "working-model"
@@ -62,7 +70,8 @@ def serving(monkeypatch):
 
 def test_a_reload_refuses_a_model_it_cannot_feed(serving, monkeypatch):
     monkeypatch.setattr(
-        api.registry, "load",
+        api.registry,
+        "load",
         lambda *_a, **_k: ("new-model", _Meta("needs-elo", ["home_points_last_5", "home_elo"])),
     )
 
@@ -76,7 +85,8 @@ def test_a_reload_refuses_a_model_it_cannot_feed(serving, monkeypatch):
 def test_the_previous_model_is_still_served_afterwards(serving, monkeypatch):
     """The property that actually matters: the site keeps working."""
     monkeypatch.setattr(
-        api.registry, "load",
+        api.registry,
+        "load",
         lambda *_a, **_k: ("new-model", _Meta("needs-elo", ["home_elo"])),
     )
 
@@ -90,7 +100,8 @@ def test_the_previous_model_is_still_served_afterwards(serving, monkeypatch):
 
 def test_a_compatible_model_loads_normally(serving, monkeypatch):
     monkeypatch.setattr(
-        api.registry, "load",
+        api.registry,
+        "load",
         lambda *_a, **_k: ("new-model", _Meta("fine", ["home_points_last_5"])),
     )
 
@@ -107,7 +118,8 @@ def test_startup_serves_what_works_rather_than_refusing(serving, monkeypatch):
     error logged loudly, beats none.
     """
     monkeypatch.setattr(
-        api.registry, "load",
+        api.registry,
+        "load",
         lambda *_a, **_k: ("new-model", _Meta("needs-elo", ["home_elo"])),
     )
 
@@ -145,7 +157,8 @@ def _adjustment(monkeypatch, offsets: dict | None, stamped: str | None) -> None:
 
 def _serve(monkeypatch, version: str = "serving-v1") -> None:
     monkeypatch.setattr(
-        api.registry, "load",
+        api.registry,
+        "load",
         lambda *_a, **_k: ("m", _FullMeta(version, ["home_points_last_5"])),
     )
 
@@ -240,10 +253,13 @@ def test_a_retrain_turns_a_clean_verdict_stale(serving, monkeypatch):
 
 
 def _strength(counts: dict[str, int]) -> pd.DataFrame:
-    return pd.DataFrame([
-        {"League": "E0", "Season": s, "Team": f"t{i}", "strength_overall": 70.0}
-        for s, n in counts.items() for i in range(n)
-    ])
+    return pd.DataFrame(
+        [
+            {"League": "E0", "Season": s, "Team": f"t{i}", "strength_overall": 70.0}
+            for s, n in counts.items()
+            for i in range(n)
+        ]
+    )
 
 
 def test_a_season_in_progress_is_not_offered() -> None:
@@ -360,8 +376,11 @@ def test_the_verdict_does_not_read_the_model_version(monkeypatch, tmp_path) -> N
     _point_at(monkeypatch, tmp_path)
     (tmp_path / "team_strength.csv").write_bytes(b"strength")
     digest = api._digest(tmp_path / "team_strength.csv")
-    _meta(tmp_path, inputs={"team_strength.csv": digest},
-          model_version_at_run="a-model-that-is-long-gone")
+    _meta(
+        tmp_path,
+        inputs={"team_strength.csv": digest},
+        model_version_at_run="a-model-that-is-long-gone",
+    )
 
     _, stale = api._backtest_freshness()
 

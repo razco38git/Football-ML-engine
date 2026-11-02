@@ -20,9 +20,7 @@ def write_edition(directory, season: str, squads: dict[str, int]) -> None:
 
 def players(*rows: tuple[str, str, str]) -> pd.DataFrame:
     """Rated player-seasons as ``(season, team, fifa_club)`` triples."""
-    return pd.DataFrame(
-        [{"Season": s, "Team": t, "fifa_club": c} for s, t, c in rows]
-    )
+    return pd.DataFrame([{"Season": s, "Team": t, "fifa_club": c} for s, t, c in rows])
 
 
 @pytest.mark.parametrize(

@@ -65,10 +65,7 @@ def main() -> None:
     history = build_match_features(tmh, strength=strength)
     cols = feature_columns(history)
     played = history[history["FTR"].notna()]
-    print(
-        f"Training on {len(played):,} matches "
-        f"(through {played['Date'].max().date()}) ..."
-    )
+    print(f"Training on {len(played):,} matches (through {played['Date'].max().date()}) ...")
     model = MatchPredictor().fit(played[cols], played["FTHG"], played["FTAG"])
 
     upcoming = build_upcoming_features(tmh, fixtures, strength=strength)
@@ -97,8 +94,7 @@ def main() -> None:
 
     print(f"\n=== {len(table)} upcoming fixtures ===\n")
     header = (
-        f"{'date':<11} {'lg':<4} {'match':<34} {'pick':>4} {'xG':>11} "
-        f"{'H/D/A %':>18} {'sc':>4}"
+        f"{'date':<11} {'lg':<4} {'match':<34} {'pick':>4} {'xG':>11} {'H/D/A %':>18} {'sc':>4}"
     )
     if has_odds:
         header += f" {'market H/D/A':>18}"

@@ -33,9 +33,15 @@ api = importlib.import_module("footballml.api.app")
 
 def _prediction(league: str, home: str, away: str, competition: str | None = None) -> pd.DataFrame:
     row = {
-        "League": league, "Date": "2026-10-21", "HomeTeam": home, "AwayTeam": away,
-        "expected_goals_home": 1.6, "expected_goals_away": 1.1,
-        "prob_home_win": 0.5, "prob_draw": 0.25, "prob_away_win": 0.25,
+        "League": league,
+        "Date": "2026-10-21",
+        "HomeTeam": home,
+        "AwayTeam": away,
+        "expected_goals_home": 1.6,
+        "expected_goals_away": 1.1,
+        "prob_home_win": 0.5,
+        "prob_draw": 0.25,
+        "prob_away_win": 0.25,
         "predicted_outcome": "H",
     }
     if competition is not None:
@@ -93,11 +99,18 @@ def test_a_european_tie_settles_against_the_european_result(tmp_path) -> None:
     store.append(_prediction("SP1", "Real Madrid", "Arsenal", "UCL"), "v1", path)
 
     results = pd.DataFrame(
-        [{
-            "League": "SP1", "competition": "UCL", "Date": "2026-10-21",
-            "HomeTeam": "Real Madrid", "AwayTeam": "Arsenal",
-            "FTHG": 2, "FTAG": 1, "FTR": "H",
-        }]
+        [
+            {
+                "League": "SP1",
+                "competition": "UCL",
+                "Date": "2026-10-21",
+                "HomeTeam": "Real Madrid",
+                "AwayTeam": "Arsenal",
+                "FTHG": 2,
+                "FTAG": 1,
+                "FTR": "H",
+            }
+        ]
     )
     assert store.settle(results, path) == 1
     assert store.load(path)["actual_result"].iloc[0] == "H"
@@ -111,11 +124,18 @@ def test_a_domestic_result_does_not_settle_a_european_tie(tmp_path) -> None:
     store.append(_prediction("SP1", "Real Madrid", "Arsenal", "UCL"), "v1", path)
 
     domestic = pd.DataFrame(
-        [{
-            "League": "SP1", "competition": store.DOMESTIC, "Date": "2026-10-21",
-            "HomeTeam": "Real Madrid", "AwayTeam": "Arsenal",
-            "FTHG": 0, "FTAG": 3, "FTR": "A",
-        }]
+        [
+            {
+                "League": "SP1",
+                "competition": store.DOMESTIC,
+                "Date": "2026-10-21",
+                "HomeTeam": "Real Madrid",
+                "AwayTeam": "Arsenal",
+                "FTHG": 0,
+                "FTAG": 3,
+                "FTR": "A",
+            }
+        ]
     )
     assert store.settle(domestic, path) == 0
     assert pd.isna(store.load(path)["actual_result"].iloc[0])
@@ -126,10 +146,17 @@ def test_an_old_store_still_settles_from_a_results_frame_without_the_column(tmp_
     path = tmp_path / "p.csv"
     store.append(_prediction("E0", "Arsenal", "Chelsea"), "v1", path)
     results = pd.DataFrame(
-        [{
-            "League": "E0", "Date": "2026-10-21", "HomeTeam": "Arsenal",
-            "AwayTeam": "Chelsea", "FTHG": 1, "FTAG": 1, "FTR": "D",
-        }]
+        [
+            {
+                "League": "E0",
+                "Date": "2026-10-21",
+                "HomeTeam": "Arsenal",
+                "AwayTeam": "Chelsea",
+                "FTHG": 1,
+                "FTAG": 1,
+                "FTR": "D",
+            }
+        ]
     )
     assert store.settle(results, path) == 1
 
@@ -141,7 +168,8 @@ def _settled(rows: list[tuple[str, str, str]]) -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
-                "competition": competition, "actual_result": actual,
+                "competition": competition,
+                "actual_result": actual,
                 "prob_home_win": 0.6 if predicted == "H" else 0.2,
                 "prob_draw": 0.2,
                 "prob_away_win": 0.6 if predicted == "A" else 0.2,
@@ -152,9 +180,7 @@ def _settled(rows: list[tuple[str, str, str]]) -> pd.DataFrame:
 
 
 def test_competitions_are_reported_separately() -> None:
-    rows = _settled(
-        [(store.DOMESTIC, "H", "H")] * 8 + [("UCL", "H", "A")] * 4
-    )
+    rows = _settled([(store.DOMESTIC, "H", "H")] * 8 + [("UCL", "H", "A")] * 4)
     out = api._by_competition(rows)
     assert set(out) == {store.DOMESTIC, "UCL"}
     assert out[store.DOMESTIC].n == 8
@@ -170,8 +196,10 @@ def test_each_competition_carries_its_own_base_rate() -> None:
     between them and be the wrong yardstick for both.
     """
     rows = _settled(
-        [(store.DOMESTIC, "H", "H")] * 7 + [(store.DOMESTIC, "H", "A")] * 3
-        + [("UCL", "H", "A")] * 7 + [("UCL", "H", "H")] * 3
+        [(store.DOMESTIC, "H", "H")] * 7
+        + [(store.DOMESTIC, "H", "A")] * 3
+        + [("UCL", "H", "A")] * 7
+        + [("UCL", "H", "H")] * 3
     )
     out = api._by_competition(rows)
     assert out[store.DOMESTIC].rps_base_rate > 0

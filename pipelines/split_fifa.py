@@ -71,8 +71,18 @@ GK_CANON = ["gk_diving", "gk_handling", "gk_kicking", "gk_positioning", "gk_refl
 #: `short_name` is that familiar form, and throwing it away left 63 of 2025/26's
 #: 176 unmatched players unmatchable in principle.
 CANON = [
-    "name", "alt_name", "overall", "club", "positions", "age",
-    "pace", "shooting", "passing", "dribbling", "defending", "physical",
+    "name",
+    "alt_name",
+    "overall",
+    "club",
+    "positions",
+    "age",
+    "pace",
+    "shooting",
+    "passing",
+    "dribbling",
+    "defending",
+    "physical",
     *GK_CANON,
 ]
 
@@ -94,8 +104,12 @@ class Source:
 #: hold -- "male_players.csv" and "male_players (1).csv" are different editions
 #: from different years.
 SOURCES: tuple[Source, ...] = (
-    Source("male_players (legacy)_23.csv", "15-23", "sofifa",
-           "sofifa's combined FIFA 15-23 export; split by its `fifa_version` column"),
+    Source(
+        "male_players (legacy)_23.csv",
+        "15-23",
+        "sofifa",
+        "sofifa's combined FIFA 15-23 export; split by its `fifa_version` column",
+    ),
     Source("FC26_20250921.csv", "26", "sofifa", "sofifa FC26 export, dated 2025-09-21"),
     Source("male_players.csv", "24", "ea-fc24", "EA's own FC24 site export"),
     Source("male_players (1).csv", "25", "ea-fc25", "EA's own FC25 site export"),
@@ -123,44 +137,55 @@ def emit(frame: pd.DataFrame, edition: int, source: str) -> Path | None:
     keepers = out[GK_CANON[0]].notna().sum() if GK_CANON[0] in out else 0
     logger.info(
         "  %s  edition %2d  %6d players  %6d with positions  %6d with keeper attrs  <- %s",
-        path.name, edition, len(out), out["positions"].notna().sum(), keepers, source,
+        path.name,
+        edition,
+        len(out),
+        out["positions"].notna().sum(),
+        keepers,
+        source,
     )
     return path
 
 
 def from_sofifa(df: pd.DataFrame) -> pd.DataFrame:
     """sofifa's long format: the legacy FIFA 15-23 file and the FC26 export."""
-    return pd.DataFrame({
-        "name": df["long_name"],
-        "alt_name": df.get("short_name"),
-        "overall": pd.to_numeric(df["overall"], errors="coerce"),
-        "club": df.get("club_name"),
-        "positions": df.get("player_positions"),
-        "age": pd.to_numeric(df.get("age"), errors="coerce"),
-        "pace": pd.to_numeric(df.get("pace"), errors="coerce"),
-        "shooting": pd.to_numeric(df.get("shooting"), errors="coerce"),
-        "passing": pd.to_numeric(df.get("passing"), errors="coerce"),
-        "dribbling": pd.to_numeric(df.get("dribbling"), errors="coerce"),
-        "defending": pd.to_numeric(df.get("defending"), errors="coerce"),
-        "physical": pd.to_numeric(df.get("physic"), errors="coerce"),
-        **{
-            c: pd.to_numeric(df.get(f"goalkeeping_{c[3:]}"), errors="coerce")
-            for c in GK_CANON
-        },
-    })
+    return pd.DataFrame(
+        {
+            "name": df["long_name"],
+            "alt_name": df.get("short_name"),
+            "overall": pd.to_numeric(df["overall"], errors="coerce"),
+            "club": df.get("club_name"),
+            "positions": df.get("player_positions"),
+            "age": pd.to_numeric(df.get("age"), errors="coerce"),
+            "pace": pd.to_numeric(df.get("pace"), errors="coerce"),
+            "shooting": pd.to_numeric(df.get("shooting"), errors="coerce"),
+            "passing": pd.to_numeric(df.get("passing"), errors="coerce"),
+            "dribbling": pd.to_numeric(df.get("dribbling"), errors="coerce"),
+            "defending": pd.to_numeric(df.get("defending"), errors="coerce"),
+            "physical": pd.to_numeric(df.get("physic"), errors="coerce"),
+            **{c: pd.to_numeric(df.get(f"goalkeeping_{c[3:]}"), errors="coerce") for c in GK_CANON},
+        }
+    )
 
 
 def from_fc24(df: pd.DataFrame) -> pd.DataFrame:
     """EA's FC24 site export. Carries no goalkeeper attributes at all."""
-    return pd.DataFrame({
-        "name": df["Name"], "alt_name": df["Name"],
-        "overall": pd.to_numeric(df["Overall"], errors="coerce"),
-        "club": df.get("Club"), "positions": df.get("Position"),
-        "age": pd.to_numeric(df.get("Age"), errors="coerce"),
-        "pace": df.get("Pace"), "shooting": df.get("Shooting"),
-        "passing": df.get("Passing"), "dribbling": df.get("Dribbling"),
-        "defending": df.get("Defending"), "physical": df.get("Physicality"),
-    })
+    return pd.DataFrame(
+        {
+            "name": df["Name"],
+            "alt_name": df["Name"],
+            "overall": pd.to_numeric(df["Overall"], errors="coerce"),
+            "club": df.get("Club"),
+            "positions": df.get("Position"),
+            "age": pd.to_numeric(df.get("Age"), errors="coerce"),
+            "pace": df.get("Pace"),
+            "shooting": df.get("Shooting"),
+            "passing": df.get("Passing"),
+            "dribbling": df.get("Dribbling"),
+            "defending": df.get("Defending"),
+            "physical": df.get("Physicality"),
+        }
+    )
 
 
 def from_fc25(df: pd.DataFrame) -> pd.DataFrame:
@@ -168,18 +193,26 @@ def from_fc25(df: pd.DataFrame) -> pd.DataFrame:
     # Primary position first, alternates after, so `primary_role` picks the primary.
     pos = df["Position"].fillna("").astype(str)
     alt = df.get("Alternative positions", pd.Series("", index=df.index)).fillna("").astype(str)
-    return pd.DataFrame({
-        "name": df["Name"], "alt_name": df["Name"],
-        "overall": pd.to_numeric(df["OVR"], errors="coerce"),
-        "club": df.get("Team"), "positions": (pos + ", " + alt).str.strip(", "),
-        "age": pd.to_numeric(df.get("Age"), errors="coerce"),
-        "pace": df.get("PAC"), "shooting": df.get("SHO"), "passing": df.get("PAS"),
-        "dribbling": df.get("DRI"), "defending": df.get("DEF"), "physical": df.get("PHY"),
-        # EA-site exports fill these only for keepers, unlike sofifa which gives
-        # every player a (meaninglessly low) diving score. So a populated
-        # `gk_diving` does not identify a keeper -- use the role.
-        **{c: df.get("GK " + c[3:].capitalize()) for c in GK_CANON},
-    })
+    return pd.DataFrame(
+        {
+            "name": df["Name"],
+            "alt_name": df["Name"],
+            "overall": pd.to_numeric(df["OVR"], errors="coerce"),
+            "club": df.get("Team"),
+            "positions": (pos + ", " + alt).str.strip(", "),
+            "age": pd.to_numeric(df.get("Age"), errors="coerce"),
+            "pace": df.get("PAC"),
+            "shooting": df.get("SHO"),
+            "passing": df.get("PAS"),
+            "dribbling": df.get("DRI"),
+            "defending": df.get("DEF"),
+            "physical": df.get("PHY"),
+            # EA-site exports fill these only for keepers, unlike sofifa which gives
+            # every player a (meaninglessly low) diving score. So a populated
+            # `gk_diving` does not identify a keeper -- use the role.
+            **{c: df.get("GK " + c[3:].capitalize()) for c in GK_CANON},
+        }
+    )
 
 
 def from_fc27(df: pd.DataFrame) -> pd.DataFrame:
@@ -197,23 +230,28 @@ def from_fc27(df: pd.DataFrame) -> pd.DataFrame:
     # `common_name` is blank for most players, so fall back to first + last.
     common = df["common_name"].astype("string").str.strip().replace("", pd.NA)
     joined = (
-        df["first_name"].fillna("").astype(str).str.strip() + " "
-        + df["last_name"].fillna("").astype(str).str.strip()
-    ).str.strip().replace("", pd.NA)
+        (
+            df["first_name"].fillna("").astype(str).str.strip()
+            + " "
+            + df["last_name"].fillna("").astype(str).str.strip()
+        )
+        .str.strip()
+        .replace("", pd.NA)
+    )
     pos = df["position"].fillna("").astype(str)
     alt = df.get("alternate_positions", pd.Series("", index=df.index)).fillna("").astype(str)
 
-    return pd.DataFrame({
-        "name": common.fillna(joined),
-        "alt_name": common,
-        "overall": pd.to_numeric(df["overall_rating"], errors="coerce"),
-        "club": df.get("club"), "positions": (pos + ", " + alt).str.strip(", "),
-        "age": pd.NA,
-        **{
-            c: pd.to_numeric(df.get(f"goalkeeping_{c[3:]}"), errors="coerce")
-            for c in GK_CANON
-        },
-    })
+    return pd.DataFrame(
+        {
+            "name": common.fillna(joined),
+            "alt_name": common,
+            "overall": pd.to_numeric(df["overall_rating"], errors="coerce"),
+            "club": df.get("club"),
+            "positions": (pos + ", " + alt).str.strip(", "),
+            "age": pd.NA,
+            **{c: pd.to_numeric(df.get(f"goalkeeping_{c[3:]}"), errors="coerce") for c in GK_CANON},
+        }
+    )
 
 
 def _locate(source: Source, sources_dir: Path) -> Path | None:
@@ -223,7 +261,11 @@ def _locate(source: Source, sources_dir: Path) -> Path | None:
             return candidate
     logger.warning(
         "missing %s (editions %s) -- %s. Looked in %s and %s",
-        source.filename, source.editions, source.provenance, sources_dir, OUT,
+        source.filename,
+        source.editions,
+        source.provenance,
+        sources_dir,
+        OUT,
     )
     return None
 
@@ -231,11 +273,15 @@ def _locate(source: Source, sources_dir: Path) -> Path | None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--sources", type=Path, default=DEFAULT_SOURCES,
+        "--sources",
+        type=Path,
+        default=DEFAULT_SOURCES,
         help=f"Directory holding the raw exports (default: {DEFAULT_SOURCES}).",
     )
     parser.add_argument(
-        "--editions", type=int, nargs="+",
+        "--editions",
+        type=int,
+        nargs="+",
         help="Only rebuild these editions, e.g. 26 27. Default: all available.",
     )
     args = parser.parse_args()
@@ -269,8 +315,10 @@ def main() -> int:
             continue
         logger.info("=== %s ===", source.provenance)
         reader = {
-            "sofifa": from_sofifa, "ea-fc24": from_fc24,
-            "ea-fc25": from_fc25, "ea-fc27": from_fc27,
+            "sofifa": from_sofifa,
+            "ea-fc24": from_fc24,
+            "ea-fc25": from_fc25,
+            "ea-fc27": from_fc27,
         }[source.schema]
         written.append(emit(reader(pd.read_csv(path, low_memory=False)), edition, source.filename))
 
@@ -279,7 +327,8 @@ def main() -> int:
         logger.error(
             "Nothing written. The raw exports are not in the repository -- put "
             "them in %s, or pass --sources. See SOURCES in this file for what "
-            "each one is.", args.sources,
+            "each one is.",
+            args.sources,
         )
         return 1
 

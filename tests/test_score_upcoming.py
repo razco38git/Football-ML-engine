@@ -25,8 +25,10 @@ KEY = ["League", "Date", "HomeTeam", "AwayTeam"]
 def _scored(rows: list[tuple[str, str, str]]) -> pd.DataFrame:
     """A frame shaped like `build_upcoming_features` output: no competition."""
     frame = pd.DataFrame(
-        [{"League": lg, "Date": pd.Timestamp(d), "HomeTeam": h, "AwayTeam": a}
-         for lg, d, h, a in rows]
+        [
+            {"League": lg, "Date": pd.Timestamp(d), "HomeTeam": h, "AwayTeam": a}
+            for lg, d, h, a in rows
+        ]
     )
     for column in OUTPUT_COLUMNS:
         if column not in frame.columns and column != "competition":
@@ -36,9 +38,16 @@ def _scored(rows: list[tuple[str, str, str]]) -> pd.DataFrame:
 
 def _fixtures(rows: list[tuple[str, str, str, str]]) -> pd.DataFrame:
     return pd.DataFrame(
-        [{"League": lg, "Date": pd.Timestamp(d), "HomeTeam": h, "AwayTeam": a,
-          "competition": comp}
-         for lg, d, h, a, comp in rows]
+        [
+            {
+                "League": lg,
+                "Date": pd.Timestamp(d),
+                "HomeTeam": h,
+                "AwayTeam": a,
+                "competition": comp,
+            }
+            for lg, d, h, a, comp in rows
+        ]
     )
 
 

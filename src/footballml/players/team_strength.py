@@ -103,9 +103,7 @@ OVERALL_LINES = {"goalkeeper": 1, "defence": 4, "midfield": 3, "attack": 3}
 _LINE_ORDER = ("goalkeeper", "defence", "midfield", "attack")
 
 
-def select_eleven(
-    players: pd.DataFrame, formation: dict[str, int] | None = None
-) -> pd.DataFrame:
+def select_eleven(players: pd.DataFrame, formation: dict[str, int] | None = None) -> pd.DataFrame:
     """Pick the most likely starting eleven for one team-season.
 
     Slots are filled by minutes played, not by rating. That distinction matters:
@@ -248,16 +246,14 @@ def team_strength(
 
     if method == "eleven":
         # A plain loop rather than groupby.apply: apply's handling of the group
-        # keys varies with include_groups, and concatenating the returned frames
-        # keeps every original column intact without any index gymnastics.
+        # keys has varied across pandas versions, and concatenating the returned
+        # frames keeps every original column intact without index gymnastics.
         picks = [select_eleven(g, formation) for _, g in players.groupby(keys, observed=True)]
         selected = pd.concat(picks) if picks else players.head(0)
     elif method == "best_n":
         by = [c for c in _BEST_N_ORDER if c in players.columns]
         selected = (
-            players.sort_values(
-                by, ascending=[_BEST_N_ORDER[c] for c in by], kind="stable"
-            )
+            players.sort_values(by, ascending=[_BEST_N_ORDER[c] for c in by], kind="stable")
             .groupby(keys, observed=True)
             .head(best_n)
         )
@@ -268,7 +264,7 @@ def team_strength(
 
     lines = (
         selected.groupby([*keys, "line"], observed=True)
-        .apply(_weighted_mean, include_groups=False)
+        .apply(_weighted_mean)
         .reset_index(name="rating")
     )
     wide = lines.pivot_table(index=keys, columns="line", values="rating").reset_index()
@@ -298,7 +294,9 @@ def team_strength(
         logger.info(
             "Dropping %d team-season(s) with fewer than %d rated players "
             "(seasons %s) -- too early in the season to rate a squad",
-            int(thin.sum()), min_players, ", ".join(seasons),
+            int(thin.sum()),
+            min_players,
+            ", ".join(seasons),
         )
         wide = wide[~thin]
 

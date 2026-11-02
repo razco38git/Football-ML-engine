@@ -8,7 +8,13 @@ version = "0.1.0"
 description = "Football match prediction, player ratings, and accuracy tracking"
 requires-python = ">=3.11"
 dependencies = [
-    "pandas>=2.2",
+    # 3.0, not 2.2: `groupby.apply` drops the group keys by default from 3.0,
+    # which is the behaviour the three call sites in `features.rolling`,
+    # `players.fifa` and `players.team_strength` depend on. Under 2.2 they had
+    # to ask for it with `include_groups=False`, a keyword pandas-stubs does not
+    # model, so `mypy src` could not check any of those calls. The project is
+    # only ever run and tested against 3.x, so the floor now says so.
+    "pandas>=3.0",
     "numpy>=1.26",
     "scipy>=1.12",
     "scikit-learn>=1.4",
@@ -53,11 +59,25 @@ postgres = [
     "alembic>=1.13",
     "psycopg[binary]>=3.1",
 ]
+# Upper bounds on the three tools whose *output* decides whether CI is green.
+# A formatter's style, a type checker's inference and a stub package's precision
+# all move between releases, so unpinned they make the badge's colour depend on
+# the date rather than on the code: a release with no commit here can turn it
+# red, which is roughly how this suite came to be failing on `main` unnoticed.
+# Bump them deliberately and fix what the bump finds. `pytest` needs no bound --
+# a new pytest does not invent new opinions about this code.
 dev = [
     "pytest>=8.0",
-    "ruff>=0.5",
-    "mypy>=1.10",
-    "pandas-stubs",
+    # `fastapi.testclient.TestClient` -- four test modules drive the API through
+    # it -- is a thin wrapper over an HTTP client that neither FastAPI nor
+    # `uvicorn[standard]` pulls in. Nothing declared it, so it only ever worked
+    # because a developer machine happened to have one. `starlette.testclient`
+    # imports `httpx2` first and falls back to `httpx`, so this is the half of
+    # that pair that does not also emit a deprecation warning.
+    "httpx2>=2.6",
+    "ruff>=0.16.7,<0.17",
+    "mypy>=2.3,<2.4",
+    "pandas-stubs>=3.0,<3.1",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -70,16 +90,29 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "PD"]
 ignore = [
-    "PD901",  # `df` is a fine name for a dataframe
+    # PD901 (`df` is a fine name for a dataframe) was ignored here until ruff
+    # removed the rule. Ignoring a rule that no longer exists is dead config,
+    # and ruff warns about it on every lint run.
     "PD008",  # `.at` is the correct accessor for single-cell scalar access
 ]
 
 [tool.mypy]
-python_version = "3.11"
+# Must match the interpreter CI runs on (`.github/workflows/ci.yml`), not the
+# `requires-python` floor. `python_version = "3.11"` made `mypy src` abort
+# before it checked a single line of this project: numpy ships `type` statements
+# in its own stubs, which are 3.12 syntax, so mypy refused to parse numpy and
+# gave up with one error. The type check has therefore never run on CI -- and
+# the format check failing ahead of it meant nobody could see that either.
+python_version = "3.12"
 warn_unused_ignores = true
 warn_redundant_casts = true
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+# The repository root as well as `src`: four test modules import `pipelines.*`,
+# which is a directory at the root and not part of the installed package. This
+# passed locally only because `python -m pytest` puts the working directory on
+# `sys.path` -- CI runs the bare `pytest` entry point, which does not, so those
+# modules failed to import and pytest stopped on a collection error.
+pythonpath = ["src", "."]

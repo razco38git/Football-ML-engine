@@ -25,8 +25,14 @@ from footballml.players.team_strength import team_strength
 
 def _player(name: str, rating: float, minutes: int, role: str = "MID", **over) -> dict:
     return {
-        "League": "E0", "Season": "2425", "Team": "Arsenal", "Player": name,
-        "role": role, "rating": rating, "minutes": minutes, "rated": True,
+        "League": "E0",
+        "Season": "2425",
+        "Team": "Arsenal",
+        "Player": name,
+        "role": role,
+        "rating": rating,
+        "minutes": minutes,
+        "rated": True,
         **over,
     }
 
@@ -43,10 +49,12 @@ def test_a_tie_at_the_cut_is_broken_by_minutes() -> None:
     visible in the output -- asserting on a rating alone could not tell them
     apart, since both are rated 60.
     """
-    frame = pd.DataFrame([
-        _player("plays-every-week", 60, 3000, role="MID"),
-        _player("one-cup-game", 60, 90, role="FWD"),
-    ])
+    frame = pd.DataFrame(
+        [
+            _player("plays-every-week", 60, 3000, role="MID"),
+            _player("one-cup-game", 60, 90, role="FWD"),
+        ]
+    )
     picked = team_strength(frame, method="best_n", best_n=1, min_players=1)
 
     assert picked["n_players"].iloc[0] == 1
@@ -55,10 +63,12 @@ def test_a_tie_at_the_cut_is_broken_by_minutes() -> None:
 
     # And the other way round, so this is the minutes rule and not the order
     # the roles happen to be listed in.
-    flipped = pd.DataFrame([
-        _player("one-cup-game", 60, 90, role="MID"),
-        _player("plays-every-week", 60, 3000, role="FWD"),
-    ])
+    flipped = pd.DataFrame(
+        [
+            _player("one-cup-game", 60, 90, role="MID"),
+            _player("plays-every-week", 60, 3000, role="FWD"),
+        ]
+    )
     picked = team_strength(flipped, method="best_n", best_n=1, min_players=1)
     assert "strength_attack" in picked.columns
     assert "strength_midfield" not in picked.columns
@@ -71,9 +81,7 @@ def test_the_selection_does_not_depend_on_row_order() -> None:
     forward = team_strength(_squad(rows), method="best_n", best_n=2, min_players=1)
     reverse = team_strength(_squad(rows[::-1]), method="best_n", best_n=2, min_players=1)
 
-    pd.testing.assert_frame_equal(
-        forward.reset_index(drop=True), reverse.reset_index(drop=True)
-    )
+    pd.testing.assert_frame_equal(forward.reset_index(drop=True), reverse.reset_index(drop=True))
 
 
 def test_identical_rating_and_minutes_still_resolve() -> None:
@@ -95,14 +103,9 @@ def test_a_finished_season_is_untouched_by_a_season_still_in_progress() -> None:
     extra rows changed the array, quicksort partitioned differently, and 260 of
     1,173 settled team-seasons were re-selected.
     """
-    finished = pd.DataFrame(
-        [_player(f"p{i}", 60 - (i % 3), 2000 + i * 7) for i in range(20)]
-    )
+    finished = pd.DataFrame([_player(f"p{i}", 60 - (i % 3), 2000 + i * 7) for i in range(20)])
     in_progress = pd.DataFrame(
-        [
-            _player(f"new{i}", 60 - (i % 3), 300 + i, Season="2526", Team="Spurs")
-            for i in range(40)
-        ]
+        [_player(f"new{i}", 60 - (i % 3), 300 + i, Season="2526", Team="Spurs") for i in range(40)]
     )
 
     alone = team_strength(finished, method="best_n", best_n=15)
@@ -123,12 +126,9 @@ def test_a_finished_season_is_untouched_by_a_season_still_in_progress() -> None:
 def test_growing_the_in_progress_season_one_row_at_a_time_changes_nothing() -> None:
     """How it was actually observed: Understat rewrote its 2026 files mid-run
     and the frame grew by four rows in twenty-five minutes."""
-    finished = pd.DataFrame(
-        [_player(f"p{i}", 60 - (i % 4), 1500 + i * 11) for i in range(25)]
-    )
+    finished = pd.DataFrame([_player(f"p{i}", 60 - (i % 4), 1500 + i * 11) for i in range(25)])
     growing = [
-        _player(f"new{i}", 58 + (i % 5), 200 + i, Season="2526", Team="Spurs")
-        for i in range(12)
+        _player(f"new{i}", 58 + (i % 5), 200 + i, Season="2526", Team="Spurs") for i in range(12)
     ]
 
     baseline = None

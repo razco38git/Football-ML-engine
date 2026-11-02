@@ -97,9 +97,11 @@ def expected_calibration_error(
     single number to watch when judging whether calibration improved -- the
     curve shows *where* the model is wrong, this shows *how much*.
     """
-    obs = np.column_stack(
-        [(np.asarray(y_true, dtype=object) == o) for o in OUTCOMES]
-    ).ravel().astype("float64")
+    obs = (
+        np.column_stack([(np.asarray(y_true, dtype=object) == o) for o in OUTCOMES])
+        .ravel()
+        .astype("float64")
+    )
     pred = np.asarray(probs, dtype="float64").ravel()
 
     edges = np.linspace(0.0, 1.0, bins + 1)

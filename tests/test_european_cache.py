@@ -31,7 +31,7 @@ BASE = [
     ("E0", "2324", "Arsenal", 78.0),
     ("E0", "2324", "Chelsea", 75.0),
     ("SP1", "2324", "Barcelona", 82.0),
-    ("E0", "2425", "Arsenal", 79.0),   # the current season, still moving
+    ("E0", "2425", "Arsenal", 79.0),  # the current season, still moving
     ("E0", "2425", "Chelsea", 76.0),
 ]
 
@@ -88,8 +88,10 @@ def _cached(fingerprint: str) -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
-                "Date": pd.Timestamp("2024-09-17"), "HomeTeam": "Arsenal",
-                "AwayTeam": "Barcelona", "home_elo": 1600.0,
+                "Date": pd.Timestamp("2024-09-17"),
+                "HomeTeam": "Arsenal",
+                "AwayTeam": "Barcelona",
+                "home_elo": 1600.0,
                 validate.FINGERPRINT_COLUMN: fingerprint,
             }
         ]
@@ -140,28 +142,44 @@ def test_only_uncached_matches_are_rebuilt(monkeypatch) -> None:
     """
     european = pd.DataFrame(
         [
-            {"League": "UCL", "Season": "2425", "Date": pd.Timestamp("2024-09-17"),
-             "HomeTeam": "Arsenal", "AwayTeam": "Barcelona", "FTHG": 2, "FTAG": 1,
-             "FTR": "H", "home_league": "E0", "away_league": "SP1"},
+            {
+                "League": "UCL",
+                "Season": "2425",
+                "Date": pd.Timestamp("2024-09-17"),
+                "HomeTeam": "Arsenal",
+                "AwayTeam": "Barcelona",
+                "FTHG": 2,
+                "FTAG": 1,
+                "FTR": "H",
+                "home_league": "E0",
+                "away_league": "SP1",
+            },
         ]
     )
     cached = pd.DataFrame(
         [
-            {"Date": pd.Timestamp("2024-09-17"), "HomeTeam": "Arsenal",
-             "AwayTeam": "Barcelona", "League": "E0", "Season": "2425",
-             "FTHG": float("nan"), "FTAG": float("nan"), "FTR": None,
-             "home_elo": 1600.0, "away_elo": 1580.0},
+            {
+                "Date": pd.Timestamp("2024-09-17"),
+                "HomeTeam": "Arsenal",
+                "AwayTeam": "Barcelona",
+                "League": "E0",
+                "Season": "2425",
+                "FTHG": float("nan"),
+                "FTAG": float("nan"),
+                "FTR": None,
+                "home_elo": 1600.0,
+                "away_elo": 1580.0,
+            },
         ]
     )
 
     called = []
     monkeypatch.setattr(
-        validate, "build_upcoming_features",
+        validate,
+        "build_upcoming_features",
         lambda *a, **k: called.append(1) or pd.DataFrame(),
     )
-    scored, raw = validate.build_features(
-        european, pd.DataFrame(), pd.DataFrame(), cached=cached
-    )
+    scored, raw = validate.build_features(european, pd.DataFrame(), pd.DataFrame(), cached=cached)
     assert not called, "rebuilt a match that was already cached"
     assert len(scored) == 1
     assert scored["home_elo"].iloc[0] == 1600.0
@@ -175,17 +193,34 @@ def test_a_cached_match_missing_from_the_fixture_list_is_dropped() -> None:
     the fetch no longer returns."""
     european = pd.DataFrame(
         [
-            {"League": "UCL", "Season": "2425", "Date": pd.Timestamp("2024-09-17"),
-             "HomeTeam": "Arsenal", "AwayTeam": "Barcelona", "FTHG": 2, "FTAG": 1,
-             "FTR": "H", "home_league": "E0", "away_league": "SP1"},
+            {
+                "League": "UCL",
+                "Season": "2425",
+                "Date": pd.Timestamp("2024-09-17"),
+                "HomeTeam": "Arsenal",
+                "AwayTeam": "Barcelona",
+                "FTHG": 2,
+                "FTAG": 1,
+                "FTR": "H",
+                "home_league": "E0",
+                "away_league": "SP1",
+            },
         ]
     )
     cached = pd.DataFrame(
         [
-            {"Date": pd.Timestamp("2024-09-17"), "HomeTeam": "Arsenal",
-             "AwayTeam": "Barcelona", "home_elo": 1600.0},
-            {"Date": pd.Timestamp("2020-01-01"), "HomeTeam": "Gone",
-             "AwayTeam": "Vanished", "home_elo": 1500.0},
+            {
+                "Date": pd.Timestamp("2024-09-17"),
+                "HomeTeam": "Arsenal",
+                "AwayTeam": "Barcelona",
+                "home_elo": 1600.0,
+            },
+            {
+                "Date": pd.Timestamp("2020-01-01"),
+                "HomeTeam": "Gone",
+                "AwayTeam": "Vanished",
+                "home_elo": 1500.0,
+            },
         ]
     )
     _, raw = validate.build_features(european, pd.DataFrame(), pd.DataFrame(), cached=cached)
@@ -196,9 +231,18 @@ def test_a_cached_match_missing_from_the_fixture_list_is_dropped() -> None:
 def test_no_cache_falls_back_to_building(monkeypatch) -> None:
     european = pd.DataFrame(
         [
-            {"League": "UCL", "Season": "2425", "Date": pd.Timestamp("2024-09-17"),
-             "HomeTeam": "Arsenal", "AwayTeam": "Barcelona", "FTHG": 2, "FTAG": 1,
-             "FTR": "H", "home_league": "E0", "away_league": "SP1"},
+            {
+                "League": "UCL",
+                "Season": "2425",
+                "Date": pd.Timestamp("2024-09-17"),
+                "HomeTeam": "Arsenal",
+                "AwayTeam": "Barcelona",
+                "FTHG": 2,
+                "FTAG": 1,
+                "FTR": "H",
+                "home_league": "E0",
+                "away_league": "SP1",
+            },
         ]
     )
     called = []
@@ -269,9 +313,21 @@ def test_progress_is_written_before_the_run_finishes(tmp_path, monkeypatch) -> N
 
     days = pd.date_range("2024-09-17", periods=5, freq="7D")
     european = pd.DataFrame(
-        [{"League": "UCL", "Season": "2425", "Date": d, "HomeTeam": f"H{i}",
-          "AwayTeam": f"A{i}", "FTHG": 1, "FTAG": 0, "FTR": "H",
-          "home_league": "E0", "away_league": "SP1"} for i, d in enumerate(days)]
+        [
+            {
+                "League": "UCL",
+                "Season": "2425",
+                "Date": d,
+                "HomeTeam": f"H{i}",
+                "AwayTeam": f"A{i}",
+                "FTHG": 1,
+                "FTAG": 0,
+                "FTR": "H",
+                "home_league": "E0",
+                "away_league": "SP1",
+            }
+            for i, d in enumerate(days)
+        ]
     )
 
     seen = []
@@ -285,8 +341,9 @@ def test_progress_is_written_before_the_run_finishes(tmp_path, monkeypatch) -> N
 
     monkeypatch.setattr(validate, "build_upcoming_features", fake)
     with pytest.raises(KeyboardInterrupt):
-        validate.build_features(european, pd.DataFrame(), pd.DataFrame(),
-                                cached=None, fingerprint="f")
+        validate.build_features(
+            european, pd.DataFrame(), pd.DataFrame(), cached=None, fingerprint="f"
+        )
 
     kept = validate.load_cache("f", tmp_path / "features.pkl")
     assert len(kept) == 4, "the work done before the interruption was thrown away"
@@ -297,8 +354,9 @@ def test_a_checkpoint_cannot_leave_a_half_written_cache(tmp_path, monkeypatch) -
     valid fingerprint, so the next run loads and trusts it. The write goes
     through a temporary file and a replace."""
     monkeypatch.setattr(validate, "FEATURES_CACHE", tmp_path / "features.pkl")
-    good = pd.DataFrame([{"Date": pd.Timestamp("2024-09-17"), "HomeTeam": "A",
-                          "AwayTeam": "B", "home_elo": 1500.0}])
+    good = pd.DataFrame(
+        [{"Date": pd.Timestamp("2024-09-17"), "HomeTeam": "A", "AwayTeam": "B", "home_elo": 1500.0}]
+    )
     validate._checkpoint([good], "f")
     assert len(validate.load_cache("f", tmp_path / "features.pkl")) == 1
     assert not (tmp_path / "features.pkl.tmp").exists(), "temporary file left behind"
@@ -322,13 +380,21 @@ def test_no_cache_writes_nothing(tmp_path, monkeypatch) -> None:
 
 
 def _predictions(version: str | None, n: int = 4) -> pd.DataFrame:
-    frame = pd.DataFrame({
-        "home_league": ["E0"] * n, "away_league": ["SP1"] * n,
-        "expected_goals_home": [1.4] * n, "expected_goals_away": [1.2] * n,
-        "FTHG": [1] * n, "FTAG": [0] * n, "FTR": ["H"] * n,
-        "Season": ["2425"] * n,
-        "prob_home_win": [0.4] * n, "prob_draw": [0.3] * n, "prob_away_win": [0.3] * n,
-    })
+    frame = pd.DataFrame(
+        {
+            "home_league": ["E0"] * n,
+            "away_league": ["SP1"] * n,
+            "expected_goals_home": [1.4] * n,
+            "expected_goals_away": [1.2] * n,
+            "FTHG": [1] * n,
+            "FTAG": [0] * n,
+            "FTR": ["H"] * n,
+            "Season": ["2425"] * n,
+            "prob_home_win": [0.4] * n,
+            "prob_draw": [0.3] * n,
+            "prob_away_win": [0.3] * n,
+        }
+    )
     if version is not None:
         frame[validate.MODEL_VERSION_COLUMN] = version
     return frame
@@ -406,9 +472,7 @@ def test_a_partly_stamped_file_is_refused(monkeypatch, tmp_path):
 
 def test_an_empty_predictions_file_is_refused(monkeypatch, tmp_path):
     """Zero rows carry zero evidence about which model scored them."""
-    fit_mod = _fit_module(
-        monkeypatch, tmp_path, _predictions("new-model").iloc[:0], "new-model"
-    )
+    fit_mod = _fit_module(monkeypatch, tmp_path, _predictions("new-model").iloc[:0], "new-model")
     written: list = []
     monkeypatch.setattr(fit_mod, "save", lambda *a, **k: written.append(a))
 
@@ -457,16 +521,12 @@ def test_the_scored_file_records_the_model_that_scored_it(monkeypatch, tmp_path)
     monkeypatch.setattr(validate, "load_cache", lambda *a, **k: pd.DataFrame())
     monkeypatch.setattr(validate, "build_features", lambda *a, **k: (scored, scored))
     monkeypatch.setattr(validate, "predict_with", lambda frame, *a: frame)
-    monkeypatch.setattr(
-        sys, "argv", ["validate_european", "--no-domestic-reference"]
-    )
+    monkeypatch.setattr(sys, "argv", ["validate_european", "--no-domestic-reference"])
 
     assert validate.main() == 0
 
     written = pd.read_csv(out)
-    assert list(written[validate.MODEL_VERSION_COLUMN].unique()) == [
-        "the-model-that-scored-it"
-    ]
+    assert list(written[validate.MODEL_VERSION_COLUMN].unique()) == ["the-model-that-scored-it"]
 
     # And the consumer accepts exactly what the producer wrote.
     fit_mod = _fit_module(monkeypatch, tmp_path, written, "the-model-that-scored-it")
@@ -487,10 +547,12 @@ def test_the_scored_file_records_the_model_that_scored_it(monkeypatch, tmp_path)
 
 
 def _ties(dates: list[str]) -> pd.DataFrame:
-    return pd.DataFrame([
-        {"Date": pd.Timestamp(d), "HomeTeam": f"H{i}", "AwayTeam": f"A{i}"}
-        for i, d in enumerate(dates)
-    ])
+    return pd.DataFrame(
+        [
+            {"Date": pd.Timestamp(d), "HomeTeam": f"H{i}", "AwayTeam": f"A{i}"}
+            for i, d in enumerate(dates)
+        ]
+    )
 
 
 def test_an_empty_cache_means_every_matchday_must_be_built() -> None:
@@ -512,11 +574,19 @@ def test_a_fully_warm_cache_has_nothing_to_build() -> None:
 def _run(monkeypatch, tmp_path, cached: pd.DataFrame, limit: str | None) -> tuple[int, bool]:
     """`main` wired to throwaway inputs. Returns (exit code, wrote anything)."""
     european = _ties(["2026-10-20", "2026-10-21", "2026-10-22"]).assign(
-        Season="2627", League="UCL", competition="UCL",
-        home_league="E0", away_league="SP1",
-        FTHG=1, FTAG=0, FTR="H",
-        prob_home_win=0.5, prob_draw=0.26, prob_away_win=0.24,
-        expected_goals_home=1.5, expected_goals_away=1.1,
+        Season="2627",
+        League="UCL",
+        competition="UCL",
+        home_league="E0",
+        away_league="SP1",
+        FTHG=1,
+        FTAG=0,
+        FTR="H",
+        prob_home_win=0.5,
+        prob_draw=0.26,
+        prob_away_win=0.24,
+        expected_goals_home=1.5,
+        expected_goals_away=1.1,
     )
     matches = tmp_path / "european_matches.csv"
     european.to_csv(matches, index=False)

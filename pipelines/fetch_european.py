@@ -81,7 +81,8 @@ def merge_seasons(
     merged = pd.concat([keep, fetched], ignore_index=True)
     logger.info(
         "Kept %d row(s) from %d season(s) this run did not fetch",
-        len(keep), keep["Season"].nunique(),
+        len(keep),
+        keep["Season"].nunique(),
     )
     return merged.sort_values(["Season", "Date", "HomeTeam"]).reset_index(drop=True)
 
@@ -133,9 +134,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--start-season", default=FIRST_SEASON)
     parser.add_argument("--end-season", default=None)
-    parser.add_argument(
-        "--competitions", nargs="+", choices=sorted(EUROPEAN_LEAGUES), default=None
-    )
+    parser.add_argument("--competitions", nargs="+", choices=sorted(EUROPEAN_LEAGUES), default=None)
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -169,8 +168,11 @@ def main() -> int:
         print(table.to_string())
         print("\nBy league pairing (home vs away domestic division):")
         pairing = kept.pivot_table(
-            index="home_league", columns="away_league", values="Date",
-            aggfunc="count", fill_value=0,
+            index="home_league",
+            columns="away_league",
+            values="Date",
+            aggfunc="count",
+            fill_value=0,
         )
         print(pairing.to_string())
 

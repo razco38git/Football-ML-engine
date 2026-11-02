@@ -65,9 +65,7 @@ def test_efficiency_on_random_value_functions() -> None:
         scores = {c: rng.normal(0.2, 0.02, 40) for c in coalitions(PLAYERS)}
         contributions = per_match_contributions(scores, PLAYERS)
         total = check_efficiency(contributions, scores, PLAYERS)
-        assert total == pytest.approx(
-            scores[()].mean() - scores[tuple(PLAYERS)].mean()
-        )
+        assert total == pytest.approx(scores[()].mean() - scores[tuple(PLAYERS)].mean())
 
 
 def test_dummy_player_gets_exactly_zero() -> None:

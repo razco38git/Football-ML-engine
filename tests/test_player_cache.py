@@ -41,23 +41,26 @@ def cache_in_tmp(tmp_path, monkeypatch):
 
 def _block(season: str = "1819", rows: int = 3) -> pd.DataFrame:
     """A block shaped like one `fetch_fbref_stats` read."""
-    return pd.DataFrame({
-        "League": ["E0"] * rows,
-        "Season": [season] * rows,
-        "Team": ["Arsenal"] * rows,
-        "Player": [f"Player {i}" for i in range(rows)],
-        # Nullable Float64 on purpose, including a pd.NA: see the dtype note in
-        # the module docstring.
-        "tackles_won_per90": pd.array(
-            [*(round(0.1 * i, 2) for i in range(rows - 1)), None], dtype="Float64"
-        ),
-    })
+    return pd.DataFrame(
+        {
+            "League": ["E0"] * rows,
+            "Season": [season] * rows,
+            "Team": ["Arsenal"] * rows,
+            "Player": [f"Player {i}" for i in range(rows)],
+            # Nullable Float64 on purpose, including a pd.NA: see the dtype note in
+            # the module docstring.
+            "tackles_won_per90": pd.array(
+                [*(round(0.1 * i, 2) for i in range(rows - 1)), None], dtype="Float64"
+            ),
+        }
+    )
 
 
 _MISC = "misc"
 
 
 # --- round trip ---------------------------------------------------------------
+
 
 def test_a_saved_block_comes_back() -> None:
     block = _block()
@@ -78,9 +81,7 @@ def test_dtypes_survive_the_round_trip() -> None:
     block = _block()
     key = cache.request_key(["E0"], _MISC)
     cache.save("1819", key, block)
-    assert cache.load("1819", key)["tackles_won_per90"].dtype == (
-        block["tackles_won_per90"].dtype
-    )
+    assert cache.load("1819", key)["tackles_won_per90"].dtype == (block["tackles_won_per90"].dtype)
 
 
 def test_a_miss_is_none_not_an_error() -> None:
@@ -95,6 +96,7 @@ def test_an_empty_block_is_not_stored() -> None:
 
 
 # --- what the key has to separate ---------------------------------------------
+
 
 def test_a_narrower_request_cannot_serve_a_wider_one() -> None:
     """A one-league block served to a five-league run drops four leagues.
@@ -112,9 +114,7 @@ def test_a_narrower_request_cannot_serve_a_wider_one() -> None:
 
 def test_league_order_does_not_change_the_key() -> None:
     """The same request spelled differently must hit, or nothing ever caches."""
-    assert cache.request_key(["E0", "D1"], _MISC) == cache.request_key(
-        ["D1", "E0"], _MISC
-    )
+    assert cache.request_key(["E0", "D1"], _MISC) == cache.request_key(["D1", "E0"], _MISC)
 
 
 def test_the_stat_type_separates_the_key() -> None:
@@ -133,6 +133,7 @@ def test_a_different_season_is_a_different_block() -> None:
 
 
 # --- staleness ----------------------------------------------------------------
+
 
 def test_changing_the_code_invalidates_everything(monkeypatch) -> None:
     """A cache that outlives the code that filled it fails invisibly.
@@ -173,6 +174,7 @@ def test_a_stale_block_is_replaced_not_accumulated() -> None:
 
 # --- failing open -------------------------------------------------------------
 
+
 def test_an_unreadable_block_is_a_miss() -> None:
     """An optimisation must not be able to fail the build."""
     key = cache.request_key(["E0"], _MISC)
@@ -204,6 +206,7 @@ def test_clearing_an_absent_cache_is_not_an_error() -> None:
 
 
 # --- the season in progress ---------------------------------------------------
+
 
 def test_the_latest_season_requested_is_never_cached() -> None:
     """It changes daily, so a cached copy would freeze the live ratings.

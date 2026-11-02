@@ -37,7 +37,7 @@ def _right(*rows: tuple[str, str, int]) -> pd.DataFrame:
 
 
 def test_an_initial_shared_by_two_players_matches_neither() -> None:
-    """"A. Onana" reaches both men and can choose between neither.
+    """ "A. Onana" reaches both men and can choose between neither.
 
     The source abbreviates the given name, so the only key that reaches either
     row is initial-plus-surname -- and both Onanas answer to it.

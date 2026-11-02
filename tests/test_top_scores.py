@@ -25,9 +25,7 @@ from footballml.models.dixon_coles import most_likely_score, score_matrix, top_s
 @pytest.fixture
 def matrix() -> np.ndarray:
     """Three fixtures: a home favourite, a tight game, and a rout."""
-    return score_matrix(
-        np.array([1.93, 1.20, 3.10]), np.array([1.07, 1.25, 0.40]), rho=-0.061
-    )
+    return score_matrix(np.array([1.93, 1.20, 3.10]), np.array([1.07, 1.25, 0.40]), rho=-0.061)
 
 
 def test_the_first_entry_is_the_modal_score(matrix):

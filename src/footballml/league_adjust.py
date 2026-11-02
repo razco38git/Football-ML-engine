@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -143,13 +144,13 @@ def fit(predictions: pd.DataFrame, reference: str = REFERENCE) -> dict[str, obje
             "rps_uncorrected": round(_rps(np.concatenate(held_base), actual), 5),
             "rps_corrected": round(_rps(np.concatenate(held_probs), actual), 5),
         }
-        holdout["improvement"] = round(
-            holdout["rps_uncorrected"] - holdout["rps_corrected"], 5
-        )
+        holdout["improvement"] = round(holdout["rps_uncorrected"] - holdout["rps_corrected"], 5)
         logger.info(
             "Leave-one-season-out: RPS %.5f -> %.5f (%+.5f) on %d matches",
-            holdout["rps_uncorrected"], holdout["rps_corrected"],
-            -holdout["improvement"], holdout["n"],
+            holdout["rps_uncorrected"],
+            holdout["rps_corrected"],
+            -holdout["improvement"],
+            holdout["n"],
         )
         assert OUTCOMES  # the probability column order these scores assume
 
@@ -180,8 +181,10 @@ def _probabilities(block: pd.DataFrame, offsets: dict[str, float]) -> np.ndarray
 def adjust(
     mu_home: np.ndarray | float,
     mu_away: np.ndarray | float,
-    home_league: np.ndarray | str,
-    away_league: np.ndarray | str,
+    # A sequence, not only an array: the body hands these to `np.asarray`, and
+    # `/matches` has always passed plain lists of division codes.
+    home_league: Sequence[str] | np.ndarray | str,
+    away_league: Sequence[str] | np.ndarray | str,
     offsets: dict[str, float],
 ) -> tuple[np.ndarray, np.ndarray]:
     """Shift goal rates by the measured gap between the two leagues.
@@ -232,9 +235,7 @@ def save(fitted: dict[str, object], path: Path | None = None) -> Path:
             "an unstamped file is applied to every later model without warning"
         )
     if not isinstance(fitted["offsets"], dict):
-        raise ValueError(
-            f"offsets must be a mapping, got {type(fitted['offsets']).__name__}"
-        )
+        raise ValueError(f"offsets must be a mapping, got {type(fitted['offsets']).__name__}")
 
     write_json(fitted, path)
     return path

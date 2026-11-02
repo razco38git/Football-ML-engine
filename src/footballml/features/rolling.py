@@ -121,9 +121,7 @@ def prepare_team_match(tmh: pd.DataFrame) -> pd.DataFrame:
     df["GoalDiff"] = df["GoalsFor"] - df["GoalsAgainst"]
 
     # Guard against 0-shot matches rather than emitting inf.
-    df["ShotAccuracy"] = (
-        df["ShotsOnTargetFor"].div(df["ShotsFor"]).where(df["ShotsFor"] > 0)
-    )
+    df["ShotAccuracy"] = df["ShotsOnTargetFor"].div(df["ShotsFor"]).where(df["ShotsFor"] > 0)
 
     if "xGFor" in df.columns and "xGAgainst" in df.columns:
         df["xGDiff"] = df["xGFor"] - df["xGAgainst"]
@@ -196,14 +194,13 @@ def add_rest_features(tmh: pd.DataFrame, congestion_days: int = 14) -> pd.DataFr
         dates = g["Date"]
         cutoff = dates - pd.Timedelta(days=congestion_days)
         counts = [
-            int(((dates < d) & (dates >= c)).sum())
-            for d, c in zip(dates, cutoff, strict=True)
+            int(((dates < d) & (dates >= c)).sum()) for d, c in zip(dates, cutoff, strict=True)
         ]
         return pd.Series(counts, index=g.index, dtype="float64")
 
     df[f"matches_last_{congestion_days}_days"] = (
         df.groupby("Team", sort=False, observed=True, group_keys=False)
-        .apply(_congestion, include_groups=False)
+        .apply(_congestion)
         .reindex(df.index)
     )
     return df

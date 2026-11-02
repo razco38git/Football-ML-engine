@@ -198,9 +198,7 @@ def test_the_csv_writer_does_not_claim_an_fsync_it_never_makes(
 
     atomic.write_csv(frame, tmp_path / "x.csv")
 
-    assert not synced, (
-        "write_csv now fsyncs; update the module docstring, which says it does not"
-    )
+    assert not synced, "write_csv now fsyncs; update the module docstring, which says it does not"
     assert "do not: they hand the path to pandas" in atomic.__doc__
 
 

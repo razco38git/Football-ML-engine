@@ -100,7 +100,10 @@ def test_a_refused_reload_fails_the_run(monkeypatch, tmp_path) -> None:
 
     def refuse(*_args, **_kwargs):
         raise HTTPError(
-            "http://127.0.0.1:8000/admin/reload", 409, "Conflict", {},
+            "http://127.0.0.1:8000/admin/reload",
+            409,
+            "Conflict",
+            {},
             io.BytesIO(b'{"reason": "model needs features this process cannot build"}'),
         )
 
@@ -135,9 +138,7 @@ def test_skip_leaves_the_rest(monkeypatch, tmp_path) -> None:
     assert "train" in attempted
 
 
-@pytest.mark.parametrize(
-    ("seconds", "expected"), [(9, "9s"), (65, "1m 05s"), (600, "10m 00s")]
-)
+@pytest.mark.parametrize(("seconds", "expected"), [(9, "9s"), (65, "1m 05s"), (600, "10m 00s")])
 def test_duration_reads_naturally(seconds: int, expected: str) -> None:
     assert weekly._duration(seconds) == expected
 
@@ -272,7 +273,7 @@ def test_an_error_far_from_the_end_is_kept() -> None:
 def test_the_tail_is_still_the_tail() -> None:
     """A clean run must produce exactly what it produced before."""
     lines = [f"line {i}" for i in range(50)]
-    assert weekly._summary_lines(_output(lines)) == lines[-weekly.SUMMARY_LINES:]
+    assert weekly._summary_lines(_output(lines)) == lines[-weekly.SUMMARY_LINES :]
 
 
 def test_a_flagged_line_inside_the_tail_is_not_repeated() -> None:
@@ -281,7 +282,7 @@ def test_a_flagged_line_inside_the_tail_is_not_repeated() -> None:
     lines = [*[f"line {i}" for i in range(50)], warning, "after"]
     summary = weekly._summary_lines(_output(lines))
     assert summary.count(warning) == 1
-    assert summary == lines[-weekly.SUMMARY_LINES:], "the tail is unchanged"
+    assert summary == lines[-weekly.SUMMARY_LINES :], "the tail is unchanged"
 
 
 def test_an_earlier_copy_of_a_tail_line_is_not_hoisted() -> None:
@@ -299,7 +300,9 @@ def test_flagged_lines_keep_their_original_order() -> None:
     lines = [first, "noise", second, "noise", third, *[f"line {i}" for i in range(30)]]
     summary = weekly._summary_lines(_output(lines))
     assert [line for line in summary if line in {first, second, third}] == [
-        first, second, third,
+        first,
+        second,
+        third,
     ]
 
 
@@ -324,7 +327,7 @@ def test_output_shorter_than_the_tail_is_returned_whole() -> None:
 
 
 def test_a_word_that_merely_contains_a_level_is_not_flagged() -> None:
-    """"no errors" is the opposite of an error, and `ERRORS` is not a level."""
+    """ "no errors" is the opposite of an error, and `ERRORS` is not a level."""
     noise = "checked for errors and found none"
     lines = [noise, *[f"line {i}" for i in range(30)]]
     assert noise not in weekly._summary_lines(_output(lines))
@@ -367,6 +370,7 @@ def test_a_failed_backtest_is_named_in_the_summary(monkeypatch, tmp_path) -> Non
     that file is what somebody actually reads on a Monday -- and the job
     installs its own handlers, so captured records prove nothing about it.
     """
+
     def fake_run(step):
         if step.name == "backtest":
             raise subprocess.CalledProcessError(1, step.name, "", "boom")

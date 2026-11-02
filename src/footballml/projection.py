@@ -33,9 +33,7 @@ logger = logging.getLogger(__name__)
 WIN, DRAW = 3, 1
 
 
-def remaining_fixtures(
-    tmh: pd.DataFrame, league: str, season: str
-) -> pd.DataFrame:
+def remaining_fixtures(tmh: pd.DataFrame, league: str, season: str) -> pd.DataFrame:
     """Ordered pairs in this league-season that have not been played yet.
 
     Args:
@@ -74,11 +72,10 @@ def remaining_fixtures(
 
 def current_table(tmh: pd.DataFrame, league: str, season: str) -> pd.DataFrame:
     """Points, goal difference and matches played so far."""
-    rows = tmh[
-        (tmh["League"] == league) & (tmh["Season"].astype(str) == str(season))
-    ].copy()
+    rows = tmh[(tmh["League"] == league) & (tmh["Season"].astype(str) == str(season))].copy()
     rows["points"] = np.where(
-        rows["GoalsFor"] > rows["GoalsAgainst"], WIN,
+        rows["GoalsFor"] > rows["GoalsAgainst"],
+        WIN,
         np.where(rows["GoalsFor"] == rows["GoalsAgainst"], DRAW, 0),
     )
     table = (
@@ -178,8 +175,6 @@ def simulate(
             "projected_position": position.mean(axis=0).round(1),
             "title_pct": (position == 1).mean(axis=0).round(4),
             "top_four_pct": (position <= 4).mean(axis=0).round(4),
-            "relegation_pct": (
-                position > len(teams) - relegation_places
-            ).mean(axis=0).round(4),
+            "relegation_pct": (position > len(teams) - relegation_places).mean(axis=0).round(4),
         }
     )

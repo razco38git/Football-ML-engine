@@ -89,7 +89,8 @@ def test_every_rated_club_resolves_to_a_name_the_match_data_uses() -> None:
     known = set(played["HomeTeam"].dropna()) | set(played["AwayTeam"].dropna())
 
     unreachable = sorted(
-        name for name in rated
+        name
+        for name in rated
         if name not in known and load_aliases("understat").get(name) not in known
     )
     assert not unreachable, (

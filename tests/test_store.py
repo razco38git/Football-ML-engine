@@ -107,9 +107,9 @@ def test_settle_never_rewrites_history(predictions: pd.DataFrame, path: Path) ->
     store.settle(pd.DataFrame({**key, "FTHG": [2.0], "FTAG": [1.0], "FTR": ["H"]}), path)
 
     # A contradictory later feed must be ignored, not applied.
-    assert store.settle(
-        pd.DataFrame({**key, "FTHG": [0.0], "FTAG": [3.0], "FTR": ["A"]}), path
-    ) == 0
+    assert (
+        store.settle(pd.DataFrame({**key, "FTHG": [0.0], "FTAG": [3.0], "FTR": ["A"]}), path) == 0
+    )
     assert store.settled(path)["actual_result"].iloc[0] == "H"
 
 
@@ -132,14 +132,24 @@ def test_settled_counts_each_fixture_once(tmp_path):
 
     path = tmp_path / "predictions.csv"
     fixture = pd.DataFrame(
-        [{
-            "League": "SP1", "Date": str(KICKOFF.date()), "HomeTeam": "Betis",
-            "AwayTeam": "Getafe", "expected_goals_home": 1.4,
-            "expected_goals_away": 1.0, "prob_home_win": 0.5, "prob_draw": 0.3,
-            "prob_away_win": 0.2, "predicted_outcome": "H",
-            "modal_score_home": 1, "modal_score_away": 1,
-            "prob_over_2_5": 0.4, "prob_btts": 0.5,
-        }]
+        [
+            {
+                "League": "SP1",
+                "Date": str(KICKOFF.date()),
+                "HomeTeam": "Betis",
+                "AwayTeam": "Getafe",
+                "expected_goals_home": 1.4,
+                "expected_goals_away": 1.0,
+                "prob_home_win": 0.5,
+                "prob_draw": 0.3,
+                "prob_away_win": 0.2,
+                "predicted_outcome": "H",
+                "modal_score_home": 1,
+                "modal_score_away": 1,
+                "prob_over_2_5": 0.4,
+                "prob_btts": 0.5,
+            }
+        ]
     )
     store.append(fixture, "model-a", path=path)
     store.append(fixture, "model-b", path=path)
@@ -168,13 +178,23 @@ def test_settled_counts_each_fixture_once(tmp_path):
 # fixtures held more than one forecast and 58 disagreed, by up to sixteen
 # points.
 
+
 def _forecast(date, home="Roma", away="Real Madrid", **over) -> dict:
     row = {
-        "League": "I1", "Date": str(date), "HomeTeam": home, "AwayTeam": away,
-        "expected_goals_home": 1.7, "expected_goals_away": 1.4,
-        "prob_home_win": 0.47, "prob_draw": 0.24, "prob_away_win": 0.29,
-        "predicted_outcome": "H", "modal_score_home": 1, "modal_score_away": 1,
-        "prob_over_2_5": 0.52, "prob_btts": 0.54,
+        "League": "I1",
+        "Date": str(date),
+        "HomeTeam": home,
+        "AwayTeam": away,
+        "expected_goals_home": 1.7,
+        "expected_goals_away": 1.4,
+        "prob_home_win": 0.47,
+        "prob_draw": 0.24,
+        "prob_away_win": 0.29,
+        "predicted_outcome": "H",
+        "modal_score_home": 1,
+        "modal_score_away": 1,
+        "prob_over_2_5": 0.52,
+        "prob_btts": 0.54,
     }
     return {**row, **over}
 
@@ -191,14 +211,35 @@ def _write(path: Path, rows: list[dict]) -> None:
 def test_the_last_forecast_before_kickoff_is_published(path: Path) -> None:
     """What the site actually showed, not the oldest thing it ever said."""
     kickoff = pd.Timestamp("2026-10-14")
-    _write(path, [
-        _forecast(kickoff, prob_home_win=0.47, prob_draw=0.24, prob_away_win=0.29,
-                  model_version="a", predicted_at="2026-10-04T17:57:35+00:00"),
-        _forecast(kickoff, prob_home_win=0.49, prob_draw=0.23, prob_away_win=0.28,
-                  model_version="b", predicted_at="2026-10-05T08:41:52+00:00"),
-        _forecast(kickoff, prob_home_win=0.44, prob_draw=0.25, prob_away_win=0.32,
-                  model_version="c", predicted_at="2026-10-12T12:22:46+00:00"),
-    ])
+    _write(
+        path,
+        [
+            _forecast(
+                kickoff,
+                prob_home_win=0.47,
+                prob_draw=0.24,
+                prob_away_win=0.29,
+                model_version="a",
+                predicted_at="2026-10-04T17:57:35+00:00",
+            ),
+            _forecast(
+                kickoff,
+                prob_home_win=0.49,
+                prob_draw=0.23,
+                prob_away_win=0.28,
+                model_version="b",
+                predicted_at="2026-10-05T08:41:52+00:00",
+            ),
+            _forecast(
+                kickoff,
+                prob_home_win=0.44,
+                prob_draw=0.25,
+                prob_away_win=0.32,
+                model_version="c",
+                predicted_at="2026-10-12T12:22:46+00:00",
+            ),
+        ],
+    )
 
     out = store.settled(path)
     assert len(out) == 1
@@ -214,12 +255,23 @@ def test_a_forecast_made_after_kickoff_is_refused(path: Path) -> None:
     as a prediction committed in advance would be false.
     """
     kickoff = pd.Timestamp("2026-09-15")
-    _write(path, [
-        _forecast(kickoff, prob_home_win=0.47, predicted_at="2026-09-10T06:00:00+00:00",
-                  model_version="before"),
-        _forecast(kickoff, prob_home_win=0.90, predicted_at="2026-09-16T14:36:11+00:00",
-                  model_version="after"),
-    ])
+    _write(
+        path,
+        [
+            _forecast(
+                kickoff,
+                prob_home_win=0.47,
+                predicted_at="2026-09-10T06:00:00+00:00",
+                model_version="before",
+            ),
+            _forecast(
+                kickoff,
+                prob_home_win=0.90,
+                predicted_at="2026-09-16T14:36:11+00:00",
+                model_version="after",
+            ),
+        ],
+    )
 
     out = store.settled(path)
     assert len(out) == 1
@@ -236,10 +288,13 @@ def test_a_fixture_with_only_late_forecasts_is_dropped(path: Path) -> None:
     and truer.
     """
     kickoff = pd.Timestamp("2026-09-15")
-    _write(path, [
-        _forecast(kickoff, predicted_at="2026-09-15T13:02:46+00:00", model_version="a"),
-        _forecast(kickoff, predicted_at="2026-09-16T14:36:11+00:00", model_version="b"),
-    ])
+    _write(
+        path,
+        [
+            _forecast(kickoff, predicted_at="2026-09-15T13:02:46+00:00", model_version="a"),
+            _forecast(kickoff, predicted_at="2026-09-16T14:36:11+00:00", model_version="b"),
+        ],
+    )
     assert store.settled(path).empty
 
 
@@ -252,26 +307,40 @@ def test_the_bound_is_the_match_date_because_we_have_no_kickoff_times(path: Path
     that can be proved.
     """
     kickoff = pd.Timestamp("2026-10-14")
-    _write(path, [
-        _forecast(kickoff, predicted_at="2026-10-13T23:59:00+00:00", model_version="eve"),
-    ])
+    _write(
+        path,
+        [
+            _forecast(kickoff, predicted_at="2026-10-13T23:59:00+00:00", model_version="eve"),
+        ],
+    )
     assert len(store.settled(path)) == 1
 
-    _write(path, [
-        _forecast(kickoff, predicted_at="2026-10-14T00:01:00+00:00", model_version="morn"),
-    ])
+    _write(
+        path,
+        [
+            _forecast(kickoff, predicted_at="2026-10-14T00:01:00+00:00", model_version="morn"),
+        ],
+    )
     assert store.settled(path).empty
 
 
 def test_fixtures_are_still_counted_once_each(path: Path) -> None:
     """The original guarantee, unchanged by picking a different row."""
     kickoff = pd.Timestamp("2026-10-14")
-    _write(path, [
-        _forecast(kickoff, predicted_at="2026-10-04T06:00:00+00:00", model_version="a"),
-        _forecast(kickoff, predicted_at="2026-10-05T06:00:00+00:00", model_version="b"),
-        _forecast(kickoff, home="Arsenal", away="Lille",
-                  predicted_at="2026-10-05T06:00:00+00:00", model_version="b"),
-    ])
+    _write(
+        path,
+        [
+            _forecast(kickoff, predicted_at="2026-10-04T06:00:00+00:00", model_version="a"),
+            _forecast(kickoff, predicted_at="2026-10-05T06:00:00+00:00", model_version="b"),
+            _forecast(
+                kickoff,
+                home="Arsenal",
+                away="Lille",
+                predicted_at="2026-10-05T06:00:00+00:00",
+                model_version="b",
+            ),
+        ],
+    )
     out = store.settled(path)
     assert len(out) == 2
     assert set(out["HomeTeam"]) == {"Roma", "Arsenal"}

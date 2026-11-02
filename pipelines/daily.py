@@ -129,9 +129,7 @@ FETCH_EUROPEAN = Step("fetch_european", (), "pull any new UEFA results")
 #: It reads two sources -- football-data, and the schedule pages, which carry a
 #: score days before football-data publishes one -- so it has work to do on days
 #: when the fetch brought nothing.
-SETTLE_ONLY = Step(
-    "score_upcoming", ("--settle-only",), "settle what was played -- the fast path"
-)
+SETTLE_ONLY = Step("score_upcoming", ("--settle-only",), "settle what was played -- the fast path")
 
 #: Score the new ties into `european_predictions.csv`, which is what the site
 #: reads for European recent results.
@@ -228,14 +226,17 @@ def _report_stranded_european() -> None:
         "They settle from european_matches.csv, so this means the UEFA fetch "
         "has not succeeded -- the Champions League is missing from Recent "
         "results and Prediction Accuracy until it does.",
-        len(stranded), STRANDED_AFTER_DAYS, listed,
+        len(stranded),
+        STRANDED_AFTER_DAYS,
+        listed,
     )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--force", action="store_true",
+        "--force",
+        action="store_true",
         help="Run the downstream steps even when no new matches arrived.",
     )
     parser.add_argument("--api-url", default=API_URL)
@@ -254,7 +255,8 @@ def main() -> int:
         if not acquired:
             logger.info(
                 "Another refresh is running (%s); stopping. It rebuilds "
-                "everything this job would have.", holder() or "unknown",
+                "everything this job would have.",
+                holder() or "unknown",
             )
             return 0
         return _run(args, started)
@@ -295,7 +297,8 @@ def _run(args: argparse.Namespace, started: float) -> int:
         # and a later run settles what this one could not.
         logger.error(
             "Settling failed (exit %d); carrying on to the fetch. The tabs keep "
-            "whatever was last settled.", exc.returncode,
+            "whatever was last settled.",
+            exc.returncode,
         )
 
     # European results, then settle again if any arrived.
@@ -314,7 +317,8 @@ def _run(args: argparse.Namespace, started: float) -> int:
         # that is exactly how it came to be four weeks stale unnoticed.
         logger.error(
             "fetch_european failed (exit %d). European results stay as they "
-            "were; the rest of this run is unaffected.", exc.returncode,
+            "were; the rest of this run is unaffected.",
+            exc.returncode,
         )
     else:
         if _fingerprint(EUROPEAN) != european_before:
@@ -337,15 +341,14 @@ def _run(args: argparse.Namespace, started: float) -> int:
                 logger.error(
                     "Scoring the European results failed (exit %d). They are "
                     "settled below but will not appear under Recent results "
-                    "until the weekly scores them.", exc.returncode,
+                    "until the weekly scores them.",
+                    exc.returncode,
                 )
             try:
                 run_step(SETTLE_ONLY)
                 published = reload_api(args.api_url) or published
             except subprocess.CalledProcessError as exc:
-                logger.error(
-                    "Settling the European results failed (exit %d)", exc.returncode
-                )
+                logger.error("Settling the European results failed (exit %d)", exc.returncode)
         else:
             logger.info("No new European results")
 
@@ -371,14 +374,18 @@ def _run(args: argparse.Namespace, started: float) -> int:
     if advanced:
         logger.info(
             "New results: %d rows (was %d), latest %s (was %s)",
-            after[0], before[0], after[1] or "n/a", before[1] or "n/a",
+            after[0],
+            before[0],
+            after[1] or "n/a",
+            before[1] or "n/a",
         )
     else:
         logger.info(
             "The match history did not move (%d rows, latest %s) -- neither "
             "football-data nor the FBref top-up brought anything; the tables "
             "would be rebuilt identically, so they are left alone",
-            after[0], after[1] or "n/a",
+            after[0],
+            after[1] or "n/a",
         )
 
     # Re-forecast on the fresh history, and re-simulate only if it moved.
@@ -398,7 +405,9 @@ def _run(args: argparse.Namespace, started: float) -> int:
                 "than one that is a day behind, because nothing on the page says "
                 "which half is which. Rerun with `python -m pipelines.weekly "
                 "--only %s` once the cause is fixed.",
-                step.name, exc.returncode, step.name,
+                step.name,
+                exc.returncode,
+                step.name,
             )
             return 1
 

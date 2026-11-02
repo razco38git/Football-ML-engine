@@ -228,9 +228,10 @@ def main() -> int:
 
     print("\nLine composition of the shipped selection (top 15, no quota):")
     base_pick = select_squad(players, None)
-    comp = base_pick.groupby("line", observed=True).size() / base_pick.groupby(
-        KEYS, observed=True
-    ).ngroups
+    comp = (
+        base_pick.groupby("line", observed=True).size()
+        / base_pick.groupby(KEYS, observed=True).ngroups
+    )
     print(comp.round(2).to_string())
 
     results: list[dict] = []
@@ -269,16 +270,18 @@ def main() -> int:
 
         lines = picked.groupby("line", observed=True).size()
         per_club = picked.groupby(KEYS, observed=True).size()
-        results.append({
-            "arm": name,
-            "mean_squad": round(float(per_club.mean()), 2),
-            "pct_defence": round(float(lines.get("defence", 0) / len(picked)), 3),
-            "pct_attack": round(float(lines.get("attack", 0) / len(picked)), 3),
-            "rps": float(rps.mean()),
-            "accuracy": accuracy,
-            **next_season_validity(strength, outcomes),
-            "seconds": round(time.monotonic() - started),
-        })
+        results.append(
+            {
+                "arm": name,
+                "mean_squad": round(float(per_club.mean()), 2),
+                "pct_defence": round(float(lines.get("defence", 0) / len(picked)), 3),
+                "pct_attack": round(float(lines.get("attack", 0) / len(picked)), 3),
+                "rps": float(rps.mean()),
+                "accuracy": accuracy,
+                **next_season_validity(strength, outcomes),
+                "seconds": round(time.monotonic() - started),
+            }
+        )
 
     table = pd.DataFrame(results)
     base = vectors["production"]
@@ -288,8 +291,15 @@ def main() -> int:
             rows.append({"arm": name, "delta": 0.0, "lo": 0.0, "hi": 0.0, "sig": False})
             continue
         boot = paired_bootstrap(base, vectors[name])
-        rows.append({"arm": name, "delta": boot["delta"], "lo": boot["lo"],
-                     "hi": boot["hi"], "sig": boot["excludes_zero"]})
+        rows.append(
+            {
+                "arm": name,
+                "delta": boot["delta"],
+                "lo": boot["lo"],
+                "hi": boot["hi"],
+                "sig": boot["excludes_zero"],
+            }
+        )
     table = table.merge(pd.DataFrame(rows), on="arm")
 
     print("\n=== Positional quotas ===")

@@ -99,9 +99,7 @@ def test_selection_leaves_the_rating_column_untouched() -> None:
     """Only *which* players are chosen may differ between arms."""
     pool = _pool(attack=8, defence=8, midfield=4, goalkeeper=2)
     got = quota.select_squad(pool, quota.QUOTAS["full"], 15)
-    pd.testing.assert_series_equal(
-        got["rating"], pool.loc[got.index, "rating"], check_names=False
-    )
+    pd.testing.assert_series_equal(got["rating"], pool.loc[got.index, "rating"], check_names=False)
 
 
 # --- the arms and the bar -----------------------------------------------------
@@ -117,9 +115,7 @@ def test_the_quotas_are_declared_as_constants() -> None:
     """Readable in the source before any number exists."""
     for name in ("formation", "balanced", "full"):
         assert isinstance(quota.QUOTAS[name], dict)
-    assert quota.QUOTAS["formation"] == {
-        "goalkeeper": 1, "defence": 4, "midfield": 3, "attack": 3
-    }
+    assert quota.QUOTAS["formation"] == {"goalkeeper": 1, "defence": 4, "midfield": 3, "attack": 3}
 
 
 def test_no_quota_reserves_more_places_than_the_squad_has() -> None:
@@ -158,13 +154,24 @@ def test_a_season_that_cannot_move_is_not_counted() -> None:
 
 def test_the_experiment_cannot_write_anything() -> None:
     source = "\n".join(
-        line for line in inspect.getsource(quota).split("\n")
-        if not line.lstrip().startswith("#")
+        line for line in inspect.getsource(quota).split("\n") if not line.lstrip().startswith("#")
     )
     for forbidden in (
-        "to_csv", "to_pickle", "to_parquet", "to_json", "to_hdf", "shutil",
-        "os.replace", "os.remove", "os.rename", "unlink(", "write_text",
-        "write_bytes", "mkdir(", "savetxt", "np.save",
+        "to_csv",
+        "to_pickle",
+        "to_parquet",
+        "to_json",
+        "to_hdf",
+        "shutil",
+        "os.replace",
+        "os.remove",
+        "os.rename",
+        "unlink(",
+        "write_text",
+        "write_bytes",
+        "mkdir(",
+        "savetxt",
+        "np.save",
     ):
         assert forbidden not in source, f"the experiment must not call {forbidden}"
 

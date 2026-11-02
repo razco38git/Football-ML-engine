@@ -111,8 +111,9 @@ def _score(preds: pd.DataFrame) -> tuple[np.ndarray, float]:
     return rps_per_match(truth, probs), float((probs.argmax(axis=1) == actual).mean())
 
 
-def _breakdown(label: str, keys: pd.Series, base: np.ndarray, arms_: dict[str, np.ndarray],
-               minimum: int = 100) -> dict[str, int]:
+def _breakdown(
+    label: str, keys: pd.Series, base: np.ndarray, arms_: dict[str, np.ndarray], minimum: int = 100
+) -> dict[str, int]:
     """Per-season or per-league deltas, and how many did not get worse.
 
     The paired bootstrap resamples fixtures as if independent, but matches in a
@@ -136,14 +137,19 @@ def _breakdown(label: str, keys: pd.Series, base: np.ndarray, arms_: dict[str, n
         # them a free pass -- counted against a denominator that already
         # excluded it, which is how a 5-of-11 record printed as 6.
         if all(delta == 0.0 for delta in deltas.values()):
-            print(f"  {str(key):8s} {int(mask.sum()):6d}  " +
-                  "  ".join(f"{deltas[n]:+18.5f}" for n in names) + "   (cannot move)")
+            print(
+                f"  {str(key):8s} {int(mask.sum()):6d}  "
+                + "  ".join(f"{deltas[n]:+18.5f}" for n in names)
+                + "   (cannot move)"
+            )
             continue
         total += 1
         for name in names:
             ok[name] += deltas[name] <= 0
-        print(f"  {str(key):8s} {int(mask.sum()):6d}  " +
-              "  ".join(f"{deltas[n]:+18.5f}" for n in names))
+        print(
+            f"  {str(key):8s} {int(mask.sum()):6d}  "
+            + "  ".join(f"{deltas[n]:+18.5f}" for n in names)
+        )
     print(f"  neutral-or-better in, of {total} {label}s that can move:")
     for name in names:
         print(f"    {name:18s} {ok[name]}")
@@ -194,14 +200,16 @@ def main() -> int:
         if season_of is None:
             season_of = preds["Season"].reset_index(drop=True).astype(str)
             league_of = preds["League"].reset_index(drop=True).astype(str)
-        results.append({
-            "arm": name,
-            "european_ties": len(european),
-            "n": len(preds),
-            "rps": float(rps.mean()),
-            "accuracy": accuracy,
-            "seconds": round(time.monotonic() - started),
-        })
+        results.append(
+            {
+                "arm": name,
+                "european_ties": len(european),
+                "n": len(preds),
+                "rps": float(rps.mean()),
+                "accuracy": accuracy,
+                "seconds": round(time.monotonic() - started),
+            }
+        )
 
     # Every arm must have predicted the identical fixture list in identical
     # order, or the pairing is meaningless. Asserted rather than trusted, as
@@ -217,10 +225,15 @@ def main() -> int:
             rows.append({"arm": name, "delta": 0.0, "lo": 0.0, "hi": 0.0, "sig": False})
             continue
         boot = paired_bootstrap(base, vectors[name])
-        rows.append({
-            "arm": name, "delta": boot["delta"], "lo": boot["lo"],
-            "hi": boot["hi"], "sig": boot["excludes_zero"],
-        })
+        rows.append(
+            {
+                "arm": name,
+                "delta": boot["delta"],
+                "lo": boot["lo"],
+                "hi": boot["hi"],
+                "sig": boot["excludes_zero"],
+            }
+        )
     table = table.merge(pd.DataFrame(rows), on="arm")
 
     print("\n=== Extended Elo: domestic walk-forward ===")

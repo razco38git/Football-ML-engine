@@ -283,7 +283,7 @@ def similar_players(
             )
         )
 
-    matches.sort(key=lambda m: (m.combined or 0.0), reverse=True)
+    matches.sort(key=lambda m: m.combined or 0.0, reverse=True)
     return subject, matches[:limit]
 
 

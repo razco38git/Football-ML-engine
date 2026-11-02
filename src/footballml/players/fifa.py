@@ -41,8 +41,14 @@ COLUMN_CANDIDATES: dict[str, tuple[str, ...]] = {
     # form ("Kylian Mbappe Lottin") does match. `short_name` stays last as a
     # fallback for exports that carry nothing else.
     "name": (
-        "long_name", "common_name", "name", "player_name",
-        "Name", "Player", "PLAYER", "short_name",
+        "long_name",
+        "common_name",
+        "name",
+        "player_name",
+        "Name",
+        "Player",
+        "PLAYER",
+        "short_name",
     ),
     # The form a player is actually known by, where the export carries one
     # alongside the legal name. EA lists Vitinha as "Vitor Machado Ferreira"
@@ -55,7 +61,12 @@ COLUMN_CANDIDATES: dict[str, tuple[str, ...]] = {
     "overall": ("overall", "overall_rating", "Overall", "OVR", "ovr", "rating"),
     "club": ("club_name", "club", "Club", "team", "Team", "TEAM", "club_team"),
     "positions": (
-        "player_positions", "positions", "position", "Position", "POS", "best_position",
+        "player_positions",
+        "positions",
+        "position",
+        "Position",
+        "POS",
+        "best_position",
     ),
     "gender": ("gender", "Gender", "sex"),
     "league": ("league", "League", "league_name"),
@@ -85,8 +96,12 @@ COLUMN_CANDIDATES: dict[str, tuple[str, ...]] = {
 ROLE_BY_POSITION = {
     "GK": "GK",
     "CB": "CB",
-    "LCB": "CB", "RCB": "CB",
-    "LB": "FB", "RB": "FB", "LWB": "FB", "RWB": "FB",
+    "LCB": "CB",
+    "RCB": "CB",
+    "LB": "FB",
+    "RB": "FB",
+    "LWB": "FB",
+    "RWB": "FB",
     # A holder and a number eight are as different as a centre-back and a
     # full-back, and splitting those two is the precedent. Pooled, 2,028
     # CDM-primary player-seasons were ranked for chance creation against 3,081
@@ -100,10 +115,23 @@ ROLE_BY_POSITION = {
     # them toward defending and build-up made the midfield line predict next
     # season's points worse, 0.646 to 0.634, so the pool was the problem and
     # the weights were not.
-    "CDM": "DM", "LDM": "DM", "RDM": "DM",
-    "CM": "MID", "LCM": "MID", "RCM": "MID",
-    "CAM": "AMW", "LM": "AMW", "RM": "AMW", "LW": "AMW", "RW": "AMW",
-    "ST": "FWD", "CF": "FWD", "LS": "FWD", "RS": "FWD", "LF": "FWD", "RF": "FWD",
+    "CDM": "DM",
+    "LDM": "DM",
+    "RDM": "DM",
+    "CM": "MID",
+    "LCM": "MID",
+    "RCM": "MID",
+    "CAM": "AMW",
+    "LM": "AMW",
+    "RM": "AMW",
+    "LW": "AMW",
+    "RW": "AMW",
+    "ST": "FWD",
+    "CF": "FWD",
+    "LS": "FWD",
+    "RS": "FWD",
+    "LF": "FWD",
+    "RF": "FWD",
 }
 
 #: Display names for the roles.
@@ -218,10 +246,10 @@ def _build_names(df: pd.DataFrame) -> pd.Series | None:
             + " "
             + df[last_col].fillna("").astype(str).str.strip()
         ).str.strip()
-        combined = combined.replace("", pd.NA)
+        combined = combined.replace({"": pd.NA})
 
     if name_col:
-        primary = df[name_col].astype("string").str.strip().replace("", pd.NA)
+        primary = df[name_col].astype("string").str.strip().replace({"": pd.NA})
         return primary.fillna(combined) if combined is not None else primary.fillna("")
 
     return combined
@@ -286,22 +314,38 @@ def _normalise_export(df: pd.DataFrame, source: str) -> pd.DataFrame | None:
             "fifa_overall": pd.to_numeric(df[overall_col], errors="coerce"),
         }
     )
-    for field in ("club", "positions", "age", "pace", "shooting", "passing",
-                  "dribbling", "defending", "physical",
-                  "gk_diving", "gk_handling", "gk_kicking", "gk_positioning",
-                  "gk_reflexes"):
+    for field in (
+        "club",
+        "positions",
+        "age",
+        "pace",
+        "shooting",
+        "passing",
+        "dribbling",
+        "defending",
+        "physical",
+        "gk_diving",
+        "gk_handling",
+        "gk_kicking",
+        "gk_positioning",
+        "gk_reflexes",
+    ):
         column = _find_column(df, field)
         if column is not None:
             values = df[column]
             out[f"fifa_{field}"] = (
-                values.astype(str) if field in {"club", "positions"}
+                values.astype(str)
+                if field in {"club", "positions"}
                 else pd.to_numeric(values, errors="coerce")
             )
 
     alt_col = _find_column(df, "alt_name")
     if alt_col is not None:
-        alt = df[alt_col].astype("string").str.strip().map(
-            lambda v: _strip_foreign_script(v) if isinstance(v, str) else v
+        alt = (
+            df[alt_col]
+            .astype("string")
+            .str.strip()
+            .map(lambda v: _strip_foreign_script(v) if isinstance(v, str) else v)
         )
         # Only worth carrying when it differs from the legal name.
         out["fifa_alt_name"] = alt.where(alt.fillna("") != out["fifa_name"])
@@ -349,8 +393,10 @@ def load_fifa(directory: Path | None = None) -> pd.DataFrame:
             out = pd.concat(frames, ignore_index=True)
             logger.info(
                 "Loaded %d FIFA player-seasons across %d editions (%s..%s)",
-                len(out), len(frames),
-                out["Season"].min(), out["Season"].max(),
+                len(out),
+                len(frames),
+                out["Season"].min(),
+                out["Season"].max(),
             )
             return out
 
@@ -367,7 +413,8 @@ def load_fifa(directory: Path | None = None) -> pd.DataFrame:
             continue
         logger.warning(
             "Using %s for every season -- no per-season files found, so ratings "
-            "will not reflect the season they are applied to", path.name,
+            "will not reflect the season they are applied to",
+            path.name,
         )
         return normalised
 
@@ -415,9 +462,7 @@ def _club_names(merged: pd.DataFrame) -> dict[str, str]:
     return names
 
 
-def _match_loosely(
-    merged: pd.DataFrame, fifa: pd.DataFrame, columns: list[str]
-) -> pd.DataFrame:
+def _match_loosely(merged: pd.DataFrame, fifa: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
     """Second pass for names the two sources spell differently.
 
     Four kinds of mismatch remain after exact comparison, each handled by its
@@ -488,12 +533,13 @@ def _match_loosely(
     # "Fabian Ruiz" both end in "ruiz" -- which reads as two candidates and
     # defeats the uniqueness guards the tiers below rely on.
     seen: dict[str, dict[str, set[object]]] = {
-        "strong": {}, "leading": {}, "surnames": {}, "initials": {},
+        "strong": {},
+        "leading": {},
+        "surnames": {},
+        "initials": {},
     }
 
-    def add(
-        bucket: dict[str, list[pd.Series]], which: str, key: str, row: pd.Series
-    ) -> None:
+    def add(bucket: dict[str, list[pd.Series]], which: str, key: str, row: pd.Series) -> None:
         marked = seen[which].setdefault(key, set())
         if row.name in marked:
             return
@@ -604,9 +650,7 @@ def _match_loosely(
             # legal and familiar name ("Fabian Ruiz Pena" and "Fabian Ruiz")
             # contains the query twice and would otherwise look ambiguous.
             wanted = frozenset(parts)
-            by_row = {
-                row.name: row for tokens, row in token_sets if wanted <= tokens
-            }
+            by_row = {row.name: row for tokens, row in token_sets if wanted <= tokens}
             candidates = possible(list(by_row.values()))
             if len(candidates) == 1:
                 hit = candidates[0]
@@ -637,9 +681,7 @@ def _match_loosely(
             # surname tier, which has the guards for them.
             ours = frozenset(parts)
             by_row = {
-                row.name: row
-                for tokens, row in token_sets
-                if len(tokens) > 1 and tokens <= ours
+                row.name: row for tokens, row in token_sets if len(tokens) > 1 and tokens <= ours
             }
             candidates = possible(list(by_row.values()))
             if len(candidates) == 1:
@@ -698,9 +740,7 @@ def _match_loosely(
                 # Lottin" against "Kylian Mbappe-Lottin" all introduce a given
                 # name of their own and are refused.
                 contained = _tokens_of(candidates[0]) <= set(parts)
-                confirmed = (
-                    bool(named) or contained or at_club(candidates, team) is not None
-                )
+                confirmed = bool(named) or contained or at_club(candidates, team) is not None
                 hit = candidates[0] if confirmed else None
             elif candidates:
                 hit = at_club(named, team) if named else None
@@ -730,10 +770,8 @@ def _match_loosely(
             # the 2024/25 edition; exactly one of them plays for Paris SG.
             # Without that, a bare "Pablo" or "Rafa" would collapse onto
             # whichever namesake sorted first.
-            ours = parts[0]
-            candidates = possible(
-                [row for tokens, row in token_sets if ours in tokens]
-            )
+            sole_token = parts[0]
+            candidates = possible([row for tokens, row in token_sets if sole_token in tokens])
             hit = at_club(candidates, team)
 
         if hit is not None:
@@ -846,11 +884,7 @@ def _match_across_editions(
         if not positions:
             continue
 
-        club = (
-            by_season.get(season, pooled).get(str(merged.at[idx, "Team"]))
-            if has_team
-            else None
-        )
+        club = by_season.get(season, pooled).get(str(merged.at[idx, "Team"])) if has_team else None
         if club is None:
             continue
         here = [
@@ -864,9 +898,10 @@ def _match_across_editions(
         # The same check the tiers apply. This tier fires on a name EA used in
         # a *different* edition, which is the weakest evidence in the module,
         # so it must not be the one route that skips it.
-        if contradicts_position(merged.at[idx, "position_group"]
-                                if "position_group" in merged.columns else None,
-                                hit.get("role")):
+        if contradicts_position(
+            merged.at[idx, "position_group"] if "position_group" in merged.columns else None,
+            hit.get("role"),
+        ):
             continue
 
         for column in columns:
@@ -940,7 +975,8 @@ def _match_by_token_set(
     if filled:
         logger.info(
             "  %s: %d matched on the same name tokens in a different order",
-            season, filled,
+            season,
+            filled,
         )
     return piece
 
@@ -968,7 +1004,8 @@ def _attach_per_season(
             # Better an unrated season than one rated from the wrong year.
             logger.warning(
                 "No FIFA export for season %s; %d players keep performance only",
-                season, len(group),
+                season,
+                len(group),
             )
             piece = group.copy()
             for column in columns:
@@ -996,7 +1033,9 @@ def _attach_per_season(
                 piece.loc[wrong, columns] = pd.NA
                 logger.info(
                     "  %s: %d exact name match(es) cleared, the EA entry plays "
-                    "a position the player cannot", season, sum(wrong),
+                    "a position the player cannot",
+                    season,
+                    sum(wrong),
                 )
         # Before the loose tiers, not after: an identical set of name tokens
         # beats every heuristic below it, and running it later let a weaker
@@ -1020,15 +1059,15 @@ def _attach_per_season(
             piece = _match_loosely(piece, edition, columns)
         logger.info(
             "  %s: %.0f%% of %d player-seasons matched",
-            season, piece["fifa_overall"].notna().mean() * 100, len(piece),
+            season,
+            piece["fifa_overall"].notna().mean() * 100,
+            len(piece),
         )
         pieces.append(piece)
 
     # Only now, with every season matched, is there a body of confirmed names
     # to carry into the editions that spell a player differently.
-    return _match_across_editions(
-        pd.concat(pieces, ignore_index=True), fifa, columns
-    )
+    return _match_across_editions(pd.concat(pieces, ignore_index=True), fifa, columns)
 
 
 def attach_fifa(players: pd.DataFrame, fifa: pd.DataFrame) -> pd.DataFrame:
@@ -1058,7 +1097,8 @@ def attach_fifa(players: pd.DataFrame, fifa: pd.DataFrame) -> pd.DataFrame:
 
     logger.info(
         "FIFA match rate: %.0f%% of %d player-seasons",
-        merged["fifa_overall"].notna().mean() * 100, len(merged),
+        merged["fifa_overall"].notna().mean() * 100,
+        len(merged),
     )
 
     # Players with no EA entry keep a coarse role from Understat, so they are
@@ -1226,9 +1266,11 @@ def _settle_reordered_roles(merged: pd.DataFrame) -> pd.DataFrame:
     positions = merged["fifa_positions"]
     # The set, not the string: "CM, CDM" and "CDM, CM" must land on one key.
     key = positions.map(
-        lambda v: frozenset(t.strip().upper() for t in str(v).split(",") if t.strip())
-        if isinstance(v, str) and v.strip()
-        else None
+        lambda v: (
+            frozenset(t.strip().upper() for t in str(v).split(",") if t.strip())
+            if isinstance(v, str) and v.strip()
+            else None
+        )
     )
     known = key.notna() & merged["role"].notna()
     if not known.any():
@@ -1256,7 +1298,7 @@ def _settle_reordered_roles(merged: pd.DataFrame) -> pd.DataFrame:
 
     chosen = (
         work.groupby(["Player", "_key"], sort=False)[["Season", "role"]]
-        .apply(_settle, include_groups=False)
+        .apply(_settle)
         .rename("settled")
     )
     settled = work.join(chosen, on=["Player", "_key"])["settled"]

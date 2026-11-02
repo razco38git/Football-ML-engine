@@ -95,10 +95,19 @@ def test_the_correlations_point_the_way_round_football_does() -> None:
     for i in range(60):
         # Strong clubs score more, concede less, and take more points.
         quality = i / 60
-        strength.append(("E0", "2425", f"T{i}", 60 + 30 * quality, 60 + 30 * quality,
-                         60 + 30 * quality))
-        outcomes.append(("E0", "2526", f"T{i}", 1.0 + 2.0 * quality, 2.0 - 1.5 * quality,
-                         int(30 + 50 * quality)))
+        strength.append(
+            ("E0", "2425", f"T{i}", 60 + 30 * quality, 60 + 30 * quality, 60 + 30 * quality)
+        )
+        outcomes.append(
+            (
+                "E0",
+                "2526",
+                f"T{i}",
+                1.0 + 2.0 * quality,
+                2.0 - 1.5 * quality,
+                int(30 + 50 * quality),
+            )
+        )
 
     got = sweep.next_season_validity(_strength(strength), _outcomes(outcomes))
     assert got["atk_vs_gf"] > 0.9
@@ -115,15 +124,32 @@ def test_validity_looks_at_the_following_season_not_this_one() -> None:
     strength, outcomes = [], []
     for i in range(60):
         quality = i / 60
-        strength.append(("E0", "2425", f"T{i}", 60 + 30 * quality, 60 + 30 * quality,
-                         60 + 30 * quality))
+        strength.append(
+            ("E0", "2425", f"T{i}", 60 + 30 * quality, 60 + 30 * quality, 60 + 30 * quality)
+        )
         # Next season agrees with the rating.
-        outcomes.append(("E0", "2526", f"T{i}", 1.0 + 2.0 * quality, 2.0 - 1.5 * quality,
-                         int(30 + 50 * quality)))
+        outcomes.append(
+            (
+                "E0",
+                "2526",
+                f"T{i}",
+                1.0 + 2.0 * quality,
+                2.0 - 1.5 * quality,
+                int(30 + 50 * quality),
+            )
+        )
         # The *same* season is deliberately inverted: a function reading these
         # would come back with the opposite sign.
-        outcomes.append(("E0", "2425", f"T{i}", 3.0 - 2.0 * quality, 0.5 + 1.5 * quality,
-                         int(80 - 50 * quality)))
+        outcomes.append(
+            (
+                "E0",
+                "2425",
+                f"T{i}",
+                3.0 - 2.0 * quality,
+                0.5 + 1.5 * quality,
+                int(80 - 50 * quality),
+            )
+        )
 
     got = sweep.next_season_validity(_strength(strength), _outcomes(outcomes))
     assert got["atk_vs_gf"] > 0.9, "it read the same season, not the next one"
@@ -141,17 +167,20 @@ def test_too_few_club_seasons_returns_nan_rather_than_a_number() -> None:
 def test_a_missing_strength_column_is_reported_as_absent() -> None:
     """Rather than raising and losing the arms that did compute."""
     strength = _strength([("E0", "2425", f"T{i}", 70.0, 70.0, 70.0) for i in range(60)])
-    got = sweep.next_season_validity(strength.drop(columns=["strength_attack"]),
-                                     _outcomes([("E0", "2526", f"T{i}", 1.5, 1.5, 50)
-                                                for i in range(60)]))
+    got = sweep.next_season_validity(
+        strength.drop(columns=["strength_attack"]),
+        _outcomes([("E0", "2526", f"T{i}", 1.5, 1.5, 50) for i in range(60)]),
+    )
     assert np.isnan(got["atk_vs_gf"])
 
 
 def test_points_are_derived_from_goals_not_from_the_result_column() -> None:
     """So the figure does not depend on how `Result` happens to be encoded."""
     history = pd.DataFrame(
-        [{"League": "E0", "Season": "2425", "Team": "A", "GoalsFor": g, "GoalsAgainst": a}
-         for g, a in [(2, 1)] * 10 + [(1, 1)] * 10 + [(0, 3)] * 10]
+        [
+            {"League": "E0", "Season": "2425", "Team": "A", "GoalsFor": g, "GoalsAgainst": a}
+            for g, a in [(2, 1)] * 10 + [(1, 1)] * 10 + [(0, 3)] * 10
+        ]
     )
     out = sweep._season_outcomes(history)
     assert len(out) == 1
@@ -181,14 +210,25 @@ def test_the_sweep_cannot_write_anything() -> None:
     serving them. The guarantee has to be that there is no write to interrupt.
     """
     source = "\n".join(
-        line
-        for line in inspect.getsource(sweep).split("\n")
-        if not line.lstrip().startswith("#")
+        line for line in inspect.getsource(sweep).split("\n") if not line.lstrip().startswith("#")
     )
     for forbidden in (
-        "to_csv", "to_pickle", "to_parquet", "to_feather", "to_json", "to_hdf",
-        "shutil", "os.replace", "os.remove", "os.rename", "unlink(", "write_text",
-        "write_bytes", "mkdir(", "savetxt", "np.save",
+        "to_csv",
+        "to_pickle",
+        "to_parquet",
+        "to_feather",
+        "to_json",
+        "to_hdf",
+        "shutil",
+        "os.replace",
+        "os.remove",
+        "os.rename",
+        "unlink(",
+        "write_text",
+        "write_bytes",
+        "mkdir(",
+        "savetxt",
+        "np.save",
     ):
         assert forbidden not in source, f"the sweep must not call {forbidden}"
     for line in source.splitlines():
@@ -222,7 +262,7 @@ def test_the_sweep_holds_strength_in_memory_rather_than_on_disk() -> None:
     """`build_match_features` takes the frame, which is why no write is needed."""
     source = inspect.getsource(sweep)
     assert "build_match_features(tmh, strength=strength" in source
-    assert "team_strength(rated, method=\"best_n\", best_n=size)" in source
+    assert 'team_strength(rated, method="best_n", best_n=size)' in source
 
 
 def test_players_are_rated_once_for_every_arm() -> None:

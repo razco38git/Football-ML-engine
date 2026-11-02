@@ -133,15 +133,11 @@ def _history(players: pd.DataFrame) -> dict[str, list[tuple[str, float, float]]]
             "minutes": pd.to_numeric(rated["minutes"], errors="coerce").fillna(0.0),
         }
     )
-    frame = frame.sort_values("minutes", ascending=False).drop_duplicates(
-        ["_norm", "Season"]
-    )
+    frame = frame.sort_values("minutes", ascending=False).drop_duplicates(["_norm", "Season"])
 
     out: dict[str, list[tuple[str, float, float]]] = {}
     for key, block in frame.sort_values("Season").groupby("_norm", observed=True):
-        out[str(key)] = list(
-            zip(block["Season"], block["rating"], block["minutes"], strict=True)
-        )
+        out[str(key)] = list(zip(block["Season"], block["rating"], block["minutes"], strict=True))
     return out
 
 
@@ -186,8 +182,8 @@ def _curves(players: pd.DataFrame) -> dict[tuple[str, str], tuple[np.ndarray, np
     for keys, block in frame.groupby(["role", "Season"], observed=True):
         role, season = (str(k) for k in keys)
         curves[(role, season)] = _curve(block)
-    for season, block in frame.groupby("Season", observed=True):
-        curves[("", str(season))] = _curve(block)
+    for any_role_season, block in frame.groupby("Season", observed=True):
+        curves[("", str(any_role_season))] = _curve(block)
     return curves
 
 
@@ -214,9 +210,7 @@ def _on_our_scale(
         if curve is None:
             continue
         xs, ys = curve
-        out.loc[block.index] = np.interp(
-            overall.loc[block.index].to_numpy(dtype="float64"), xs, ys
-        )
+        out.loc[block.index] = np.interp(overall.loc[block.index].to_numpy(dtype="float64"), xs, ys)
     return out
 
 
@@ -249,11 +243,18 @@ def rosters(
 
     # A club's league in a season, from our own data: the roster comes from EA,
     # which carries no league column at all, and `team_strength` keys on it.
-    leagues = (
+    # Flattened to rows rather than read off the grouped Series: a MultiIndex
+    # key is one `Hashable` as far as the stubs are concerned, and `.to_dict()`
+    # on it answers `dict[Hashable, Any]` -- not a key shape `_rate_squad` can
+    # be held to.
+    by_club = (
         frame.groupby(["Season", "Team"], observed=True)["League"]
         .agg(lambda s: s.value_counts().index[0])
-        .to_dict()
+        .reset_index()
     )
+    leagues: dict[tuple[str, str], str] = {
+        (str(row.Season), str(row.Team)): str(row.League) for row in by_club.itertuples()
+    }
 
     blocks: list[pd.DataFrame] = []
     for season, group in _by_season(resolutions):
@@ -271,6 +272,8 @@ def rosters(
         }
 
         for resolution in group:
+            if resolution.label is None:
+                continue  # Unresolved: no label to look a roster up by.
             raw = by_label.get(resolution.label)
             if raw is None or raw.empty:
                 continue
@@ -280,11 +283,7 @@ def rosters(
             squad = _normalise_export(raw, f"fifa_{season}.csv {resolution.label}")
             if squad is None or squad.empty:
                 continue
-            blocks.append(
-                _rate_squad(
-                    squad, resolution, leagues, history, curves, include_current
-                )
-            )
+            blocks.append(_rate_squad(squad, resolution, leagues, history, curves, include_current))
 
     if not blocks:
         logger.warning("No EA rosters built; every club-season was unresolved")
@@ -340,8 +339,7 @@ def _rate_squad(
     )
 
     prior = [
-        _latest_before(history.get(key, []), season, include_current)
-        for key in squad["_norm"]
+        _latest_before(history.get(key, []), season, include_current) for key in squad["_norm"]
     ]
     out["rating"] = [p[0] if p else np.nan for p in prior]
     out["minutes"] = [p[1] if p else np.nan for p in prior]
@@ -421,9 +419,7 @@ def squad_strength(
     out = strength.merge(provenance, on=["League", "Season", "Team"], how="left")
     out = out.rename(
         columns={
-            c: c.replace("strength_", "squad_")
-            for c in out.columns
-            if c.startswith("strength_")
+            c: c.replace("strength_", "squad_") for c in out.columns if c.startswith("strength_")
         }
     )
     out["n_from_history"] = out["n_from_history"].astype("Int64")
@@ -439,9 +435,7 @@ def _selected(roster: pd.DataFrame, best_n: int) -> pd.DataFrame:
     usable = usable.dropna(subset=["line"])
     by = [c for c in _BEST_N_ORDER if c in usable.columns]
     return (
-        usable.sort_values(
-            by, ascending=[_BEST_N_ORDER[c] for c in by], kind="stable"
-        )
+        usable.sort_values(by, ascending=[_BEST_N_ORDER[c] for c in by], kind="stable")
         .groupby(["League", "Season", "Team"], observed=True)
         .head(best_n)
     )

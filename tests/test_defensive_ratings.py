@@ -28,6 +28,7 @@ from pipelines import defending_sweep as sweep
 
 # --- one name contains the other ----------------------------------------------
 
+
 def test_a_single_word_name_matches_the_longer_spelling() -> None:
     """Understat prints "Gabriel"; FBref prints "Gabriel Magalhães"."""
     assert _is_same_name(_tokens("Gabriel"), _tokens("Gabriel Magalhães"))
@@ -71,19 +72,28 @@ def test_an_empty_name_matches_nothing() -> None:
 
 # --- and only when one candidate is left --------------------------------------
 
+
 def _understat(names: list[str]) -> pd.DataFrame:
-    return pd.DataFrame({
-        "League": ["E0"] * len(names), "Season": ["2526"] * len(names),
-        "Team": ["Arsenal"] * len(names), "Player": names,
-    })
+    return pd.DataFrame(
+        {
+            "League": ["E0"] * len(names),
+            "Season": ["2526"] * len(names),
+            "Team": ["Arsenal"] * len(names),
+            "Player": names,
+        }
+    )
 
 
 def _fbref(names: list[str], tackles: list[float]) -> pd.DataFrame:
-    return pd.DataFrame({
-        "League": ["E0"] * len(names), "Season": ["2526"] * len(names),
-        "Team": ["Arsenal"] * len(names), "Player": names,
-        "tackles_won_per90": tackles,
-    })
+    return pd.DataFrame(
+        {
+            "League": ["E0"] * len(names),
+            "Season": ["2526"] * len(names),
+            "Team": ["Arsenal"] * len(names),
+            "Player": names,
+            "tackles_won_per90": tackles,
+        }
+    )
 
 
 def test_an_exact_match_takes_its_player_out_of_contention() -> None:
@@ -120,6 +130,7 @@ def test_the_ordinary_exact_match_still_works() -> None:
 
 # --- a player missing the evidence is not given the midpoint ------------------
 
+
 def _percentiles(rows: list[dict]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
@@ -131,11 +142,13 @@ def test_a_player_missing_every_metric_comes_back_blank() -> None:
     average, which is how 30 centre-backs were scored on nothing at all.
     """
     weights = {"a": 3.0, "b": 2.5}
-    frame = _percentiles([
-        {"a": 0.9, "b": 0.8},
-        {"a": np.nan, "b": np.nan},
-        {"a": 0.2, "b": 0.3},
-    ])
+    frame = _percentiles(
+        [
+            {"a": 0.9, "b": 0.8},
+            {"a": np.nan, "b": np.nan},
+            {"a": 0.2, "b": 0.3},
+        ]
+    )
     out = _weighted(frame, weights)
     assert pd.isna(out.iloc[1])
     assert not pd.isna(out.iloc[0])
@@ -188,14 +201,18 @@ def test_the_refusal_threshold_is_the_one_already_configured() -> None:
 # rated on all along, at 97% of his composite, while the defenders in front of
 # him are rated on it at 0%.
 
+
 def _history(rows: list[tuple[str, str, str, list[int]]]) -> pd.DataFrame:
     """League, season, team and the goals conceded in each match."""
     out = []
     for league, season, team, conceded in rows:
         out.extend(
             {
-                "League": league, "Season": season, "Team": team,
-                "GoalsAgainst": ga, "xGAgainst": float(ga) + 0.1,
+                "League": league,
+                "Season": season,
+                "Team": team,
+                "GoalsAgainst": ga,
+                "xGAgainst": float(ga) + 0.1,
             }
             for ga in conceded
         )
@@ -210,9 +227,7 @@ def _players(rows: list[tuple[str, str, str, str]]) -> pd.DataFrame:
 
 def test_the_club_record_reaches_its_defenders() -> None:
     history = _history([("E0", "2526", "Arsenal", [0, 0, 1, 2])])
-    out = ingest.add_team_defence(
-        _players([("E0", "2526", "Arsenal", "William Saliba")]), history
-    )
+    out = ingest.add_team_defence(_players([("E0", "2526", "Arsenal", "William Saliba")]), history)
     row = out.iloc[0]
     assert row["team_ga_per_match"] == pytest.approx(0.75)
     assert row["team_clean_sheet_pct"] == pytest.approx(0.5)
@@ -225,15 +240,19 @@ def test_it_separates_a_good_defence_from_a_bad_one() -> None:
     Arsenal conceded 0.71 a game in 2025/26 and Werder Bremen 1.76, and their
     centre-backs rated 53.5 and 60.6 -- the wrong way round.
     """
-    history = _history([
-        ("E0", "2526", "Arsenal", [0, 0, 1, 1]),
-        ("D1", "2526", "Werder Bremen", [2, 2, 3, 1]),
-    ])
+    history = _history(
+        [
+            ("E0", "2526", "Arsenal", [0, 0, 1, 1]),
+            ("D1", "2526", "Werder Bremen", [2, 2, 3, 1]),
+        ]
+    )
     out = ingest.add_team_defence(
-        _players([
-            ("E0", "2526", "Arsenal", "William Saliba"),
-            ("D1", "2526", "Werder Bremen", "Karim Coulibaly"),
-        ]),
+        _players(
+            [
+                ("E0", "2526", "Arsenal", "William Saliba"),
+                ("D1", "2526", "Werder Bremen", "Karim Coulibaly"),
+            ]
+        ),
         history,
     )
     arsenal, bremen = out.iloc[0], out.iloc[1]
@@ -249,10 +268,12 @@ def test_every_defender_at_a_club_gets_the_same_number() -> None:
     """
     history = _history([("E0", "2526", "Arsenal", [0, 1])])
     out = ingest.add_team_defence(
-        _players([
-            ("E0", "2526", "Arsenal", "William Saliba"),
-            ("E0", "2526", "Arsenal", "Gabriel"),
-        ]),
+        _players(
+            [
+                ("E0", "2526", "Arsenal", "William Saliba"),
+                ("E0", "2526", "Arsenal", "Gabriel"),
+            ]
+        ),
         history,
     )
     teammates = out["team_ga_per_match"]
@@ -292,21 +313,26 @@ def test_xg_is_optional_so_pre_2014_seasons_still_work() -> None:
 
 def test_a_player_moving_club_gets_each_club_s_record() -> None:
     """One row per player per team per season, so the join must be per row."""
-    history = _history([
-        ("E0", "2526", "Arsenal", [0, 0]),
-        ("E0", "2526", "Burnley", [3, 3]),
-    ])
+    history = _history(
+        [
+            ("E0", "2526", "Arsenal", [0, 0]),
+            ("E0", "2526", "Burnley", [3, 3]),
+        ]
+    )
     out = ingest.add_team_defence(
-        _players([
-            ("E0", "2526", "Arsenal", "Journeyman"),
-            ("E0", "2526", "Burnley", "Journeyman"),
-        ]),
+        _players(
+            [
+                ("E0", "2526", "Arsenal", "Journeyman"),
+                ("E0", "2526", "Burnley", "Journeyman"),
+            ]
+        ),
         history,
     )
     assert sorted(out["team_ga_per_match"]) == [0.0, 3.0]
 
 
 # --- the definition is inert until it is weighted -----------------------------
+
 
 def test_a_zero_weighted_sub_rating_changes_nothing() -> None:
     """`team_defence` ships at 0.0 so the config can hold it without publishing it.
@@ -337,18 +363,20 @@ def test_the_shipped_config_is_what_the_sweep_chose() -> None:
     weight would leave a full back rated 8% on ball-winning.
     """
     config = load_config()
-    cb = config['positions']['CB']['sub_rating_weights']
-    assert cb['team_defence'] == pytest.approx(0.30)
-    assert cb['defending'] == pytest.approx(0.32)
-    fb = config['positions']['FB']['sub_rating_weights']
-    assert fb['team_defence'] == 0.0
-    assert fb['defending'] == pytest.approx(0.38), 'full backs keep production weights'
-    for role in ('CB', 'FB'):
-        weights = config['positions'][role]['sub_rating_weights']
+    cb = config["positions"]["CB"]["sub_rating_weights"]
+    assert cb["team_defence"] == pytest.approx(0.30)
+    assert cb["defending"] == pytest.approx(0.32)
+    fb = config["positions"]["FB"]["sub_rating_weights"]
+    assert fb["team_defence"] == 0.0
+    assert fb["defending"] == pytest.approx(0.38), "full backs keep production weights"
+    for role in ("CB", "FB"):
+        weights = config["positions"][role]["sub_rating_weights"]
         assert sum(weights.values()) == pytest.approx(1.0), role
         # The definition is present for both, whatever it is weighted at.
-        assert set(config['positions'][role]['sub_ratings']['team_defence']) == {
-            'team_xga_per_match', 'team_ga_per_match', 'team_clean_sheet_pct',
+        assert set(config["positions"][role]["sub_ratings"]["team_defence"]) == {
+            "team_xga_per_match",
+            "team_ga_per_match",
+            "team_clean_sheet_pct",
         }
 
 
@@ -377,6 +405,7 @@ def test_conceding_counts_against_a_defender() -> None:
 
 
 # --- the sweep itself ---------------------------------------------------------
+
 
 def test_every_variant_still_sums_to_one() -> None:
     """A composite whose weights do not sum to 1 is not on the same scale."""
@@ -459,18 +488,24 @@ def test_the_defence_correlation_looks_at_the_following_season() -> None:
     season's goals conceded would be marking its own homework. The model only
     ever reads strength joined from the previous season anyway.
     """
-    strength = pd.DataFrame({
-        "League": ["E0", "E0"], "Season": ["2425", "2425"],
-        "Team": ["Arsenal", "Burnley"], "strength_defence": [85.0, 60.0],
-    })
-    history = _history([
-        ("E0", "2526", "Arsenal", [0] * 20),
-        ("E0", "2526", "Burnley", [3] * 20),
-        # The same-season rows are deliberately the wrong way round: if the
-        # function looked at these, the correlation would come back positive.
-        ("E0", "2425", "Arsenal", [3] * 20),
-        ("E0", "2425", "Burnley", [0] * 20),
-    ])
+    strength = pd.DataFrame(
+        {
+            "League": ["E0", "E0"],
+            "Season": ["2425", "2425"],
+            "Team": ["Arsenal", "Burnley"],
+            "strength_defence": [85.0, 60.0],
+        }
+    )
+    history = _history(
+        [
+            ("E0", "2526", "Arsenal", [0] * 20),
+            ("E0", "2526", "Burnley", [3] * 20),
+            # The same-season rows are deliberately the wrong way round: if the
+            # function looked at these, the correlation would come back positive.
+            ("E0", "2425", "Arsenal", [3] * 20),
+            ("E0", "2425", "Burnley", [0] * 20),
+        ]
+    )
     assert sweep.next_season_defence(strength, history, min_rows=2) < 0
 
 
@@ -491,8 +526,7 @@ def test_the_sweep_never_writes_the_shipped_strength_file() -> None:
     # Checked against the code rather than the prose: the module comment names
     # the file deliberately, to say it does not write it.
     source = "\n".join(
-        line for line in inspect.getsource(sweep).split("\n")
-        if not line.lstrip().startswith("#")
+        line for line in inspect.getsource(sweep).split("\n") if not line.lstrip().startswith("#")
     )
     assert "to_csv" not in source, "the sweep must not write any frame to disk"
     assert "shutil" not in source, "nothing to copy if nothing is overwritten"
@@ -502,9 +536,20 @@ def test_the_sweep_never_writes_the_shipped_strength_file() -> None:
     # killed, which is exactly how the corruption happened, so the guarantee
     # has to be that there is no write to interrupt.
     for forbidden in (
-        "to_pickle", "to_parquet", "to_feather", "to_json", "to_hdf",
-        "os.replace", "os.remove", "os.rename", "unlink(", "write_text",
-        "write_bytes", "mkdir(", "savetxt", "np.save",
+        "to_pickle",
+        "to_parquet",
+        "to_feather",
+        "to_json",
+        "to_hdf",
+        "os.replace",
+        "os.remove",
+        "os.rename",
+        "unlink(",
+        "write_text",
+        "write_bytes",
+        "mkdir(",
+        "savetxt",
+        "np.save",
     ):
         assert forbidden not in source, f"the sweep must not call {forbidden}"
     # `open` only ever for reading, if at all.
@@ -527,6 +572,7 @@ def test_the_sweep_never_imports_a_module_that_writes_production() -> None:
 
 
 # --- the artifacts the winner gets written to ---------------------------------
+
 
 def test_the_ratings_artifacts_are_written_atomically() -> None:
     """A kill part-way through a write must not leave a readable, wrong file.
@@ -564,6 +610,7 @@ def test_the_atomic_write_replaces_rather_than_appends(tmp_path: Path) -> None:
 
 # --- a zero weight has to mean zero everywhere --------------------------------
 
+
 def test_a_zero_weighted_sub_rating_stays_out_of_the_peak() -> None:
     """`peak_weight` blends in a player's best sub-rating, and it used to take
     the max over *every* defined sub-rating -- including ones weighted zero.
@@ -581,15 +628,17 @@ def test_a_zero_weighted_sub_rating_stays_out_of_the_peak() -> None:
     weights = config["positions"]["FB"]["sub_rating_weights"]
     assert weights["team_defence"] == 0.0, "the fixture depends on this shipping at zero"
 
-    frame = pd.DataFrame({
-        "role": ["FB", "FB"],
-        "Season": ["2526", "2526"],
-        "sub_defending": [0.5, 0.5],
-        "sub_creation": [0.5, 0.5],
-        "sub_involvement": [0.5, 0.5],
-        "sub_finishing": [0.5, 0.5],
-        "sub_team_defence": [0.02, 0.98],
-    })
+    frame = pd.DataFrame(
+        {
+            "role": ["FB", "FB"],
+            "Season": ["2526", "2526"],
+            "sub_defending": [0.5, 0.5],
+            "sub_creation": [0.5, 0.5],
+            "sub_involvement": [0.5, 0.5],
+            "sub_finishing": [0.5, 0.5],
+            "sub_team_defence": [0.02, 0.98],
+        }
+    )
     peak = rating._peak_over_rated_sub_ratings(frame, config)
     assert peak.iloc[0] == pytest.approx(peak.iloc[1]), (
         "the club's clean sheets changed a full back's peak"
@@ -640,9 +689,7 @@ def test_the_peak_is_the_best_of_what_the_role_is_rated_on() -> None:
         for standout in rated_on:
             row = {f"sub_{name}": 0.3 for name in rated_on}
             row[f"sub_{standout}"] = 0.9
-            row |= {
-                f"sub_{n}": 0.0 for n, w in spec["sub_rating_weights"].items() if w == 0
-            }
+            row |= {f"sub_{n}": 0.0 for n, w in spec["sub_rating_weights"].items() if w == 0}
             frame = pd.DataFrame([row | {"role": role, "Season": "2526"}])
             peak = rating._peak_over_rated_sub_ratings(frame, config)
             assert peak.iloc[0] == pytest.approx(0.9), f"{role}/{standout}"
@@ -651,10 +698,12 @@ def test_the_peak_is_the_best_of_what_the_role_is_rated_on() -> None:
 def test_a_role_the_config_does_not_know_gets_no_peak() -> None:
     """Rather than a peak taken over columns that mean nothing for it."""
     config = copy.deepcopy(load_config())
-    frame = pd.DataFrame([
-        {"role": "SWEEPER", "Season": "2526", "sub_defending": 0.9},
-        {"role": "CB", "Season": "2526", "sub_defending": 0.9},
-    ])
+    frame = pd.DataFrame(
+        [
+            {"role": "SWEEPER", "Season": "2526", "sub_defending": 0.9},
+            {"role": "CB", "Season": "2526", "sub_defending": 0.9},
+        ]
+    )
     peak = rating._peak_over_rated_sub_ratings(frame, config)
     assert pd.isna(peak.iloc[0])
     assert peak.iloc[1] == pytest.approx(0.9)

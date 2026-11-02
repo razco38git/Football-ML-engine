@@ -32,7 +32,10 @@ def tmh() -> pd.DataFrame:
     The multi-league file, not the default: the legacy EPL-only one has no
     `League` column, which `build_upcoming_features` needs.
     """
-    df = load_team_match_history(PROCESSED_DIR / "team_match_history_all.csv")
+    path = PROCESSED_DIR / "team_match_history_all.csv"
+    if not path.exists():
+        pytest.skip("team_match_history_all.csv not built; run `pipelines.build_dataset`")
+    df = load_team_match_history(path)
     return df[df["Season"].astype(str).isin(["2324", "2425"])].copy()
 
 
@@ -107,9 +110,7 @@ def test_scoring_a_match_as_a_fixture_matches_scoring_it_as_history(
     assert not mismatched, f"fixture path differs on {len(mismatched)}: {mismatched[:10]}"
 
 
-def test_no_feature_sees_the_match_date_or_later(
-    tmh: pd.DataFrame, target: pd.Series
-) -> None:
+def test_no_feature_sees_the_match_date_or_later(tmh: pd.DataFrame, target: pd.Series) -> None:
     """The leak test.
 
     Truncating the history at the match date must leave the fixture's features
@@ -120,9 +121,7 @@ def test_no_feature_sees_the_match_date_or_later(
     fixtures = _fixture_frame(target)
 
     full = build_upcoming_features(history, fixtures)
-    truncated = build_upcoming_features(
-        history[history["Date"] < target["Date"]].copy(), fixtures
-    )
+    truncated = build_upcoming_features(history[history["Date"] < target["Date"]].copy(), fixtures)
     assert len(full) == len(truncated) == 1
 
     for column in _shared_feature_columns(full, truncated):
@@ -159,9 +158,11 @@ def test_a_cross_league_fixture_gets_strength_for_both_sides(tmh: pd.DataFrame) 
     fixtures = pd.DataFrame(
         [
             {
-                "League": "E0", "Season": "2425",
+                "League": "E0",
+                "Season": "2425",
                 "Date": pd.Timestamp("2025-02-19"),
-                "HomeTeam": home, "AwayTeam": away,
+                "HomeTeam": home,
+                "AwayTeam": away,
             }
         ]
     )

@@ -107,9 +107,7 @@ def test_the_projected_columns_are_the_configs_team_defence_inputs() -> None:
     """Asserted against the config so widening one silently fails here."""
     import yaml
 
-    config = yaml.safe_load(
-        Path("config/player_rating.yaml").read_text(encoding="utf-8")
-    )
+    config = yaml.safe_load(Path("config/player_rating.yaml").read_text(encoding="utf-8"))
     declared = set(config["positions"]["CB"]["sub_ratings"]["team_defence"])
     assert set(travel.PROJECTED_COLUMNS) == declared
 
@@ -200,48 +198,63 @@ def test_a_null_stayer_slope_is_uninformative_not_equivalent() -> None:
     tight-looking ratio off a null denominator -- is the most likely way this
     experiment produces a confident wrong answer.
     """
-    assert travel.verdict(
-        delta_ci=(-0.01, 0.01),
-        ratio=1.0,
-        ratio_ci=(0.9, 1.1),
-        stayer_ci=(-0.02, 0.05),
-    ) == "uninformative"
+    assert (
+        travel.verdict(
+            delta_ci=(-0.01, 0.01),
+            ratio=1.0,
+            ratio_ci=(0.9, 1.1),
+            stayer_ci=(-0.02, 0.05),
+        )
+        == "uninformative"
+    )
 
 
 def test_an_interval_containing_one_is_not_by_itself_equivalence() -> None:
     """A wide interval is ignorance, not evidence of no effect."""
-    assert travel.verdict(
-        delta_ci=(-0.30, 0.20),
-        ratio=0.95,
-        ratio_ci=(0.40, 1.60),
-        stayer_ci=(0.03, 0.09),
-    ) == "inconclusive"
+    assert (
+        travel.verdict(
+            delta_ci=(-0.30, 0.20),
+            ratio=0.95,
+            ratio_ci=(0.40, 1.60),
+            stayer_ci=(0.03, 0.09),
+        )
+        == "inconclusive"
+    )
 
 
 def test_equivalence_requires_the_interval_inside_the_bounds() -> None:
-    assert travel.verdict(
-        delta_ci=(-0.01, 0.01),
-        ratio=0.99,
-        ratio_ci=(0.90, 1.10),
-        stayer_ci=(0.03, 0.09),
-    ) == "equivalent"
+    assert (
+        travel.verdict(
+            delta_ci=(-0.01, 0.01),
+            ratio=0.99,
+            ratio_ci=(0.90, 1.10),
+            stayer_ci=(0.03, 0.09),
+        )
+        == "equivalent"
+    )
 
 
 def test_contamination_needs_both_a_clear_delta_and_a_ratio_past_the_bound() -> None:
-    assert travel.verdict(
-        delta_ci=(-0.08, -0.02),
-        ratio=0.55,
-        ratio_ci=(0.30, 0.80),
-        stayer_ci=(0.03, 0.09),
-    ) == "contamination"
+    assert (
+        travel.verdict(
+            delta_ci=(-0.08, -0.02),
+            ratio=0.55,
+            ratio_ci=(0.30, 0.80),
+            stayer_ci=(0.03, 0.09),
+        )
+        == "contamination"
+    )
 
     # Ratio past the bound but delta straddling zero is not a finding.
-    assert travel.verdict(
-        delta_ci=(-0.08, 0.02),
-        ratio=0.55,
-        ratio_ci=(0.20, 1.30),
-        stayer_ci=(0.03, 0.09),
-    ) == "inconclusive"
+    assert (
+        travel.verdict(
+            delta_ci=(-0.08, 0.02),
+            ratio=0.55,
+            ratio_ci=(0.20, 1.30),
+            stayer_ci=(0.03, 0.09),
+        )
+        == "inconclusive"
+    )
 
 
 # --- isolation from production ------------------------------------------------
@@ -249,21 +262,31 @@ def test_contamination_needs_both_a_clear_delta_and_a_ratio_past_the_bound() -> 
 
 def test_the_experiment_cannot_write_anything() -> None:
     source = "\n".join(
-        line
-        for line in inspect.getsource(travel).split("\n")
-        if not line.lstrip().startswith("#")
+        line for line in inspect.getsource(travel).split("\n") if not line.lstrip().startswith("#")
     )
     for forbidden in (
-        "to_csv", "to_pickle", "to_parquet", "to_json", "to_hdf", "shutil",
-        "os.replace", "os.remove", "os.rename", "unlink(", "write_text",
-        "write_bytes", "mkdir(", "savetxt", "np.save",
+        "to_csv",
+        "to_pickle",
+        "to_parquet",
+        "to_json",
+        "to_hdf",
+        "shutil",
+        "os.replace",
+        "os.remove",
+        "os.rename",
+        "unlink(",
+        "write_text",
+        "write_bytes",
+        "mkdir(",
+        "savetxt",
+        "np.save",
     ):
         assert forbidden not in source, f"the experiment must not call {forbidden}"
     for line in source.splitlines():
         if "open(" in line and "fileno" not in line:
-            assert not any(
-                mode in line for mode in ('"w"', "'w'", '"a"', "'a'", '"x"', "'x'")
-            ), line
+            assert not any(mode in line for mode in ('"w"', "'w'", '"a"', "'a'", '"x"', "'x'")), (
+                line
+            )
 
 
 def test_the_experiment_does_not_import_the_thing_that_writes_production() -> None:

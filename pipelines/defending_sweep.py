@@ -152,24 +152,19 @@ def variants(
         built = [("baseline", copy.deepcopy(config))]
         built.append((f"cb-{chosen:.2f}-only", _outcome_variant(config, chosen)))
         built += [
-            (f"cb-{chosen:.2f}+fb-{f:.2f}", _fb_variant(config, chosen, f))
-            for f in (0.15, 0.30)
+            (f"cb-{chosen:.2f}+fb-{f:.2f}", _fb_variant(config, chosen, f)) for f in (0.15, 0.30)
         ]
         return built
 
     built = [("baseline", copy.deepcopy(config))]
     # 0.62 is the whole pool on defending: the setting that shipped before any
     # of this, measured explicitly so the table stands on its own.
-    built += [
-        (f"share-{d:.2f}", _share_variant(config, d)) for d in (0.62, 0.45, 0.30, 0.15, 0.00)
-    ]
+    built += [(f"share-{d:.2f}", _share_variant(config, d)) for d in (0.62, 0.45, 0.30, 0.15, 0.00)]
     built += [(f"outcome-{s:.2f}", _outcome_variant(config, s)) for s in (0.15, 0.30, 0.45)]
     return built
 
 
-def next_season_defence(
-    strength: pd.DataFrame, history: pd.DataFrame, min_rows: int = 50
-) -> float:
+def next_season_defence(strength: pd.DataFrame, history: pd.DataFrame, min_rows: int = 50) -> float:
     """Back-line strength against the goals its club concedes the season after.
 
     Next season rather than this one, because that is the only direction the
@@ -219,11 +214,15 @@ def main() -> int:
     parser.add_argument("--quick", action="store_true", help="Four seasons, for a smoke test.")
     parser.add_argument("--start-season", type=int, default=1516)
     parser.add_argument(
-        "--stage", choices=("cb", "fb"), default="cb",
+        "--stage",
+        choices=("cb", "fb"),
+        default="cb",
         help="cb chooses a centre-back setting; fb extends the winner to full backs.",
     )
     parser.add_argument(
-        "--cb-share", type=float, default=None,
+        "--cb-share",
+        type=float,
+        default=None,
         help=f"The centre-back team_defence the fb stage builds on (default {CB_WINNER}).",
     )
     args = parser.parse_args()
@@ -261,7 +260,9 @@ def main() -> int:
         weights = variant["positions"]["CB"]["sub_rating_weights"]
         logger.info(
             "--- %s: CB defending=%.2f team_defence=%.2f | FB team_defence=%.2f ---",
-            name, weights["defending"], weights.get("team_defence", 0.0),
+            name,
+            weights["defending"],
+            weights.get("team_defence", 0.0),
             variant["positions"]["FB"]["sub_rating_weights"].get("team_defence", 0.0),
         )
         rated = rate_players(players, config=variant)
@@ -269,26 +270,31 @@ def main() -> int:
 
         features = build_match_features(tmh, strength=strength, european=AUTO)
         _, preds = run_backtest(
-            features, start_season=1819 if args.quick else args.start_season,
-            use_dixon_coles=True, odds=odds if not odds.empty else None, calibrate=True,
+            features,
+            start_season=1819 if args.quick else args.start_season,
+            use_dixon_coles=True,
+            odds=odds if not odds.empty else None,
+            calibrate=True,
         )
         rps, accuracy = _score(preds)
         defence_r = next_season_defence(strength, history)
 
         cb = rated[(rated["role"] == "CB") & rated["rated"]]
-        results.append({
-            "variant": name,
-            "cb_defending_weight": weights["defending"],
-            "team_defence_weight": weights.get("team_defence", 0.0),
-            "fb_team_defence": variant["positions"]["FB"]["sub_rating_weights"].get(
-                "team_defence", 0.0
-            ),
-            "n": len(preds),
-            "rps": float(rps.mean()),
-            "accuracy": accuracy,
-            "defence_vs_next_ga": defence_r,
-            "mean_cb_rating": float(cb["rating"].mean()),
-        })
+        results.append(
+            {
+                "variant": name,
+                "cb_defending_weight": weights["defending"],
+                "team_defence_weight": weights.get("team_defence", 0.0),
+                "fb_team_defence": variant["positions"]["FB"]["sub_rating_weights"].get(
+                    "team_defence", 0.0
+                ),
+                "n": len(preds),
+                "rps": float(rps.mean()),
+                "accuracy": accuracy,
+                "defence_vs_next_ga": defence_r,
+                "mean_cb_rating": float(cb["rating"].mean()),
+            }
+        )
         per_variant[name] = preds
     table = pd.DataFrame(results)
     base_rps, _ = _score(per_variant["baseline"])
@@ -301,10 +307,15 @@ def main() -> int:
             continue
         rps, _ = _score(per_variant[name])
         boot = paired_bootstrap(base_rps, rps)
-        deltas.append({
-            "variant": name, "delta": boot["delta"],
-            "lo": boot["lo"], "hi": boot["hi"], "excludes_zero": boot["excludes_zero"],
-        })
+        deltas.append(
+            {
+                "variant": name,
+                "delta": boot["delta"],
+                "lo": boot["lo"],
+                "hi": boot["hi"],
+                "excludes_zero": boot["excludes_zero"],
+            }
+        )
 
     table = table.merge(pd.DataFrame(deltas), on="variant")
     print("\n=== Defending sweep ===")

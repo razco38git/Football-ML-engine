@@ -28,12 +28,26 @@ def _two_team_history() -> pd.DataFrame:
     """One played match between two teams, in long form."""
     return pd.DataFrame(
         [
-            {"League": "E0", "Season": "2627", "Date": pd.Timestamp("2026-08-01"),
-             "Team": "A", "Opponent": "B", "Venue": "Home",
-             "GoalsFor": 2, "GoalsAgainst": 1},
-            {"League": "E0", "Season": "2627", "Date": pd.Timestamp("2026-08-01"),
-             "Team": "B", "Opponent": "A", "Venue": "Away",
-             "GoalsFor": 1, "GoalsAgainst": 2},
+            {
+                "League": "E0",
+                "Season": "2627",
+                "Date": pd.Timestamp("2026-08-01"),
+                "Team": "A",
+                "Opponent": "B",
+                "Venue": "Home",
+                "GoalsFor": 2,
+                "GoalsAgainst": 1,
+            },
+            {
+                "League": "E0",
+                "Season": "2627",
+                "Date": pd.Timestamp("2026-08-01"),
+                "Team": "B",
+                "Opponent": "A",
+                "Venue": "Away",
+                "GoalsFor": 1,
+                "GoalsAgainst": 2,
+            },
         ]
     )
 
@@ -124,8 +138,6 @@ def test_every_team_plays_a_full_season(tmh: pd.DataFrame) -> None:
         table = current_table(tmh, league, "2627")
         fixtures = remaining_fixtures(tmh, league, "2627")
         teams = len(table)
-        appearances = (
-            fixtures["HomeTeam"].value_counts() + fixtures["AwayTeam"].value_counts()
-        )
+        appearances = fixtures["HomeTeam"].value_counts() + fixtures["AwayTeam"].value_counts()
         total = table.set_index("Team")["played"] + appearances
         assert (total == 2 * (teams - 1)).all(), league

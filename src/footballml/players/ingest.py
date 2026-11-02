@@ -49,8 +49,16 @@ POSITION_PRECEDENCE = ("GK", "D", "F", "M")
 #: Counting stats converted to per-90 rates before any comparison. Raw totals
 #: would simply rank by minutes played.
 PER_90_METRICS = (
-    "np_xg", "xa", "shots", "key_passes", "xg_chain", "xg_buildup",
-    "np_goals", "assists", "yellow_cards", "red_cards",
+    "np_xg",
+    "xa",
+    "shots",
+    "key_passes",
+    "xg_chain",
+    "xg_buildup",
+    "np_goals",
+    "assists",
+    "yellow_cards",
+    "red_cards",
 )
 
 
@@ -97,9 +105,9 @@ def _add_team_relative(df: pd.DataFrame) -> pd.DataFrame:
     weights = out["nineties"].clip(lower=0)
     for metric, column in per90.items():
         totals = out.groupby(["League", "Season", "team"], observed=True)[metric].transform("sum")
-        team_nineties = weights.groupby(
-            [out["League"], out["Season"], out["team"]]
-        ).transform("sum")
+        team_nineties = weights.groupby([out["League"], out["Season"], out["team"]]).transform(
+            "sum"
+        )
         # 11 players on the pitch, so squad nineties are ~11x team nineties.
         team_rate = (totals / team_nineties.replace(0, np.nan)) * 11.0
         out[f"{metric}_share"] = out[column].div(team_rate).where(team_rate > 0)
@@ -166,9 +174,7 @@ def _add_possession_adjusted(df: pd.DataFrame) -> pd.DataFrame:
     """
     out = df.copy()
     team_col = "Team" if "Team" in out.columns else "team"
-    available = [
-        m for m in DEFENSIVE_VOLUME_METRICS if f"{m}_per90" in out.columns
-    ]
+    available = [m for m in DEFENSIVE_VOLUME_METRICS if f"{m}_per90" in out.columns]
     if not available or team_col not in out.columns:
         return out
 
@@ -249,9 +255,7 @@ def fetch_player_seasons(
     codes = leagues or sorted(UNDERSTAT_LEAGUES)
     seasons = seasons or season_labels()
 
-    reader = sd.Understat(
-        leagues=[UNDERSTAT_LEAGUES[c] for c in codes], seasons=seasons
-    )
+    reader = sd.Understat(leagues=[UNDERSTAT_LEAGUES[c] for c in codes], seasons=seasons)
     raw = reader.read_player_season_stats().reset_index()
     logger.info("Fetched %d player-seasons", len(raw))
 
@@ -264,9 +268,20 @@ def fetch_player_seasons(
     df["position_group"] = _career_position(df)
 
     numeric = [
-        "minutes", "matches", "goals", "xg", "np_goals", "np_xg", "assists",
-        "xa", "shots", "key_passes", "yellow_cards", "red_cards",
-        "xg_chain", "xg_buildup",
+        "minutes",
+        "matches",
+        "goals",
+        "xg",
+        "np_goals",
+        "np_xg",
+        "assists",
+        "xa",
+        "shots",
+        "key_passes",
+        "yellow_cards",
+        "red_cards",
+        "xg_chain",
+        "xg_buildup",
     ]
     for col in numeric:
         df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -306,9 +321,17 @@ def fetch_player_seasons(
     df = _add_team_relative(df)
 
     keep = [
-        "League", "Season", "player", "team", "position", "position_group",
-        "season_position", "nineties", *numeric,
-        *[f"{m}_per90" for m in PER_90_METRICS], "finishing_delta_per90",
+        "League",
+        "Season",
+        "player",
+        "team",
+        "position",
+        "position_group",
+        "season_position",
+        "nineties",
+        *numeric,
+        *[f"{m}_per90" for m in PER_90_METRICS],
+        "finishing_delta_per90",
         *[f"{m}_share" for m in TEAM_RELATIVE_METRICS],
         *[f"{m}_padj" for m in DEFENSIVE_VOLUME_METRICS],
     ]
@@ -477,6 +500,7 @@ def add_team_defence(players: pd.DataFrame, history: pd.DataFrame | None = None)
     present = [c for c in TEAM_DEFENCE_COLUMNS if c in out.columns]
     logger.info(
         "Team defence joined for %d of %d player-seasons",
-        int(out[present[0]].notna().sum()) if present else 0, len(out),
+        int(out[present[0]].notna().sum()) if present else 0,
+        len(out),
     )
     return out

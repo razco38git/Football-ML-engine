@@ -81,7 +81,8 @@ def main() -> int:
         write_json({"one_player": insights}, INSIGHTS)
         log.info(
             "Wrote %s -- removing a club's best player costs a median of %.2f",
-            INSIGHTS, insights["median_drop"],
+            INSIGHTS,
+            insights["median_drop"],
         )
 
     latest = strength[strength["Season"] == strength["Season"].max()]
@@ -122,9 +123,7 @@ def _one_player(players: pd.DataFrame) -> dict[str, object] | None:
     # The same total order `best_n` selects by, so "best player" means the one
     # it would have put first rather than whichever row happened to sort first.
     best = (
-        rated.sort_values(
-            ["rating", "minutes", "Player"], ascending=[False, False, True]
-        )
+        rated.sort_values(["rating", "minutes", "Player"], ascending=[False, False, True])
         .groupby(keys, observed=True)
         .head(1)
     )
@@ -168,9 +167,7 @@ def _report(strength: pd.DataFrame) -> None:
     shared = measured[keys].merge(strength[keys], on=keys)
     renamed = strength.rename(
         columns={
-            c: c.replace("squad_", "strength_")
-            for c in strength.columns
-            if c.startswith("squad_")
+            c: c.replace("squad_", "strength_") for c in strength.columns if c.startswith("squad_")
         }
     )
 

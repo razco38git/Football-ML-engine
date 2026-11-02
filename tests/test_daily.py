@@ -82,6 +82,7 @@ def _args(monkeypatch, **over) -> None:
 
 # --- the fingerprint ----------------------------------------------------------
 
+
 def test_fingerprint_is_rows_and_latest_date(tmp_path, monkeypatch) -> None:
     path = tmp_path / "matches_all.csv"
     pd.DataFrame({"Date": ["2026-09-19", "2026-09-20"]}).to_csv(path, index=False)
@@ -116,6 +117,7 @@ def test_fingerprint_survives_a_missing_or_empty_file(tmp_path, monkeypatch) -> 
 
 
 # --- the short-circuit --------------------------------------------------------
+
 
 def test_settling_happens_before_the_fetch(monkeypatch, runs) -> None:
     """The ordering is the whole fix, so it is pinned rather than assumed.
@@ -211,8 +213,11 @@ def test_new_results_run_the_whole_chain(monkeypatch, runs) -> None:
 
     assert daily.main() == 0
     assert runs == [
-        "score_upcoming", "fetch_european", "build_dataset",
-        "score_upcoming", "project_season",
+        "score_upcoming",
+        "fetch_european",
+        "build_dataset",
+        "score_upcoming",
+        "project_season",
     ]
 
 
@@ -223,12 +228,16 @@ def test_force_reprojects_without_new_results(monkeypatch, runs) -> None:
 
     assert daily.main() == 0
     assert runs == [
-        "score_upcoming", "fetch_european", "build_dataset",
-        "score_upcoming", "project_season",
+        "score_upcoming",
+        "fetch_european",
+        "build_dataset",
+        "score_upcoming",
+        "project_season",
     ]
 
 
 # --- failures leave the site complete rather than half-refreshed --------------
+
 
 def test_a_failed_fetch_touches_nothing(monkeypatch, runs) -> None:
     """football-data being unreachable is normal and must cost nothing."""
@@ -272,8 +281,11 @@ def test_a_failed_projection_still_reports_failure(monkeypatch) -> None:
 
     assert daily.main() == 1
     assert called == [
-        "score_upcoming", "fetch_european", "build_dataset",
-        "score_upcoming", "project_season",
+        "score_upcoming",
+        "fetch_european",
+        "build_dataset",
+        "score_upcoming",
+        "project_season",
     ]
     # Settling published before the fetch, and that stands.
     assert reloaded == [True]
@@ -289,6 +301,7 @@ def test_a_dead_api_is_reported_not_swallowed(monkeypatch, runs) -> None:
 
 
 # --- the chain itself ---------------------------------------------------------
+
 
 def test_the_expensive_weekly_steps_are_not_in_the_daily_chain() -> None:
     """Skipping these is the whole point; including one would be a regression.
@@ -317,6 +330,7 @@ def test_settling_comes_before_projecting() -> None:
 # result was 2026-09-17, so four weeks of European predictions sat unsettled and
 # the Champions League was absent from Recent results and Prediction Accuracy
 # with nothing anywhere saying so.
+
 
 def test_european_results_are_fetched_daily(monkeypatch, runs) -> None:
     _args(monkeypatch)
@@ -414,16 +428,19 @@ def test_a_failed_european_fetch_does_not_stop_the_run(monkeypatch) -> None:
 
 # --- the staleness report -----------------------------------------------------
 
+
 def _store(tmp_path, rows: list[tuple[str, str, str, str, object]]) -> None:
     """Write a prediction store where `actual_result` may be missing."""
-    pd.DataFrame({
-        "League": ["E0"] * len(rows),
-        "competition": [r[0] for r in rows],
-        "Date": [r[1] for r in rows],
-        "HomeTeam": [r[2] for r in rows],
-        "AwayTeam": [r[3] for r in rows],
-        "actual_result": [r[4] for r in rows],
-    }).to_csv(tmp_path / "predictions.csv", index=False)
+    pd.DataFrame(
+        {
+            "League": ["E0"] * len(rows),
+            "competition": [r[0] for r in rows],
+            "Date": [r[1] for r in rows],
+            "HomeTeam": [r[2] for r in rows],
+            "AwayTeam": [r[3] for r in rows],
+            "actual_result": [r[4] for r in rows],
+        }
+    ).to_csv(tmp_path / "predictions.csv", index=False)
 
 
 def test_a_stranded_european_tie_is_reported(tmp_path, caplog) -> None:
@@ -495,11 +512,14 @@ def test_an_unreadable_store_is_not_an_error(tmp_path) -> None:
 
 # --- the chain ----------------------------------------------------------------
 
+
 def test_the_european_fetch_is_in_the_daily_chain_and_the_rebuilds_are_not() -> None:
     """The split that keeps this job short: results yes, rebuilds no."""
     names = {
-        daily.FETCH.name, daily.FETCH_EUROPEAN.name,
-        daily.SETTLE.name, daily.PROJECT.name,
+        daily.FETCH.name,
+        daily.FETCH_EUROPEAN.name,
+        daily.SETTLE.name,
+        daily.PROJECT.name,
     }
     assert "fetch_european" in names
     assert "build_players" not in names
@@ -538,9 +558,7 @@ def test_the_gate_reads_the_history_not_the_file_football_data_writes(
     of these numbers.
     """
     history = tmp_path / "team_match_history_all.csv"
-    history.write_text(
-        "Date\n2026-10-17\n2026-10-18\n2026-10-18\n", encoding="utf-8"
-    )
+    history.write_text("Date\n2026-10-17\n2026-10-18\n2026-10-18\n", encoding="utf-8")
     matches = tmp_path / "matches_all.csv"
     matches.write_text("Date\n2026-10-12\n", encoding="utf-8")
 
@@ -554,9 +572,7 @@ def test_the_gate_reads_the_history_not_the_file_football_data_writes(
     )
 
 
-def test_projection_runs_when_the_history_advances_without_football_data(
-    monkeypatch, runs
-) -> None:
+def test_projection_runs_when_the_history_advances_without_football_data(monkeypatch, runs) -> None:
     """The case that prompted this: the top-up moved the history, the fetch
     brought nothing, and the projection must still run."""
     _args(monkeypatch)

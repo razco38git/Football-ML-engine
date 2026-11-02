@@ -186,6 +186,7 @@ class RatingInsights(BaseModel):
     overall: LineValidity | None = None
     one_player: OnePlayerInsight | None = None
 
+
 class Prediction(BaseModel):
     league: str
     date: date
@@ -563,9 +564,7 @@ class MatchResultPage(BaseModel):
 class PredictRequest(BaseModel):
     home_team: str
     away_team: str
-    league: str | None = Field(
-        default=None, description="Inferred from the teams when omitted"
-    )
+    league: str | None = Field(default=None, description="Inferred from the teams when omitted")
     explain: bool = False
 
 
