@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { api, competitionLabel, seasonLabel, type Prediction } from '../api/client';
 import { confidence, formatDate, pct, teamColor, verdict } from '../api/display';
 import { useAsync } from '../api/hooks';
@@ -126,6 +127,134 @@ function Figure({ label, value, color }: { label: string; value: string; color?:
  * site that shows player ratings and match probabilities invites the inference
  * that the two are closely connected. They are not, and the numbers say so.
  */
+/** The roles a reader can narrow the gems board to, in pitch order. */
+const GEM_ROLES = ['All', 'GK', 'CB', 'FB', 'DM', 'MID', 'AMW', 'FWD'];
+
+/**
+ * Seasons we rated far above EA, and what EA did about it a year later.
+ *
+ * The board is the easy half and the claim under it is the point. A list of
+ * players "we rated higher than EA" proves nothing on its own — any two
+ * rating systems disagree, and EA raises low-rated players anyway, so the
+ * disagreements would look prescient whether or not they were. What is
+ * published here is the comparison that rules that out: among players EA
+ * rated *identically*, the ones we rated higher are the ones EA raises.
+ *
+ * Each row carries its own test result rather than the card asserting one,
+ * which is why EA's next-edition number sits on the row.
+ */
+function HiddenGemsCard() {
+  const [role, setRole] = useState('All');
+  const { data } = useAsync(() => api.hiddenGems(10, role), [role]);
+  if (!data || data.players.length === 0) return null;
+
+  const claim = data.claim;
+
+  return (
+    <Card
+      title="Hidden gems — where we disagreed with EA, and who was right"
+      blurb="Every player rating is half what we measured from the season and half EA's own, mapped onto one scale. These are the seasons where our half was furthest above theirs — and beside each one, the rating EA gave that player in the next edition."
+    >
+      <div className="flex flex-wrap gap-1 mb-1">
+        {GEM_ROLES.map(option => (
+          <button
+            key={option}
+            onClick={() => setRole(option)}
+            className="px-2 py-0.5 rounded text-xs font-display"
+            style={{
+              background: option === role ? 'rgba(0,230,118,0.15)' : 'var(--secondary)',
+              color: option === role ? '#00e676' : 'var(--muted-foreground)',
+            }}
+          >
+            {option}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        {data.players.map(p => (
+          <div
+            key={`${p.season}-${p.player}-${p.team}`}
+            className="flex items-center gap-3 py-1.5"
+            style={{ borderBottom: '1px solid var(--border)' }}
+          >
+            <div style={{ minWidth: 0, flex: '1 1 auto' }}>
+              <div className="text-sm truncate" style={{ color: 'var(--foreground)' }}>
+                {p.player}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>
+                {p.team} · {seasonLabel(p.season)} · {p.role}
+              </div>
+            </div>
+
+            <div className="flex items-baseline gap-1.5 font-data text-xs flex-shrink-0">
+              <span title="EA's rating that season" style={{ color: '#f59e0b' }}>
+                {p.fifa_overall}
+              </span>
+              <span style={{ color: 'var(--muted-foreground)' }}>→</span>
+              <span title="what we measured, on EA's scale" style={{ color: '#00e676' }}>
+                {p.performance_rating}
+              </span>
+            </div>
+
+            {/* The test, on the row: what EA did next edition. */}
+            <div className="text-right flex-shrink-0" style={{ width: 92 }}>
+              {p.ea_next == null ? (
+                <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>
+                  no next entry
+                </span>
+              ) : (
+                <>
+                  <span
+                    className="font-data text-xs font-bold"
+                    style={{ color: (p.ea_move ?? 0) > 0 ? '#00e676' : '#f44336' }}
+                  >
+                    EA {p.ea_next}
+                  </span>
+                  <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>
+                    {' '}({(p.ea_move ?? 0) >= 0 ? '+' : '−'}
+                    {Math.abs(p.ea_move ?? 0)})
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {claim && (
+        <div className="text-xs leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
+          <strong style={{ color: 'var(--foreground)' }}>Does that mean anything?</strong>{' '}
+          On its own, no — EA raises low-rated players whoever they are, so any disagreement
+          would look prescient. So the test compares only players{' '}
+          <strong style={{ color: 'var(--foreground)' }}>EA rated identically</strong>: same
+          season, same position, same EA number, {claim.strata.toLocaleString()} such groups
+          holding {claim.players.toLocaleString()} players. Within them, the fifth we rated
+          highest gained{' '}
+          <strong style={{ color: '#00e676' }}>
+            {claim.top_fifth_move >= 0 ? '+' : '−'}
+            {Math.abs(claim.top_fifth_move).toFixed(2)}
+          </strong>{' '}
+          next edition and were raised {(claim.top_fifth_raised * 100).toFixed(0)}% of the
+          time; the fifth we rated lowest gained{' '}
+          <strong style={{ color: '#f44336' }}>
+            {claim.bottom_fifth_move >= 0 ? '+' : '−'}
+            {Math.abs(claim.bottom_fifth_move).toFixed(2)}
+          </strong>{' '}
+          and were raised {(claim.bottom_fifth_raised * 100).toFixed(0)}%. Correlation{' '}
+          <strong style={{ color: 'var(--foreground)' }}>
+            {claim.correlation.toFixed(2)}
+          </strong>{' '}
+          — real, and far from everything: most of what moves an EA rating is not in our data.
+          Seasons {data.excluded_seasons.join(' and ')} are left out entirely, because FBref
+          served no defensive or goalkeeping tables for them, and a season under{' '}
+          {data.min_minutes.toLocaleString()} minutes is too thin to put here.
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function InsightsZone() {
   const { data } = useAsync(() => api.ratingInsights(), []);
   if (!data) return null;
@@ -234,6 +363,8 @@ function InsightsZone() {
             </div>
           </Card>
         )}
+
+        <HiddenGemsCard />
       </div>
     </div>
   );

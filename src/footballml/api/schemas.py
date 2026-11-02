@@ -187,6 +187,69 @@ class RatingInsights(BaseModel):
     one_player: OnePlayerInsight | None = None
 
 
+class HiddenGem(BaseModel):
+    """A season we rated far above EA, and what EA did about it afterwards.
+
+    ``gap`` is ``performance_rating - fifa_on_our_scale``, both already on our
+    0-99 scale -- EA's overall is ranked within role and season before it is
+    mapped there, so the subtraction is meaningful rather than a comparison of
+    two different rulers.
+
+    ``ea_next`` is EA's overall for the same player one edition later, and is
+    `None` when there is no next entry at all: a player who left the big five,
+    retired, or went unmatched. That is published as absent rather than as a
+    zero move, because a zero would read as EA having looked and declined.
+    """
+
+    season: str
+    player: str
+    team: str
+    league: str
+    role: str
+    minutes: int
+    fifa_overall: int
+    performance_rating: int
+    fifa_on_our_scale: int
+    gap: float
+    ea_next: int | None = None
+    ea_move: int | None = None
+
+
+class GemsClaim(BaseModel):
+    """Whether EA moves toward us, among players EA rated *identically*.
+
+    Computed over the whole eligible population rather than over the board it
+    accompanies -- a statistic read off the twenty rows it is being used to
+    justify would be circular.
+
+    The stratification is what makes it worth printing. EA reverts to its own
+    mean, raising the low-rated whoever they are, and the gap is mechanically
+    anti-correlated with EA's overall; comparing only players who started on
+    the same EA number removes that entirely.
+    """
+
+    correlation: float
+    players: int
+    strata: int
+    #: Mean EA move next edition for the fifth we rated highest, and lowest,
+    #: inside their own strata.
+    top_fifth_move: float
+    bottom_fifth_move: float
+    top_fifth_raised: float
+    bottom_fifth_raised: float
+
+
+class HiddenGems(BaseModel):
+    """The board, the claim behind it, and what was excluded from both."""
+
+    players: list[HiddenGem]
+    claim: GemsClaim | None = None
+    #: The minutes floor, above the 450 a rating already needs.
+    min_minutes: int
+    #: Seasons left out because FBref served no `misc` or `keeper` table for
+    #: them, so their performance half is not comparable with a modern one.
+    excluded_seasons: list[str] = Field(default_factory=list)
+
 class Prediction(BaseModel):
     league: str
     date: date

@@ -269,3 +269,83 @@ def test_a_league_season_with_nothing_played_has_no_form(
     monkeypatch.setattr(api.state, "retrodicted", pd.DataFrame())
 
     assert api._season_form("E0", "2526").empty
+
+
+GEM_PLAYERS = pd.DataFrame(
+    [
+        # Rated far above EA, and EA agrees a year later.
+        ("E0", "2324", "Cole Palmer", "Chelsea", "AMW", 2640, 73.0, 66.0, 52.0, 94.0),
+        ("E0", "2425", "Cole Palmer", "Chelsea", "AMW", 2600, 85.0, 85.0, 85.0, 85.0),
+        # Rated below EA.
+        ("E0", "2324", "Someone Else", "Everton", "CB", 2500, 70.0, 80.0, 80.0, 55.0),
+        ("E0", "2425", "Someone Else", "Everton", "CB", 2500, 70.0, 78.0, 78.0, 60.0),
+        # Too few minutes to be published.
+        ("E0", "2324", "Cameo", "Burnley", "FWD", 500, 70.0, 60.0, 50.0, 95.0),
+        # A season whose performance half is not comparable.
+        ("E0", "1415", "Old Timer", "Villa", "MID", 3000, 70.0, 60.0, 50.0, 95.0),
+    ],
+    columns=[
+        "League", "Season", "Player", "Team", "role", "minutes",
+        "rating", "fifa_overall", "fifa_on_our_scale", "performance_rating",
+    ],
+).assign(rated=True)
+GEM_PLAYERS["fifa_name"] = GEM_PLAYERS["Player"]
+
+
+@pytest.fixture
+def gems_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    monkeypatch.setattr(api.state, "players", GEM_PLAYERS)
+    monkeypatch.setattr(api.state, "_gems", None)
+    return TestClient(api.app)
+
+
+def test_the_board_leads_with_the_biggest_gap(gems_client: TestClient) -> None:
+    payload = gems_client.get("/insights/hidden-gems").json()
+
+    assert payload["players"][0]["player"] == "Cole Palmer"
+    assert payload["players"][0]["gap"] == pytest.approx(42.0)
+
+
+def test_each_row_carries_eas_own_later_verdict(gems_client: TestClient) -> None:
+    """The row is the test, not an illustration of one."""
+    row = gems_client.get("/insights/hidden-gems").json()["players"][0]
+
+    assert row["ea_next"] == 85
+    assert row["ea_move"] == 19
+
+
+def test_the_thin_and_the_incomparable_are_absent(gems_client: TestClient) -> None:
+    named = {p["player"] for p in gems_client.get("/insights/hidden-gems").json()["players"]}
+
+    assert "Cameo" not in named, "a 500-minute season is too thin for a gap"
+    assert "Old Timer" not in named, "1415 served no misc table"
+
+
+def test_the_page_is_told_what_was_excluded(gems_client: TestClient) -> None:
+    """A board that silently drops seasons invites the reader to infer a trend."""
+    payload = gems_client.get("/insights/hidden-gems").json()
+
+    assert payload["excluded_seasons"] == ["1415", "1516"]
+    assert payload["min_minutes"] == 900
+
+
+def test_a_role_filter_narrows_the_board(gems_client: TestClient) -> None:
+    payload = gems_client.get("/insights/hidden-gems", params={"role": "CB"}).json()
+
+    assert {p["role"] for p in payload["players"]} == {"CB"}
+
+
+def test_the_claim_is_absent_rather_than_invented_on_thin_data(
+    gems_client: TestClient,
+) -> None:
+    """Six players cannot support a correlation, and none is published."""
+    assert gems_client.get("/insights/hidden-gems").json()["claim"] is None
+
+
+def test_no_ratings_is_a_404_naming_the_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(api.state, "players", pd.DataFrame())
+    monkeypatch.setattr(api.state, "_gems", None)
+    response = TestClient(api.app).get("/insights/hidden-gems")
+
+    assert response.status_code == 404
+    assert "build_players" in response.json()["detail"]

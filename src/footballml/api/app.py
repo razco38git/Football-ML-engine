@@ -43,7 +43,10 @@ from footballml.api.schemas import (
     EloPoint,
     EloRankEntry,
     EloRanking,
+    GemsClaim,
     Health,
+    HiddenGem,
+    HiddenGems,
     LeagueStrength,
     LikelyScore,
     LineValidity,
@@ -101,6 +104,11 @@ from footballml.models.evaluate import (
     odds_implied_probs,
 )
 from footballml.models.match_model import OUTCOMES, TOP_SCORES, feature_columns
+from footballml.players.gems import (
+    INCOMPLETE_SEASONS,
+    MIN_MINUTES,
+    hidden_gems,
+)
 from footballml.players.similarity import (
     SUB_RATINGS,
     attribute_set,
@@ -213,6 +221,10 @@ class State:
     #: Cached on first request, not at load: it aggregates 24,000 player-seasons
     #: twice and nothing on the site needs it until somebody opens Discover.
     _rating_insights: RatingInsights | None = None
+    #: The hidden-gems board and the claim behind it, cached together so a
+    #: reader filtering by role does not recompute the statistic that
+    #: justifies the board.
+    _gems: tuple[pd.DataFrame, dict] | None = None
 
     @property
     def upcoming_is_stale(self) -> bool:
@@ -411,6 +423,7 @@ def _load_state(startup: bool = False) -> dict[str, int]:
     state._upcoming = None
     state._upcoming_at = None
     state._rating_insights = None
+    state._gems = None
 
     logger.info("Loaded %d matches, %d teams", len(state.features), len(state.form_index))
     return {
@@ -1108,6 +1121,87 @@ def rating_insights() -> RatingInsights:
         )
     return state._rating_insights
 
+
+
+#: How many rows the hidden-gems board may return.
+GEMS_LIMIT = 20
+
+
+@app.get("/insights/hidden-gems", response_model=HiddenGems)
+def hidden_gems_board(
+    limit: int = Query(GEMS_LIMIT, ge=1, le=50),
+    role: str | None = Query(None, description="Restrict to one role, e.g. CB"),
+) -> HiddenGems:
+    """Seasons we rated far above EA, with EA's own next edition beside them.
+
+    The board is the easy half. The number that makes it worth publishing is
+    `claim`: among players **EA rated identically** -- same season, same role,
+    same overall -- the ones we rated higher are the ones EA raises next
+    edition. That comparison is what rules out EA simply reverting to its own
+    mean, which it does strongly and which would otherwise explain the whole
+    pattern.
+
+    Computed on demand and cached, because it is a subtraction of two
+    published columns plus one self-join: 0.3 seconds over 24,000 rated
+    player-seasons, against a pipeline artifact that would have to be kept in
+    step with the ratings.
+    """
+    if state.players.empty:
+        raise HTTPException(
+            404,
+            "No player ratings loaded. Run `python -m pipelines.build_players`.",
+        )
+
+    if state._gems is None:
+        board, claim = hidden_gems(state.players, limit=50)
+        state._gems = (board, claim)
+    board, claim = state._gems
+
+    if board.empty:
+        raise HTTPException(
+            404, "No rated player-season carries both halves of a rating."
+        )
+
+    rows = board if role is None else board[board["role"].astype(str) == role]
+
+    def whole(row: pd.Series, column: str) -> int | None:
+        value = row.get(column)
+        return None if value is None or pd.isna(value) else int(round(float(value)))
+
+    return HiddenGems(
+        players=[
+            HiddenGem(
+                season=str(r["Season"]),
+                player=str(r["Player"]),
+                team=str(r["Team"]),
+                league=str(r["League"]),
+                role=str(r["role"]),
+                minutes=int(r["minutes"]),
+                fifa_overall=whole(r, "fifa_overall") or 0,
+                performance_rating=whole(r, "performance_rating") or 0,
+                fifa_on_our_scale=whole(r, "fifa_on_our_scale") or 0,
+                gap=round(float(r["gap"]), 1),
+                ea_next=whole(r, "ea_next"),
+                ea_move=whole(r, "ea_move"),
+            )
+            for _, r in rows.head(limit).iterrows()
+        ],
+        claim=(
+            GemsClaim(
+                correlation=round(claim["correlation"], 4),
+                players=int(claim["players"]),
+                strata=int(claim["strata"]),
+                top_fifth_move=round(claim["top_fifth_move"], 2),
+                bottom_fifth_move=round(claim["bottom_fifth_move"], 2),
+                top_fifth_raised=round(claim["top_fifth_raised"], 4),
+                bottom_fifth_raised=round(claim["bottom_fifth_raised"], 4),
+            )
+            if claim
+            else None
+        ),
+        min_minutes=MIN_MINUTES,
+        excluded_seasons=sorted(INCOMPLETE_SEASONS),
+    )
 
 @app.get("/leagues")
 def leagues() -> dict[str, str]:

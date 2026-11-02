@@ -175,6 +175,41 @@ export interface RatingInsights {
   one_player: OnePlayerInsight | null;
 }
 
+/** A season we rated far above EA, and what EA did about it afterwards. */
+export interface HiddenGem {
+  season: string;
+  player: string;
+  team: string;
+  league: string;
+  role: string;
+  minutes: number;
+  fifa_overall: number;
+  performance_rating: number;
+  fifa_on_our_scale: number;
+  gap: number;
+  /** EA's overall one edition later; null when there is no next entry at all. */
+  ea_next: number | null;
+  ea_move: number | null;
+}
+
+/** Whether EA moves toward us, among players EA rated *identically*. */
+export interface GemsClaim {
+  correlation: number;
+  players: number;
+  strata: number;
+  top_fifth_move: number;
+  bottom_fifth_move: number;
+  top_fifth_raised: number;
+  bottom_fifth_raised: number;
+}
+
+export interface HiddenGems {
+  players: HiddenGem[];
+  claim: GemsClaim | null;
+  min_minutes: number;
+  excluded_seasons: string[];
+}
+
 export interface Retrodiction {
   /** The chances each side created, as xG. Penalties included. */
   xg_home: number;
@@ -279,6 +314,13 @@ export const api = {
 
   /** Two measured answers: which line matters, and what one player is worth. */
   ratingInsights: () => get<RatingInsights>('/insights/ratings'),
+
+  /** Seasons we rated far above EA, with EA's own next edition beside them. */
+  hiddenGems: (limit = 10, role?: string) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (role && role !== 'All') params.set('role', role);
+    return get<HiddenGems>(`/insights/hidden-gems?${params}`);
+  },
 
   /** Settled matches: prediction beside the real score. */
   history: (source: 'live' | 'backtest', league?: string, limit = 50) =>
