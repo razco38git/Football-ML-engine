@@ -70,12 +70,20 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "PD"]
 ignore = [
-    "PD901",  # `df` is a fine name for a dataframe
+    # PD901 (`df` is a fine name for a dataframe) was ignored here until ruff
+    # removed the rule. Ignoring a rule that no longer exists is dead config,
+    # and ruff warns about it on every lint run.
     "PD008",  # `.at` is the correct accessor for single-cell scalar access
 ]
 
 [tool.mypy]
-python_version = "3.11"
+# Must match the interpreter CI runs on (`.github/workflows/ci.yml`), not the
+# `requires-python` floor. `python_version = "3.11"` made `mypy src` abort
+# before it checked a single line of this project: numpy ships `type` statements
+# in its own stubs, which are 3.12 syntax, so mypy refused to parse numpy and
+# gave up with one error. The type check has therefore never run on CI -- and
+# the format check failing ahead of it meant nobody could see that either.
+python_version = "3.12"
 warn_unused_ignores = true
 warn_redundant_casts = true
 ignore_missing_imports = true
