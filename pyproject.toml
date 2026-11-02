@@ -68,6 +68,13 @@ postgres = [
 # a new pytest does not invent new opinions about this code.
 dev = [
     "pytest>=8.0",
+    # `fastapi.testclient.TestClient` -- four test modules drive the API through
+    # it -- is a thin wrapper over an HTTP client that neither FastAPI nor
+    # `uvicorn[standard]` pulls in. Nothing declared it, so it only ever worked
+    # because a developer machine happened to have one. `starlette.testclient`
+    # imports `httpx2` first and falls back to `httpx`, so this is the half of
+    # that pair that does not also emit a deprecation warning.
+    "httpx2>=2.6",
     "ruff>=0.16.7,<0.17",
     "mypy>=2.3,<2.4",
     "pandas-stubs>=3.0,<3.1",
@@ -103,4 +110,9 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+# The repository root as well as `src`: four test modules import `pipelines.*`,
+# which is a directory at the root and not part of the installed package. This
+# passed locally only because `python -m pytest` puts the working directory on
+# `sys.path` -- CI runs the bare `pytest` entry point, which does not, so those
+# modules failed to import and pytest stopped on a collection error.
+pythonpath = ["src", "."]
