@@ -8,13 +8,46 @@ these assert, not the pipelines themselves, which have their own tests.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import subprocess
 from urllib.error import HTTPError, URLError
 
 import pytest
 
-from pipelines import weekly
+from pipelines import _lock, weekly
+
+
+def _lock_granting(acquired: bool):
+    """A stand-in for `refresh_lock` that yields `acquired` and touches no file."""
+
+    @contextlib.contextmanager
+    def lock(*_a, **_k):
+        yield acquired
+
+    return lock
+
+
+@pytest.fixture(autouse=True)
+def lock_is_free(monkeypatch):
+    """Take the machine's own refresh lock out of these tests.
+
+    `main` does everything inside `refresh_lock("weekly", ...)`, and that lock
+    is a real file in `data/processed/` shared with the scheduled jobs. So the
+    result of a full-suite run depended on what the machine happened to be
+    doing: on 2026-11-03 a live weekly run held the lock, `main` logged and
+    returned 1 having executed no step, and 29 tests across this file and
+    `test_daily.py` failed on assertions about steps that never ran -- each
+    one first waiting out `LOCK_WAIT_SECONDS` worth of retries.
+
+    Patched on `_lock` rather than on `weekly`, because `main` imports the name
+    inside the function body and so reads the module attribute at call time.
+
+    What the job does *once it holds the lock* is what this file is about.
+    Whether it gets the lock, and what it does when it cannot, belongs to
+    `tests/test_refresh_lock.py`.
+    """
+    monkeypatch.setattr(_lock, "refresh_lock", _lock_granting(True))
 
 
 def test_steps_run_in_dependency_order() -> None:
@@ -388,3 +421,27 @@ def test_a_failed_backtest_is_named_in_the_summary(monkeypatch, tmp_path) -> Non
     summary = written[0]
     assert "backtest" in summary, summary
     assert "optional step(s) failed" in summary, summary
+
+
+# --- the lock, when somebody else has it -------------------------------------
+
+
+def test_a_held_lock_fails_the_run_rather_than_racing_it(monkeypatch, tmp_path) -> None:
+    """Two runs rewriting `data/processed` at once can leave a half-written
+    table, so not starting is correct -- and a non-zero exit is how a missed
+    Monday gets noticed rather than passing for a quiet success.
+
+    Patched shut explicitly, because `lock_is_free` patches it open for every
+    other test here. Leaving this one to the machine's real lock state would
+    mean it only exercised the branch when a refresh happened to be running.
+    """
+    attempted: list[str] = []
+    monkeypatch.setattr(weekly, "run_step", lambda step: attempted.append(step.name) or 0.0)
+    monkeypatch.setattr(weekly, "reload_api", lambda *a, **k: True)
+    monkeypatch.setattr(weekly, "LOG_DIR", tmp_path)
+    monkeypatch.setattr("sys.argv", ["weekly"])
+    monkeypatch.setattr(_lock, "LOCK_PATH", tmp_path / ".refresh.lock")
+    monkeypatch.setattr(_lock, "refresh_lock", _lock_granting(False))
+
+    assert weekly.main() == 1
+    assert attempted == [], "a declined run must not touch data/processed"

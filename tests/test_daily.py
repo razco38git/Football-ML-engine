@@ -12,6 +12,7 @@ rather than a half-refreshed one.
 
 from __future__ import annotations
 
+import contextlib
 import subprocess
 import sys
 from pathlib import Path
@@ -39,6 +40,35 @@ def quiet_logging(monkeypatch, tmp_path):
     # has stranded rows: without this the tests assert against live data.
     monkeypatch.setattr(daily, "PREDICTIONS", tmp_path / "predictions.csv")
     monkeypatch.setattr(daily, "EUROPEAN", tmp_path / "european_matches.csv")
+
+
+def _lock_granting(acquired: bool):
+    """A stand-in for `refresh_lock` that yields `acquired` and touches no file."""
+
+    @contextlib.contextmanager
+    def lock(*_a, **_k):
+        yield acquired
+
+    return lock
+
+
+@pytest.fixture(autouse=True)
+def lock_is_free(monkeypatch):
+    """Take the machine's own refresh lock out of these tests.
+
+    `main` does everything inside `refresh_lock("daily")`, and that lock is a
+    real file in `data/processed/` shared with the scheduled jobs. So the
+    result of a full-suite run depended on what the machine happened to be
+    doing: on 2026-11-03 a live weekly run held the lock, `main` logged and
+    returned 0 having executed no step, and 29 tests across this file and
+    `test_weekly.py` failed on assertions about an ordering that never
+    happened -- after blocking about seventy seconds each.
+
+    What the job does *once it holds the lock* is what this file is about.
+    Whether it gets the lock, and what it does when it cannot, belongs to
+    `tests/test_refresh_lock.py`.
+    """
+    monkeypatch.setattr(daily, "refresh_lock", _lock_granting(True))
 
 
 @pytest.fixture
@@ -683,3 +713,22 @@ def test_a_failed_scoring_still_settles_and_publishes(monkeypatch, runs) -> None
 
     assert daily.main() == 0
     assert runs.count("score_upcoming") >= 1, "settling was skipped"
+
+
+# --- the lock is the other short-circuit --------------------------------------
+
+
+def test_a_held_lock_stops_the_run_without_failing_it(monkeypatch, runs) -> None:
+    """Declining is the right outcome, not an error: the weekly job rebuilds
+    everything this one would have.
+
+    Patched shut explicitly, because `lock_is_free` patches it open for every
+    other test here. Leaving this one to the machine's real lock state would
+    mean it only exercised the branch when a refresh happened to be running.
+    """
+    _args(monkeypatch)
+    _fingerprints(monkeypatch, (29143, "2026-09-20"))
+    monkeypatch.setattr(daily, "refresh_lock", _lock_granting(False))
+
+    assert daily.main() == 0
+    assert runs == [], "a declined run must not touch data/processed"
