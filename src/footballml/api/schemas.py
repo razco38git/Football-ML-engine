@@ -24,6 +24,19 @@ class Health(BaseModel):
     #: ever reads `/health` should not have to find this in the logs.
     league_adjustment_stale: bool = False
 
+    #: The newest match date we hold any xG for. `None` before the first build.
+    #:
+    #: Published because the absence of xG is otherwise indistinguishable from
+    #: the ordinary case where it simply has not landed yet, and the two want
+    #: opposite things from a reader: wait a day, or do not wait at all. On
+    #: 2026-11-01 understat.com began refusing connections while resolving
+    #: normally, and every match card from that day on said the shot data
+    #: "usually lands a day or two after the result" -- true of the mechanism,
+    #: false of the situation, and three days later still telling people to
+    #: wait. This is the fact a caller needs to tell those apart; what counts
+    #: as too far behind is a presentation decision and lives in the client.
+    xg_through: date | None = None
+
 
 class ModelInfo(BaseModel):
     version: str

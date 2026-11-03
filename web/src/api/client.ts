@@ -264,6 +264,12 @@ export interface Health {
   model_version: string;
   trained_through: string;
   n_train: number;
+
+  /** The newest match date we hold any xG for, as `YYYY-MM-DD`.
+   *  Lets a caller tell "the shot data has not landed yet" from "the source
+   *  has been down for days", which read the same on a match card and want
+   *  opposite things from the reader. Null before the first build. */
+  xg_through?: string | null;
 }
 
 export class ApiError extends Error {

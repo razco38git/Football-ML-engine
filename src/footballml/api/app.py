@@ -23,7 +23,7 @@ import threading
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, TypedDict, TypeVar
 
@@ -184,6 +184,10 @@ class State:
     #: plausible-looking feature than a bookmaker price, so it never goes near
     #: that frame.
     match_xg: dict[tuple, tuple[float, float]] = field(default_factory=dict)
+
+    #: The newest match date in `match_xg`, so `/health` can report how far the
+    #: shot data reaches without walking the dict on every request.
+    xg_through: date | None = None
 
     #: Every played match scored against its own chances, newest first. The
     #: same retrodiction a match card shows, computed once so the "against the
@@ -422,7 +426,12 @@ def _load_state(startup: bool = False) -> dict[str, int]:
     state.backtest_evaluated_at, state.backtest_stale = _backtest_freshness()
 
     state.match_xg = _match_xg_lookup(tmh)
-    logger.info("Loaded own-match xG for %d matches", len(state.match_xg))
+    state.xg_through = _xg_through(state.match_xg)
+    logger.info(
+        "Loaded own-match xG for %d matches, through %s",
+        len(state.match_xg),
+        state.xg_through or "nothing",
+    )
     state.retrodicted = _retrodict_all(tmh)
     logger.info("Scored %d matches against their own chances", len(state.retrodicted))
 
@@ -935,6 +944,7 @@ def health() -> Health:
         trained_through=pd.Timestamp(meta.trained_through).date(),
         n_train=meta.n_train,
         league_adjustment_stale=state.league_offsets_stale,
+        xg_through=state.xg_through,
     )
 
 
@@ -2790,6 +2800,22 @@ def _match_xg_lookup(tmh: pd.DataFrame) -> dict[tuple, tuple[float, float]]:
         )
         for r in home.itertuples()
     }
+
+
+def _xg_through(match_xg: dict[tuple, tuple[float, float]]) -> date | None:
+    """The newest match date we hold any xG for.
+
+    Taken from the lookup rather than from the history, so it answers the
+    question a reader actually has -- how far does the shot data reach -- and
+    not how far the results do. The two part company exactly when this matters:
+    `build_dataset` carries forward the xG already on disk when Understat is
+    unreachable, so the results run on to today while this stays put on the
+    last day the source answered.
+
+    `None` on an empty lookup, which is a first-ever build rather than an
+    outage, and is reported as unknown rather than as a date.
+    """
+    return max((key[0] for key in match_xg), default=None)
 
 
 def _retrodiction(row: pd.Series) -> Retrodiction | None:

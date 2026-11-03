@@ -447,7 +447,32 @@ function SquadStrength({ p }: { p: Prediction }) {
 //: read a result against, and the card says so rather than leaving a gap.
 const XG_ERA_START = '2014-08-01';
 
-function Retrodiction({ p }: { p: Prediction }) {
+//: How old a match can be with no shot data before "not published yet" stops
+//: being the honest reading. A judgement, not a measurement: Understat
+//: normally publishes within a day, and every domestic match up to 2026-10-31
+//: had its xG while the 1-2 November ones had none at all.
+//:
+//: Measured against the match's own age rather than against how far the data
+//: reaches, which is the comparison that looks right and is not. The gap
+//: between a match and the last published day is small at the start of an
+//: outage -- the first match after it begins is one day past -- so it stays
+//: under any sensible threshold exactly when the warning is most needed. A
+//: match's age keeps growing while the source stays down, which is the thing
+//: actually worth reacting to. It also needs no special case for an
+//: international break: this branch only runs when the xG is genuinely
+//: missing, and a fortnight with no fixtures produces no cards to mislabel.
+const XG_NORMAL_LAG_DAYS = 2;
+
+function daysBetween(from: string, to: string): number {
+  const ms = Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`);
+  return Math.round(ms / 86_400_000);
+}
+
+function today(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function Retrodiction({ p, xgThrough }: { p: Prediction; xgThrough?: string | null }) {
   const r = p.retrodiction;
   const settled = p.actual_result != null;
   const european = !!p.competition && p.competition !== 'domestic';
@@ -466,13 +491,19 @@ function Retrodiction({ p }: { p: Prediction }) {
   // simply has not been published yet, and a blank space reads as a bug.
   if (!r) {
     const old = p.date < XG_ERA_START;
+    // A match this old with no shot data means the source is down, not slow,
+    // and telling a reader to wait a day or two is then simply wrong -- it
+    // was still saying so three days into the November 2026 outage.
+    const behind = !old && daysBetween(p.date, today()) >= XG_NORMAL_LAG_DAYS;
     return (
       <div className="mt-5">
         {heading}
         <div className="text-xs leading-relaxed" style={{ color: 'var(--muted-foreground)' }}>
           {old
             ? 'Shot data starts in 2014/15, so there is nothing to read this result against.'
-            : 'The shot data for this match has not been published yet. It usually lands a day or two after the result.'}
+            : behind
+              ? `No shot data for this match${xgThrough ? `. Understat, the only source for it, has published nothing since ${formatDate(xgThrough)}` : ', and none has arrived from Understat for some days'}. The result and the forecast above are unaffected; this fills in on the first refresh after the source returns.`
+              : 'The shot data for this match has not been published yet. It usually lands a day or two after the result.'}
         </div>
       </div>
     );
@@ -666,9 +697,13 @@ function ForecastSummary({ p }: { p: Prediction }) {
   );
 }
 
-export function MatchCard({ p, leagues }: {
+export function MatchCard({ p, leagues, xgThrough }: {
   p: Prediction;
   leagues?: { home: string; away: string };
+  //: How far the shot data reaches, from `/health`. Optional because
+  //: `WhatIf` builds a hypothetical match that was never played and so has
+  //: no retrodiction to explain the absence of.
+  xgThrough?: string | null;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -846,7 +881,7 @@ export function MatchCard({ p, leagues }: {
 
           <ScoreGrid p={p} />
 
-          <Retrodiction p={p} />
+          <Retrodiction p={p} xgThrough={xgThrough} />
 
           {/* SHAP drivers: the model's actual reasoning, not a summary of it. */}
           {!!p.drivers_home.length && (
@@ -910,6 +945,14 @@ export default function MatchPredictor() {
     () => (mode === 'upcoming' ? api.upcoming(league) : api.matches(league, 20)),
     [mode, league],
   );
+
+  // Fetched once and only for the cards' sake: a match with no xG needs to
+  // say whether the data is late or the source is down, and nothing in the
+  // prediction itself can tell those apart. A failure here is not worth
+  // surfacing -- the cards fall back to the ordinary "not published yet"
+  // wording, which is what they said before this existed.
+  const { data: health } = useAsync(() => api.health(), []);
+  const xgThrough = health?.xg_through ?? null;
 
   return (
     <div>
@@ -1020,7 +1063,7 @@ export default function MatchPredictor() {
       )}
 
       <div className="grid gap-4">
-        {data?.map(p => <MatchCard key={`${p.league}-${p.date}-${p.home_team}`} p={p} />)}
+        {data?.map(p => <MatchCard key={`${p.league}-${p.date}-${p.home_team}`} p={p} xgThrough={xgThrough} />)}
       </div>
     </div>
   );
