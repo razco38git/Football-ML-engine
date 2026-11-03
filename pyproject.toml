@@ -87,6 +87,20 @@ packages = ["src/footballml"]
 line-length = 100
 target-version = "py311"
 
+[tool.ruff.format]
+# Ruff formats Python inside Markdown fences too, and the snippets in README.md,
+# docs/ARCHITECTURE.md and docs/METHODOLOGY.md are laid out to be read rather
+# than to satisfy a formatter. Two concrete losses measured on 2026-11-03:
+# ARCHITECTURE.md aligns the trailing comments on DEFAULT_GBM_PARAMS so that the
+# `early_stopping` note reads as one sentence across two lines, and collapsing
+# that alignment leaves the continuation stranded under the wrong key;
+# METHODOLOGY.md states the hyperparameters as a deliberately compact three-line
+# dict, which the formatter expands to ten and pushes the section over a screen.
+# Neither is code anyone runs, so the formatter has no claim on them. Excluded
+# explicitly rather than left failing `--check`, which only teaches people to
+# ignore the check.
+exclude = ["*.md"]
+
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "PD"]
 ignore = [

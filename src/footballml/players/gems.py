@@ -238,6 +238,9 @@ def hidden_gems(
     board = judged.nlargest(limit, "gap")
     logger.info(
         "Hidden gems: %d eligible of %d rated; board spans %.1f to %.1f",
-        len(eligible), len(frame), float(board["gap"].min()), float(board["gap"].max()),
+        len(eligible),
+        len(frame),
+        float(board["gap"].min()),
+        float(board["gap"].max()),
     )
     return board, agreement(judged)

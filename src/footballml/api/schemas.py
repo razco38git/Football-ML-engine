@@ -263,6 +263,7 @@ class HiddenGems(BaseModel):
     #: them, so their performance half is not comparable with a modern one.
     excluded_seasons: list[str] = Field(default_factory=list)
 
+
 class AchievementPoint(BaseModel):
     """One season of a club's run, for the sparkline beside its row."""
 
@@ -301,6 +302,7 @@ class Achievement(BaseModel):
     #: scale attached.
     residual_sd: float
     club_seasons: int
+
 
 class Prediction(BaseModel):
     league: str

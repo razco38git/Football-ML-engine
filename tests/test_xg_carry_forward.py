@@ -94,10 +94,22 @@ def test_old_matches_keep_their_xg_and_new_ones_come_back_empty(tmp_path) -> Non
     # The fresh results carry a match played since, which Understat never served.
     fresh = pd.DataFrame(
         [
-            {"League": "E0", "Season": "2627", "Date": pd.Timestamp("2026-08-15"),
-             "Team": "Arsenal", "Opponent": "Chelsea", "Venue": "Home"},
-            {"League": "E0", "Season": "2627", "Date": pd.Timestamp("2026-11-01"),
-             "Team": "Arsenal", "Opponent": "Everton", "Venue": "Home"},
+            {
+                "League": "E0",
+                "Season": "2627",
+                "Date": pd.Timestamp("2026-08-15"),
+                "Team": "Arsenal",
+                "Opponent": "Chelsea",
+                "Venue": "Home",
+            },
+            {
+                "League": "E0",
+                "Season": "2627",
+                "Date": pd.Timestamp("2026-11-01"),
+                "Team": "Arsenal",
+                "Opponent": "Everton",
+                "Venue": "Home",
+            },
         ]
     )
 
@@ -119,8 +131,14 @@ def test_carrying_forward_never_drops_a_result(tmp_path) -> None:
 
     fresh = pd.DataFrame(
         [
-            {"League": "E0", "Season": season, "Date": pd.Timestamp("2026-08-15"),
-             "Team": "Arsenal", "Opponent": "Chelsea", "Venue": "Home"}
+            {
+                "League": "E0",
+                "Season": season,
+                "Date": pd.Timestamp("2026-08-15"),
+                "Team": "Arsenal",
+                "Opponent": "Chelsea",
+                "Venue": "Home",
+            }
             for season in ("2425", "2526", "2627")
         ]
     )
@@ -142,8 +160,16 @@ def test_the_join_stays_one_to_one(tmp_path) -> None:
     ).to_csv(path, index=False)
 
     fresh = pd.DataFrame(
-        [{"League": "E0", "Season": "2627", "Date": pd.Timestamp("2026-08-15"),
-          "Team": "Arsenal", "Opponent": "Chelsea", "Venue": "Home"}]
+        [
+            {
+                "League": "E0",
+                "Season": "2627",
+                "Date": pd.Timestamp("2026-08-15"),
+                "Team": "Arsenal",
+                "Opponent": "Chelsea",
+                "Venue": "Home",
+            }
+        ]
     )
 
     with pytest.raises(pd.errors.MergeError):

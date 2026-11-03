@@ -135,7 +135,7 @@ def test_a_club_carries_its_whole_run() -> None:
 
 
 def test_the_board_reports_the_scale_its_numbers_sit_on() -> None:
-    """"+30 points" means nothing without the spread it is being read against."""
+    """ "+30 points" means nothing without the spread it is being read against."""
     strength, outcomes = league_season("E0", "2324", clubs=20)
     outcomes.loc[outcomes.index[0], "pts"] += 30.0
 

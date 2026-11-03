@@ -285,8 +285,16 @@ GEM_PLAYERS = pd.DataFrame(
         ("E0", "1415", "Old Timer", "Villa", "MID", 3000, 70.0, 60.0, 50.0, 95.0),
     ],
     columns=[
-        "League", "Season", "Player", "Team", "role", "minutes",
-        "rating", "fifa_overall", "fifa_on_our_scale", "performance_rating",
+        "League",
+        "Season",
+        "Player",
+        "Team",
+        "role",
+        "minutes",
+        "rating",
+        "fifa_overall",
+        "fifa_on_our_scale",
+        "performance_rating",
     ],
 ).assign(rated=True)
 GEM_PLAYERS["fifa_name"] = GEM_PLAYERS["Player"]
@@ -357,6 +365,7 @@ ACH_STRENGTH = pd.DataFrame(
     columns=["League", "Season", "Team", "strength_overall"],
 )
 
+
 #: Points sit exactly on a line through the ratings, except club 0 in 2324,
 #: which took thirty more than its squad implies.
 #: Points sit on a line through the ratings, except club 0 in 2324, which won
@@ -380,9 +389,7 @@ def _season_matches(season: str) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-ACH_MATCHES = pd.concat(
-    [_season_matches("2324"), _season_matches("2425")], ignore_index=True
-)
+ACH_MATCHES = pd.concat([_season_matches("2324"), _season_matches("2425")], ignore_index=True)
 
 
 @pytest.fixture

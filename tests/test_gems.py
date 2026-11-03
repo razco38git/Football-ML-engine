@@ -45,8 +45,12 @@ def player_rows(*rows: dict) -> pd.DataFrame:
 def test_the_gap_is_the_two_published_halves_subtracted() -> None:
     frame = gaps(
         player_rows(
-            {"Season": "2324", "Player": "someone",
-             "performance_rating": 94.0, "fifa_on_our_scale": 52.0},
+            {
+                "Season": "2324",
+                "Player": "someone",
+                "performance_rating": 94.0,
+                "fifa_on_our_scale": 52.0,
+            },
         )
     )
     assert float(frame["gap"].iloc[0]) == pytest.approx(42.0)
@@ -56,10 +60,20 @@ def test_a_season_a_player_did_not_clear_is_not_on_the_board() -> None:
     """The tails of a difference fill with players who barely played."""
     board, _ = hidden_gems(
         player_rows(
-            {"Season": "2324", "Player": "thin", "minutes": MIN_MINUTES - 1,
-             "performance_rating": 94.0, "fifa_on_our_scale": 52.0},
-            {"Season": "2324", "Player": "solid", "minutes": MIN_MINUTES,
-             "performance_rating": 88.0, "fifa_on_our_scale": 60.0},
+            {
+                "Season": "2324",
+                "Player": "thin",
+                "minutes": MIN_MINUTES - 1,
+                "performance_rating": 94.0,
+                "fifa_on_our_scale": 52.0,
+            },
+            {
+                "Season": "2324",
+                "Player": "solid",
+                "minutes": MIN_MINUTES,
+                "performance_rating": 88.0,
+                "fifa_on_our_scale": 60.0,
+            },
         )
     )
     assert list(board["Player"]) == ["solid"]
@@ -75,10 +89,18 @@ def test_the_seasons_with_missing_fbref_tables_are_left_out(season: str) -> None
     """
     board, _ = hidden_gems(
         player_rows(
-            {"Season": season, "Player": "incomparable",
-             "performance_rating": 94.0, "fifa_on_our_scale": 50.0},
-            {"Season": "2324", "Player": "comparable",
-             "performance_rating": 80.0, "fifa_on_our_scale": 60.0},
+            {
+                "Season": season,
+                "Player": "incomparable",
+                "performance_rating": 94.0,
+                "fifa_on_our_scale": 50.0,
+            },
+            {
+                "Season": "2324",
+                "Player": "comparable",
+                "performance_rating": 80.0,
+                "fifa_on_our_scale": 60.0,
+            },
         )
     )
     assert list(board["Player"]) == ["comparable"]
@@ -93,12 +115,22 @@ def test_one_ea_entry_behind_two_clubs_is_refused() -> None:
     """
     frame = gaps(
         player_rows(
-            {"Season": "1718", "Player": "Bruno", "Team": "Brighton",
-             "fifa_name": "Bruno Soriano Llido", "performance_rating": 48.0,
-             "fifa_on_our_scale": 82.0},
-            {"Season": "1718", "Player": "Bruno", "Team": "Getafe",
-             "fifa_name": "Bruno Soriano Llido", "performance_rating": 49.0,
-             "fifa_on_our_scale": 82.0},
+            {
+                "Season": "1718",
+                "Player": "Bruno",
+                "Team": "Brighton",
+                "fifa_name": "Bruno Soriano Llido",
+                "performance_rating": 48.0,
+                "fifa_on_our_scale": 82.0,
+            },
+            {
+                "Season": "1718",
+                "Player": "Bruno",
+                "Team": "Getafe",
+                "fifa_name": "Bruno Soriano Llido",
+                "performance_rating": 49.0,
+                "fifa_on_our_scale": 82.0,
+            },
         )
     )
     assert frame["shared_entry"].all()
@@ -107,23 +139,36 @@ def test_one_ea_entry_behind_two_clubs_is_refused() -> None:
 def test_a_shared_entry_never_reaches_the_board() -> None:
     board, _ = hidden_gems(
         player_rows(
-            {"Season": "2324", "Player": "mismatched", "Team": "Here",
-             "fifa_name": "one entry", "performance_rating": 99.0,
-             "fifa_on_our_scale": 40.0},
-            {"Season": "2324", "Player": "mismatched", "Team": "There",
-             "fifa_name": "one entry", "performance_rating": 99.0,
-             "fifa_on_our_scale": 40.0},
-            {"Season": "2324", "Player": "genuine", "fifa_name": "genuine",
-             "performance_rating": 80.0, "fifa_on_our_scale": 60.0},
+            {
+                "Season": "2324",
+                "Player": "mismatched",
+                "Team": "Here",
+                "fifa_name": "one entry",
+                "performance_rating": 99.0,
+                "fifa_on_our_scale": 40.0,
+            },
+            {
+                "Season": "2324",
+                "Player": "mismatched",
+                "Team": "There",
+                "fifa_name": "one entry",
+                "performance_rating": 99.0,
+                "fifa_on_our_scale": 40.0,
+            },
+            {
+                "Season": "2324",
+                "Player": "genuine",
+                "fifa_name": "genuine",
+                "performance_rating": 80.0,
+                "fifa_on_our_scale": 60.0,
+            },
         )
     )
     assert list(board["Player"]) == ["genuine"]
 
 
 def test_one_club_in_a_season_is_not_flagged() -> None:
-    frame = gaps(
-        player_rows({"Season": "2324", "Player": "solo", "fifa_name": "solo"})
-    )
+    frame = gaps(player_rows({"Season": "2324", "Player": "solo", "fifa_name": "solo"}))
     assert not frame["shared_entry"].any()
 
 
@@ -152,8 +197,7 @@ def test_no_next_entry_is_absent_rather_than_zero() -> None:
 def test_the_claim_is_withheld_when_no_stratum_is_big_enough() -> None:
     """Better no number than a correlation read off four players."""
     players = player_rows(
-        *[{"Season": "2324", "Player": f"p{i}", "fifa_overall": 70.0 + i}
-          for i in range(4)]
+        *[{"Season": "2324", "Player": f"p{i}", "fifa_overall": 70.0 + i} for i in range(4)]
     )
     assert agreement(with_ea_verdict(gaps(players), players)) == {}
 
@@ -237,8 +281,13 @@ def test_mean_reversion_alone_does_not_produce_a_claim() -> None:
 def test_the_board_is_biggest_gap_first_and_respects_its_limit() -> None:
     players = player_rows(
         *[
-            {"Season": "2324", "Player": f"p{i}", "fifa_name": f"p{i}",
-             "performance_rating": 60.0 + i, "fifa_on_our_scale": 50.0}
+            {
+                "Season": "2324",
+                "Player": f"p{i}",
+                "fifa_name": f"p{i}",
+                "performance_rating": 60.0 + i,
+                "fifa_on_our_scale": 50.0,
+            }
             for i in range(8)
         ]
     )

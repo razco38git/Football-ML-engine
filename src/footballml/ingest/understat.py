@@ -180,6 +180,7 @@ def xg_from_published(path: Path) -> pd.DataFrame:
     # them, and would make the "carried forward" count meaningless.
     return carried[carried["xGFor"].notna()].reset_index(drop=True)
 
+
 def merge_xg(tmh: pd.DataFrame, xg: pd.DataFrame, validate_dates: bool = True) -> pd.DataFrame:
     """Attach Understat metrics to the football-data team-match history.
 

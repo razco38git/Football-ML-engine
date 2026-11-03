@@ -1141,7 +1141,6 @@ def rating_insights() -> RatingInsights:
     return state._rating_insights
 
 
-
 #: How many rows the hidden-gems board may return.
 GEMS_LIMIT = 20
 
@@ -1177,9 +1176,7 @@ def hidden_gems_board(
     board, claim = state._gems
 
     if board.empty:
-        raise HTTPException(
-            404, "No rated player-season carries both halves of a rating."
-        )
+        raise HTTPException(404, "No rated player-season carries both halves of a rating.")
 
     rows = board if role is None else board[board["role"].astype(str) == role]
 
@@ -1221,6 +1218,7 @@ def hidden_gems_board(
         min_minutes=MIN_MINUTES,
         excluded_seasons=sorted(INCOMPLETE_SEASONS),
     )
+
 
 #: Rows per end of the achievement board.
 ACHIEVEMENT_LIMIT = 8
@@ -1281,6 +1279,7 @@ def achievement_board(
         residual_sd=round(float(fitted["over"].std()), 2),
         club_seasons=int(len(fitted)),
     )
+
 
 @app.get("/leagues")
 def leagues() -> dict[str, str]:
