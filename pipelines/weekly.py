@@ -339,9 +339,16 @@ def main() -> int:
     # a few minutes. A schedule offset is not a lock -- both missed triggers
     # fired four seconds apart on 2026-10-12 after the machine spent the
     # morning switched off.
+    from pipelines._awake import keep_awake
     from pipelines._lock import holder, refresh_lock
 
-    with refresh_lock("weekly", wait_seconds=LOCK_WAIT_SECONDS) as acquired:
+    # Outside the refresh lock, so the wait for a daily run to finish is
+    # covered too: ten minutes of waiting is long enough to idle into sleep,
+    # and sleeping there would hold this process on the doorstep while the
+    # window to run closes.
+    with keep_awake("weekly"), refresh_lock(
+        "weekly", wait_seconds=LOCK_WAIT_SECONDS
+    ) as acquired:
         if not acquired:
             logger.error(
                 "Another refresh has held the lock for over %.0f minutes (%s). "

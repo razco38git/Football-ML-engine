@@ -72,6 +72,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from pipelines._awake import keep_awake  # noqa: E402
 from pipelines._lock import holder, refresh_lock  # noqa: E402
 from pipelines.weekly import (  # noqa: E402
     API_URL,
@@ -251,7 +252,7 @@ def main() -> int:
     # running there is nothing to wait for. Both missed triggers firing
     # together is not hypothetical: on 2026-10-12 the machine was off all
     # morning and Windows started the two four seconds apart.
-    with refresh_lock("daily") as acquired:
+    with keep_awake("daily"), refresh_lock("daily") as acquired:
         if not acquired:
             logger.info(
                 "Another refresh is running (%s); stopping. It rebuilds "
