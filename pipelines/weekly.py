@@ -346,9 +346,10 @@ def main() -> int:
     # covered too: ten minutes of waiting is long enough to idle into sleep,
     # and sleeping there would hold this process on the doorstep while the
     # window to run closes.
-    with keep_awake("weekly"), refresh_lock(
-        "weekly", wait_seconds=LOCK_WAIT_SECONDS
-    ) as acquired:
+    with (
+        keep_awake("weekly"),
+        refresh_lock("weekly", wait_seconds=LOCK_WAIT_SECONDS) as acquired,
+    ):
         if not acquired:
             logger.error(
                 "Another refresh has held the lock for over %.0f minutes (%s). "
