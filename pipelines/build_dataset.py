@@ -4,6 +4,11 @@ Fetches football-data.co.uk results and Understat xG for the top five European
 leagues, reconciles team names, and writes the processed tables the feature
 builder and backtest consume.
 
+If Understat cannot be reached the results are still published and the xG
+already on disk is carried forward -- see the comment beside the fetch for why
+that is allowed here and what it costs. ``--require-xg`` restores the old
+behaviour of failing instead.
+
 Run with::
 
     python -m pipelines.build_dataset
@@ -35,6 +40,7 @@ from footballml.ingest.understat import (  # noqa: E402
     fetch_understat_team_match,
     merge_xg,
     season_labels,
+    xg_from_published,
 )
 
 #: football-data's own results, one row per match, and nothing else's.
@@ -61,6 +67,15 @@ def main() -> None:
     parser.add_argument("--start-season", default="1011")
     parser.add_argument(
         "--end-season", default=None, help="Defaults to the season currently underway."
+    )
+    parser.add_argument(
+        "--require-xg",
+        action="store_true",
+        help=(
+            "Fail instead of carrying forward the xG already published when "
+            "Understat cannot be reached. The old behaviour, kept for a run "
+            "whose whole purpose is to refresh xG."
+        ),
     )
     args = parser.parse_args()
 
@@ -100,12 +115,59 @@ def main() -> None:
     # actually serve rather than logging a warning for every earlier one.
     xg_seasons = [s for s in seasons if s >= "1415"]
     known = set(tmh["Team"].unique())
-    xg = fetch_understat_team_match(args.leagues, xg_seasons, known_teams=known)
-    log.info("Fetched %d Understat team-match rows", len(xg))
+
+    # Results are published even when the xG top-up cannot be fetched.
+    #
+    # This is a deliberate exception to the rule above it, and the distinction
+    # is between a partial *result set* and a complete one missing an optional
+    # column family. football-data and FBref give a row everything the model
+    # reads: `EXPERIMENTS.md` measures the whole `xg` family -- 94 of the 235
+    # features -- at -0.00010 RPS [-0.00045, +0.00023] when dropped, an
+    # interval straddling zero. Stopping the entire weekly for it is the more
+    # expensive mistake, and it is the one that was being made: on 2026-11-02
+    # understat.com's authoritative nameservers went unreachable and four
+    # consecutive runs died here, so results went stale and the model went
+    # eight days without a retrain over a feature worth nothing.
+    #
+    # The xG already on disk is carried forward rather than discarded, so the
+    # published file keeps every match Understat has ever served and only
+    # matches played during the outage come back without it. A later run fills
+    # them in; nothing has to be rebuilt from scratch.
+    try:
+        xg = fetch_understat_team_match(args.leagues, xg_seasons, known_teams=known)
+        log.info("Fetched %d Understat team-match rows", len(xg))
+    except Exception as exc:  # noqa: BLE001 -- see below
+        # Broad on purpose. The failure arrives from three layers -- DNS, TLS
+        # and soccerdata's own parsing -- as a different exception type each
+        # time, and enumerating them would mean a new outage mode slips
+        # through as a crash. The type and message are logged, and the
+        # coverage line below is what makes a silent problem visible.
+        if args.require_xg:
+            raise
+        log.error("Understat unreachable (%s: %s)", type(exc).__name__, exc)
+        xg = xg_from_published(TMH_OUT)
+        log.warning(
+            "Carrying forward %d previously published xG rows. Results are "
+            "current; matches played since the last successful fetch have no "
+            "xG until a later run adds it.",
+            len(xg),
+        )
 
     merged = merge_xg(tmh, xg)
     covered = merged["xGFor"].notna().sum()
     log.info("xG coverage %d/%d (%.1f%%)", covered, len(merged), covered / len(merged) * 100)
+
+    # Named rather than left to be inferred from a percentage: a reader of the
+    # log should not have to work out which matches are affected.
+    stale = merged[merged["Season"] >= "1415"]
+    gaps = stale[stale["xGFor"].isna()]
+    if not gaps.empty:
+        log.warning(
+            "%d team-match rows since 2014/15 have no xG, newest %s. Re-run "
+            "once Understat answers to fill them.",
+            len(gaps),
+            gaps["Date"].max().date() if gaps["Date"].notna().any() else "unknown",
+        )
 
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     write_csv(matches, MATCHES_OUT)

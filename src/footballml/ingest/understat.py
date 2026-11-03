@@ -24,6 +24,7 @@ Beyond xG it carries two metrics worth having:
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import pandas as pd
 
@@ -125,6 +126,59 @@ def _side_frame(raw: pd.DataFrame, side: str, other: str, venue: str) -> pd.Data
     # so the For/Against framing would be misleading. Keep only the team's own.
     return out.drop(columns=["PPDAAgainst", "DeepCompletionsAgainst"], errors="ignore")
 
+
+#: The columns :func:`fetch_understat_team_match` returns, and so the shape
+#: :func:`merge_xg` expects on its right-hand side.
+XG_COLUMNS = [
+    "League",
+    "Season",
+    "Date",
+    "Team",
+    "Opponent",
+    "Venue",
+    *(f"{name}{side}" for name in ("xG", "npxG") for side in ("For", "Against")),
+    "PPDAFor",
+    "DeepCompletionsFor",
+]
+
+
+def xg_from_published(path: Path) -> pd.DataFrame:
+    """The xG already in a published team-match history, in the fetch's shape.
+
+    Understat is the only free source of shot quality at this coverage, and
+    when it is unreachable there is nothing to put in its place -- but there is
+    something already on disk. Every match it has ever served us is in the last
+    published `team_match_history_all.csv`, and re-reading it lets a rebuild
+    keep twelve seasons of xG instead of discarding them for want of today's.
+
+    Returns a frame shaped exactly like :func:`fetch_understat_team_match`, so
+    :func:`merge_xg` joins it with no special case: matches we already had keep
+    their xG, and matches played since the outage began come back `NaN` until a
+    later run fills them in.
+
+    Returns an empty frame with the right columns when the file is absent or
+    predates the xG columns, so a first-ever build still works.
+    """
+    if not path.exists():
+        logger.warning("No published history at %s; no xG to carry forward", path.name)
+        return pd.DataFrame(columns=XG_COLUMNS)
+
+    published = pd.read_csv(path, low_memory=False)
+    missing = set(XG_COLUMNS) - set(published.columns)
+    if missing:
+        logger.warning(
+            "%s has no xG columns (%s); none carried forward",
+            path.name,
+            sorted(missing),
+        )
+        return pd.DataFrame(columns=XG_COLUMNS)
+
+    carried = published[XG_COLUMNS].copy()
+    carried["Season"] = carried["Season"].astype(str)
+    carried["Date"] = pd.to_datetime(carried["Date"], errors="coerce")
+    # Rows that never had xG would occupy the one-to-one join with nothing in
+    # them, and would make the "carried forward" count meaningless.
+    return carried[carried["xGFor"].notna()].reset_index(drop=True)
 
 def merge_xg(tmh: pd.DataFrame, xg: pd.DataFrame, validate_dates: bool = True) -> pd.DataFrame:
     """Attach Understat metrics to the football-data team-match history.
