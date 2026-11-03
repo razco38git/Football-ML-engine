@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Re-run the weekly refresh if its last run failed and the sources are back.
 
@@ -31,10 +31,11 @@
       would put two processes in `data/processed` at once, which is the one way
       this could corrupt something. The daily job writes there too, so it is
       checked as well.
-    - **Sources still down.** Checked with the same `getaddrinfo` path the
-      pipeline uses, so this agrees with what the run would actually
-      experience. A failed check is the normal case during an outage and costs
-      a second.
+    - **Sources still down.** Checked by opening a TCP connection on 443, not
+      by resolving the name. An outage can present either way -- 2026-11-02
+      was a DNS failure, 2026-11-03 was a host that resolved and then answered
+      nothing -- and only the connect test catches both. A failed check is the
+      normal case during an outage and costs at most five seconds per host.
     - **A failure that is not transient.** If the weekly is broken for a reason
       no amount of waiting fixes, retrying hourly forever would burn 27 minutes
       an hour indefinitely. `MaxAttempts` caps the launches per failure, after
@@ -104,16 +105,51 @@ foreach ($name in @($WeeklyTaskName, $DailyTaskName)) {
 }
 
 # --- guard 3: have the sources come back? -----------------------------------
+# Resolution is not reachability, and this guard learned the difference the
+# expensive way. The 2026-11-02 outage began as a DNS failure, so testing
+# `getaddrinfo` matched exactly what the pipeline saw. By 2026-11-03 it had
+# changed character: understat.com resolved to 45.90.32.72 immediately and
+# then refused every connection. This guard saw a clean lookup, logged "every
+# source resolves", and waved all six retries through -- each spending ~18
+# minutes in build_dataset to reach the same dead socket -- before declaring a
+# live outage permanent and standing down until the next Monday.
+#
+# A TCP connect is what the fetch actually needs, so it is what gets tested.
+# It subsumes the DNS check rather than replacing it: an unresolvable name
+# throws from BeginConnect just as a refused port does, so one test covers
+# both shapes of outage and the normal case still costs well under a second.
+function Test-HostReachable {
+    param(
+        [string] $Hostname,
+        [int] $Port = 443,
+        [int] $TimeoutMs = 5000
+    )
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $pending = $client.BeginConnect($Hostname, $Port, $null, $null)
+        # A timeout is the failure mode that matters here: the host that
+        # answers nothing looks identical to a healthy one until you wait.
+        if (-not $pending.AsyncWaitHandle.WaitOne($TimeoutMs, $false)) {
+            return $false
+        }
+        # Throws on a refused or reset connection, which WaitOne does not.
+        $client.EndConnect($pending)
+        return $true
+    } catch {
+        return $false
+    } finally {
+        $client.Close()
+    }
+}
+
 $down = @()
 foreach ($hostname in $RequiredHosts) {
-    try {
-        [System.Net.Dns]::GetHostEntry($hostname) | Out-Null
-    } catch {
+    if (-not (Test-HostReachable -Hostname $hostname)) {
         $down += $hostname
     }
 }
 if ($down.Count -gt 0) {
-    Write-Line ("still unresolvable: " + ($down -join ", ") + " -- not retrying")
+    Write-Line ("still unreachable: " + ($down -join ", ") + " -- not retrying")
     exit 0
 }
 
@@ -137,7 +173,7 @@ $attempts += 1
 Set-Content -Path $state -Value $attempts
 
 Write-Line (
-    "last weekly exited $($info.LastTaskResult) and every source resolves; " +
+    "last weekly exited $($info.LastTaskResult) and every source is reachable; " +
     "starting '$WeeklyTaskName' (attempt $attempts of $MaxAttempts)"
 )
 Start-ScheduledTask -TaskName $WeeklyTaskName
