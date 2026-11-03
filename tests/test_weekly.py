@@ -93,7 +93,7 @@ def test_a_failed_step_stops_the_run(monkeypatch, tmp_path) -> None:
 
     def fake_run(step):
         attempted.append(step.name)
-        if step.name == "build_players":
+        if step.name == "build_dataset":
             raise subprocess.CalledProcessError(1, step.name, "", "boom")
         return 0.0
 
@@ -102,7 +102,7 @@ def test_a_failed_step_stops_the_run(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("sys.argv", ["weekly"])
 
     assert weekly.main() == 1
-    assert attempted == ["build_dataset", "build_players"], "should stop at the failure"
+    assert attempted == ["build_dataset"], "should stop at the failure"
 
 
 def test_a_stopped_api_is_not_a_failure(monkeypatch, tmp_path) -> None:
@@ -210,13 +210,26 @@ def test_an_optional_step_failing_does_not_stop_the_refresh(monkeypatch, tmp_pat
     assert exit_code == 1
 
 
-def test_only_the_reporting_and_european_steps_are_optional() -> None:
-    """Required steps build the dataset and the model the site serves.
+def test_only_steps_whose_failure_cannot_mislead_are_optional() -> None:
+    """Required steps are the ones a failure could leave *wrong*, not merely old.
 
-    Optional ones refine a correction that applies to European ties, re-score
-    the walk-forward history, or rebuild a *published* number the model never
-    reads -- none of which the site needs in order to be correct, and none of
-    which may cost the reload when it fails.
+    The test is what is on disk afterwards. `build_dataset` can leave results
+    half-updated, and a half-updated table reads exactly like a complete one,
+    so it stops the run. The optional steps cannot do that: they refine a
+    correction that applies to European ties, re-score the walk-forward
+    history, or rebuild a published number -- and when they fail, what remains
+    is the previous complete version of it.
+
+    `build_players` is the case that forced the distinction to be stated
+    properly, because it does not fit the older phrasing of "a number the model
+    never reads": the model reads `team_strength.csv` through
+    `add_team_strength`. It qualifies anyway, on the criterion that matters.
+    `_write_csv` writes to a temp file and replaces, and an Understat outage
+    fails during the fetch, so nothing is written at all -- verified on
+    2026-11-03, when the step died after 44s and both output files still
+    carried their previous timestamps. The model then trains on last week's
+    ratings, which is staleness, not corruption, and is bounded: dropping the
+    squad family outright measures +0.00015 RPS [-0.00001, +0.00032].
 
     An inventory rather than a rule, deliberately: adding a step here is a
     decision about what a failure is allowed to cost, so it should have to be
@@ -225,6 +238,7 @@ def test_only_the_reporting_and_european_steps_are_optional() -> None:
     optional = {s.name for s in weekly.STEPS if not s.required}
     assert optional == {
         "backtest",
+        "build_players",
         "build_squad_strength",
         "fetch_european",
         "validate_european",
@@ -420,6 +434,67 @@ def test_a_failed_backtest_is_named_in_the_summary(monkeypatch, tmp_path) -> Non
     assert written, "the run left no log behind"
     summary = written[0]
     assert "backtest" in summary, summary
+    assert "optional step(s) failed" in summary, summary
+
+
+# --- an Understat outage must not cost the retrain -----------------------------
+
+
+def test_a_failed_build_players_still_retrains_and_reloads(monkeypatch, tmp_path) -> None:
+    """The gap `build_dataset`'s carry-forward left open.
+
+    That fix stops an Understat outage killing step 1. `build_players` is step
+    2 with the same hard dependency on `read_player_season_stats`, so on
+    2026-11-03 build_dataset sailed through on carried-forward xG and the run
+    died here anyway, 44 seconds in, taking the retrain and the reload with it.
+    Left required, every weekly during an outage stops at step 2 of 11 -- which
+    is how the model went nine days without a retrain.
+
+    Nothing downstream reads what this step writes in a way that a week-old
+    vintage breaks, and the same morning proved it: `--skip build_players`
+    completed all nine other steps.
+    """
+    ran: list[str] = []
+
+    def fake_run(step):
+        if step.name == "build_players":
+            raise subprocess.CalledProcessError(1, step.name, "", "understat unreachable")
+        ran.append(step.name)
+        return 0.0
+
+    reloaded: list[bool] = []
+    monkeypatch.setattr(weekly, "run_step", fake_run)
+    monkeypatch.setattr(weekly, "reload_api", lambda url: reloaded.append(True) or True)
+    monkeypatch.setattr(weekly, "LOG_DIR", tmp_path)
+    monkeypatch.setattr("sys.argv", ["weekly"])
+
+    code = weekly.main()
+
+    assert "train" in ran, "an Understat outage cost the retrain"
+    assert "score_upcoming" in ran and "project_season" in ran
+    assert reloaded == [True], "the site was never told to pick anything up"
+    assert code != 0, "a failed step must still be reported"
+
+
+def test_a_failed_build_players_is_named_in_the_summary(monkeypatch, tmp_path) -> None:
+    """Optional must not mean invisible: ratings ageing quietly is the risk."""
+
+    def fake_run(step):
+        if step.name == "build_players":
+            raise subprocess.CalledProcessError(1, step.name, "", "understat unreachable")
+        return 0.0
+
+    monkeypatch.setattr(weekly, "run_step", fake_run)
+    monkeypatch.setattr(weekly, "reload_api", lambda url: True)
+    monkeypatch.setattr(weekly, "LOG_DIR", tmp_path)
+    monkeypatch.setattr("sys.argv", ["weekly"])
+
+    weekly.main()
+
+    written = [q.read_text(encoding="utf-8") for q in tmp_path.glob("weekly-*.log")]
+    assert written, "the run left no log behind"
+    summary = written[0]
+    assert "build_players" in summary, summary
     assert "optional step(s) failed" in summary, summary
 
 

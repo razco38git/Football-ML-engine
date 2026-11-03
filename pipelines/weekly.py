@@ -90,10 +90,39 @@ STEPS: tuple[Step, ...] = (
     # data before it -- and it was added after this step was written. Left at
     # 1516 the weekly run would quietly delete a season from the ratings file
     # every Monday, and the only sign would be a gap in the season dropdown.
+    # Optional, and the reasoning is the `Step` docstring's own test: does a
+    # failure here leave a half-built dataset masquerading as a complete one?
+    # It cannot. `_write_csv` writes to a temp file and replaces, and the only
+    # failure mode seen -- Understat unreachable -- happens during the fetch,
+    # before anything is written. Verified on 2026-11-03: the step died after
+    # 44s and both `player_ratings.csv` and `team_strength.csv` still carried
+    # their previous timestamps, untouched.
+    #
+    # So what is on disk after a failure is a complete, self-consistent, older
+    # pair of files -- exactly what `--skip build_players` leaves. Stopping the
+    # chain for that forfeits the retrain, the scoring, the projections and the
+    # reload to protect a number `daily.py` describes as moving "slowly enough
+    # that a day makes no visible difference". The same morning's run proved
+    # the rest does not need it: `--skip build_players` completed all nine
+    # other steps.
+    #
+    # This is the gap `build_dataset`'s carry-forward left open. That fix stops
+    # an Understat outage killing step 1, and this step is step 2 with the same
+    # hard dependency -- on 2026-11-03 build_dataset sailed through and the run
+    # died here anyway. Left required, every weekly during an outage stops at
+    # step 2 of 11, which is how the model went nine days without a retrain.
+    #
+    # Deliberately *not* paired with `--understat-from-cache`. That flag exists
+    # and would rebuild from the stored payload, but it would publish a file
+    # stamped today describing matches it never saw -- `fetch_player_seasons`
+    # says so itself: such a rebuild "must not be presented as including
+    # matches played since". Carrying xG forward was safe because the gap
+    # stayed visible as NaN; here it would not be.
     Step(
         "build_players",
         ("--start-season", "1415"),
         "rebuild player ratings and team strength",
+        required=False,
     ),
     # Published numbers only -- the model never reads either file it writes, so
     # a failure here costs a stale second column on one page and must not stop
