@@ -31,11 +31,16 @@
       would put two processes in `data/processed` at once, which is the one way
       this could corrupt something. The daily job writes there too, so it is
       checked as well.
-    - **Sources still down.** Checked by opening a TCP connection on 443, not
-      by resolving the name. An outage can present either way -- 2026-11-02
-      was a DNS failure, 2026-11-03 was a host that resolved and then answered
-      nothing -- and only the connect test catches both. A failed check is the
-      normal case during an outage and costs at most five seconds per host.
+    - **Sources still down.** Checked in two stages, because this guard has
+      been wrong in two different ways. First a TCP connection on 443, not a
+      name lookup: 2026-11-02 was a DNS failure, 2026-11-03 was a host that
+      resolved and then answered nothing, and only the connect test catches
+      both. Then, for hosts in `$ServingMarkers`, the homepage must contain a
+      marker that only the live site has: 2026-11-04 was a 200 OK maintenance
+      page reading "We will come back soon", which passed the connect test and
+      launched a weekly that could not fetch a single row. A failed check is
+      the normal case during an outage and costs at most five seconds per host
+      to connect, plus one page fetch.
     - **A failure that is not transient.** If the weekly is broken for a reason
       no amount of waiting fixes, retrying hourly forever would burn 27 minutes
       an hour indefinitely. `MaxAttempts` caps the launches per failure, after
@@ -57,6 +62,9 @@ param(
     # no fallback: football-data has the results, but xG and every player
     # season come from here alone.
     [string[]] $RequiredHosts = @("understat.com", "fbref.com"),
+    # Hosts that have to prove they are *serving* rather than merely answering,
+    # and the marker that proves it. See guard 3.
+    [hashtable] $ServingMarkers = @{ "understat.com" = "/league/" },
     # Six launches, not unlimited: see the fourth guard above.
     [int] $MaxAttempts = 6
 )
@@ -142,14 +150,63 @@ function Test-HostReachable {
     }
 }
 
+# Answering is not the same as serving, which is the second way this guard has
+# been wrong. On 2026-11-04 understat.com accepted TCP on 443 and returned 200
+# for a 26,719-byte page whose entire visible text was "We will come back
+# soon": no scripts, no /league/ links, no data. The connect test passed, the
+# weekly launched, spent 28 minutes in build_dataset, fell back to carried-
+# forward xG, and build_players died on a JSONDecodeError parsing HTML as JSON.
+# Six such retries is three hours of republishing data we already had.
+#
+# So a host in $ServingMarkers must also return a page containing its marker.
+# `/league/` is chosen as a *positive* feature of the live site -- its homepage
+# is a set of league links -- rather than a match on the maintenance wording,
+# which the operator can reword at any time and which would then read as
+# healthy. Matching what a working site has fails safe; matching what a broken
+# one says fails open.
+function Test-HostServing {
+    param(
+        [string] $Hostname,
+        [string] $Marker,
+        [int] $TimeoutSec = 20
+    )
+    try {
+        $response = Invoke-WebRequest -Uri "https://$Hostname/" -TimeoutSec $TimeoutSec `
+            -MaximumRedirection 3 -UseBasicParsing -ErrorAction Stop
+    } catch {
+        return $false
+    }
+    if ($response.StatusCode -ne 200) { return $false }
+    return ($response.Content -like "*$Marker*")
+}
+
 $down = @()
+$notServing = @()
 foreach ($hostname in $RequiredHosts) {
     if (-not (Test-HostReachable -Hostname $hostname)) {
         $down += $hostname
+        continue
+    }
+    $marker = $ServingMarkers[$hostname]
+    if ($marker -and -not (Test-HostServing -Hostname $hostname -Marker $marker)) {
+        $notServing += $hostname
     }
 }
 if ($down.Count -gt 0) {
     Write-Line ("still unreachable: " + ($down -join ", ") + " -- not retrying")
+    exit 0
+}
+# Logged apart from "unreachable" on purpose: the two need different responses.
+# Unreachable is somebody else's outage and waiting is all there is to do. A
+# host that answers without serving may instead mean this marker is wrong, and
+# that failure is the dangerous one -- it would hold the weekly back while the
+# source is healthy -- so it has to be distinguishable in the log at a glance.
+if ($notServing.Count -gt 0) {
+    Write-Line (
+        "answering but not serving data: " + ($notServing -join ", ") +
+        " -- not retrying. If the site is in fact up, this guard's marker is " +
+        "stale: see `$ServingMarkers in scripts/weekly_retry.ps1."
+    )
     exit 0
 }
 
