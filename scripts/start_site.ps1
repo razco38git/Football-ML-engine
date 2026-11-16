@@ -34,12 +34,35 @@ param(
     # script starts.
     [int] $WebPort = 8443,
     # Where to keep the servers' own output. A start script that discards it
-    # leaves nothing to read when the site is up but wrong.
-    [string] $LogDir = (Join-Path $PSScriptRoot "..\logs")
+    # leaves nothing to read when the site is up but wrong. Defaulted below,
+    # not here -- see the note on $here.
+    [string] $LogDir
 )
 
 $ErrorActionPreference = "Stop"
-$root = Resolve-Path (Join-Path $PSScriptRoot "..")
+
+# `$PSScriptRoot` is empty inside a `param()` default under **Windows
+# PowerShell 5.1 when the script also declares [CmdletBinding()]**. Not under
+# pwsh 7, and not under 5.1 without the attribute -- which is exactly the
+# combination this script had, so `$LogDir` defaulted to an empty path and
+# `Join-Path` threw before the first line of the body ran.
+#
+# It hid for as long as it did because every interactive run here is pwsh 7,
+# where it works. It only surfaced on 2026-11-16 when the logon task invoked
+# `powershell.exe -File`, failed with LastTaskResult 1, and left the site down
+# -- the one caller that cannot be watched is the one that hit it.
+#
+# Resolved in the body, where every host populates it, with $MyInvocation as a
+# fallback for hosts that populate neither.
+$here = if ($PSScriptRoot) {
+    $PSScriptRoot
+} elseif ($MyInvocation.MyCommand.Path) {
+    Split-Path -Parent $MyInvocation.MyCommand.Path
+} else {
+    throw "Cannot determine this script's directory; pass -LogDir explicitly."
+}
+if (-not $LogDir) { $LogDir = Join-Path $here "..\logs" }
+$root = Resolve-Path (Join-Path $here "..")
 $null = New-Item -ItemType Directory -Force -Path $LogDir
 
 function Test-PortListening {
