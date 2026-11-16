@@ -1,10 +1,11 @@
 # Should an attacking midfielder count as midfield?
 
-**Status: proposal. Nothing here is built.** Every number below was measured on
-the 2026-11-02 `player_ratings.csv` vintage — the last successful
-`build_players` before the Understat outage — and measured before the proposal
-was written, so the design rests on what the data supports rather than on what
-would be nice.
+**Status: proposal, measured. Nothing here is built.** Every number below comes
+from `pipelines/cam_line_ab.py`, run against the 2026-11-02 `player_ratings.csv`
+vintage — the last successful `build_players` before the Understat outage. The
+measurement was made before the recommendation was written, and the
+recommendation changed as a result: see
+[What the measurement changed](#what-the-measurement-changed).
 
 ## The question
 
@@ -49,7 +50,7 @@ minutes) and Brahim Díaz (136) sit below the gate unrated.
 
 ## How widespread it is
 
-Over all 12 seasons of rated player-seasons:
+Over all 13 seasons in the file:
 
 | primary EA position within `AMW` | player-seasons |
 |---|---|
@@ -59,112 +60,177 @@ Over all 12 seasons of rated player-seasons:
 | LW | 735 |
 | RW | 734 |
 
-`CAM`-primary is **24.0% of the AMW bucket** and 4.9% of all rated
-player-seasons — as common as any single winger position, not a rare edge
-case. Moving it would change **51.8%** of team-seasons' midfield rating and
-51.6% of their attack rating.
+`CAM`-primary is **24.0% of the AMW bucket** — as common as any single winger
+position, not a rare edge case. It is 4.9% of all player-seasons in the file
+and **4.7% of rated ones** (1,161 of 24,669), which is the population that
+actually reaches a team rating.
 
 ### It is a redistribution, not the correction of a bias
 
-| line | team-seasons moved | mean change | range |
-|---|---|---|---|
-| midfield | 623 / 1,203 (51.8%) | **+0.09** | +8.98 / −8.81 |
-| attack | 622 / 1,206 (51.6%) | −0.03 | +5.66 / −5.50 |
-| overall | 525 / 1,206 (43.5%) | +0.01 | +2.28 / −2.08 |
+Moving `CAM` to the midfield line, ratings held fixed, over the 1,206
+team-seasons production rates:
+
+| line | team-seasons moved | mean change | mean absolute | range |
+|---|---|---|---|---|
+| midfield | 647 / 1,203 (53.8%) | **+0.09** | 0.57 | +8.98 / −8.81 |
+| attack | 649 / 1,206 (53.8%) | −0.03 | 0.47 | +5.66 / −5.50 |
+| overall | 651 / 1,206 (54.0%) | +0.02 | 0.13 | +2.28 / −2.08 |
+| defence | 0 / 1,206 | 0.00 | 0.00 | — |
 
 The means are indistinguishable from zero while the spread is nine points
-wide. Real Madrid (+5.8 on midfield) is a large mover, not a typical one.
-Midfield moves *down* for many clubs, because adding a lower-rated number 10
-to a strong holding pair drags the line mean down.
+wide. Real Madrid (+4.29 on midfield) is a large mover, not a typical one, and
+it is not even the largest: Marseille's midfield **falls 8.81**, because adding
+a lower-rated number 10 to a strong holding pair drags the line mean down.
 
 So this cannot be argued as "the midfield rating is systematically too low".
 It is not. It is too low *for some clubs* and too high for others, and the
 question is which arrangement describes a side better.
 
-## The finding that makes this worth proposing
+## What the measurement changed
 
-Judged on the project's own three correlations, plus the midfield line against
-points. Paired bootstrap, 2,000 resamples over 841 completed team-seasons:
+The first version of this proposal measured one arm — relabel the line, hold
+the ratings fixed — and proposed a new `CAM` role on the strength of it. Both
+halves of that turned out to be wrong in an interesting way.
 
-| correlation | as published | CAM to midfield | delta | 95% CI |
+### `role` is a rating pool, not a label
+
+`rate_players` computes every percentile within `(role, Season)`. So a new
+`CAM` role does not merely move those players to another line: it re-ranks
+them against each other instead of against wingers, **and re-ranks the wingers
+they leave behind**. Relabelling the line and holding the ratings fixed answers
+a narrower question than the change poses, and the difference is most of the
+effect.
+
+Hence five arms, in two pairs that are never crossed:
+
+| arm | what varies |
+|---|---|
+| `production` | nothing — reproduces `team_strength.csv` exactly |
+| `line_only` | the midfield line gains `CAM`; the rating pool is untouched |
+| `rerated` | nothing, but re-rated, so it carries the same jitter as the two below |
+| `cam_to_mid` | `CAM` joins the existing `MID` role: MID's pool, MID's yardstick |
+| `cam_new_role` | `CAM` gets a role of its own on `AMW`'s yardstick |
+
+`cam_new_role` follows the precedent `DM` set when it was split out of `MID` —
+*"the same metrics and the same weights as MID, deliberately … Separate the
+players, not the yardstick."* Inventing weights for a new pool would be a
+separate change with its own sweep.
+
+### Against the following season's outcome
+
+Production filtering throughout, so these are comparable with the figures
+recorded elsewhere in the repo:
+
+| arm | mid>pts | atk>GF | def>GA | ovr>pts |
 |---|---|---|---|---|
-| **mid > points** | 0.7597 | 0.7755 | **+0.0156** | [+0.0073, +0.0248] |
-| atk > goals for | 0.8437 | 0.8387 | −0.0050 | [−0.0107, +0.0003] |
-| ovr > points | 0.8464 | 0.8482 | +0.0017 | [+0.0001, +0.0034] |
-| def > goals against | −0.6594 | −0.6594 | 0.0000 | unchanged |
+| production | 0.6996 | 0.7382 | −0.5287 | 0.7556 |
+| **line_only** | **0.7097** | **0.7417** | −0.5287 | **0.7568** |
+| rerated | 0.6996 | 0.7382 | −0.5287 | 0.7556 |
+| cam_to_mid | 0.7033 | 0.7397 | −0.5259 | 0.7549 |
+| cam_new_role | 0.7073 | 0.7380 | −0.5265 | 0.7556 |
 
-**One result clears both zero and the project's 0.003 correlation floor:
-`mid > points`, at +0.0156.** The midfield line genuinely describes a side
-better when attacking midfielders are counted in it.
+**The gain is in the line arrangement. Re-pooling is what costs.** `line_only`
+takes midfield up **+0.0101**, past the 0.003 floor, and nothing else moves
+against it: attack *improves* 0.0036, overall 0.0012, defence not at all.
+Re-pooling gives a third to two-thirds of that back — `cam_new_role` keeps
++0.0077 and `cam_to_mid` only +0.0037, barely clearing the floor, while both
+make `def>GA` slightly worse by re-selecting which fifteen players a club
+contributes.
 
-The feared cost does not appear. `atk > GF` drops 0.0050, but its interval
-touches zero, so it is suggestive rather than established — moving number 10s
-out of attack does not demonstrably damage the attack line. `ovr > points`
-clears zero statistically but at +0.0017 sits *below* the measurement floor,
-so the headline team rating is unaffected either way.
+Two things the first version of this document got wrong, both found by
+measuring under production filtering rather than a throwaway harness's own:
+the midfield gain is **+0.0101, not +0.0156**, and the feared attack cost does
+not merely straddle zero — it **reverses to +0.0036**.
 
-### Two caveats, stated rather than buried
+### Walk-forward RPS
 
-The absolute correlations here do not match the 0.7562 / 0.7408 / −0.5232
-recorded elsewhere in the repo, because this used its own filter — completed
-seasons only, at least 30 matches played. Only the **deltas** are meaningful,
-and both arms use identical filtering over identical team-seasons (the
-pairing is asserted in the harness).
+20,263 fixtures, paired bootstrap, each arm against its own baseline:
+
+| arm | RPS | delta | 95% CI |
+|---|---|---|---|
+| production | 0.19906 | — | — |
+| line_only | 0.19901 | −0.00005 | [−0.00018, +0.00008] |
+| rerated | 0.19904 | — | — |
+| cam_to_mid | 0.19905 | +0.00002 | [−0.00012, +0.00016] |
+| cam_new_role | 0.19902 | −0.00002 | [−0.00016, +0.00012] |
+
+Every interval straddles zero and every delta is inside ±0.00005, a tenth of
+the 0.0005 floor. That is the expected and the wanted answer: the squad family
+is 12 of 235 features and removing it *entirely* is worth +0.00015
+[−0.00001, +0.00032], so nothing inside it can move this metric. A movement
+well past the floor would have been evidence of a mistake.
+
+### One caveat, stated rather than buried
 
 `mid > points` is not one of the project's three declared benchmarks. It was
 chosen because it is the line under discussion and because points is the only
 outcome a midfield plausibly predicts — there is no "midfield goals" column.
-It should be read as the metric this proposal nominated for itself, which is
-a weaker thing than one declared in advance.
+It should be read as the metric this proposal nominated for itself, which is a
+weaker thing than one declared in advance. The three declared benchmarks are
+reported above in every arm and none of them degrades under `line_only`.
 
 ## What to build
 
-One change, in `src/footballml/players/fifa.py`:
+**Send `CAM`-primary players to the midfield line, and leave the rating pool
+alone.** One rule, keyed on EA's primary position, applied where
+`team_strength` derives `line` from `role`.
 
-```
-CAM            -> its own role, mapped to the midfield line
-LM, RM, LW, RW -> AMW, unchanged, still attack
-```
+This is a change to `LINE_BY_ROLE`'s *use*, not to `ROLE_BY_POSITION`. It is
+the arm that measured best, and it is also the smallest:
 
-A new role rather than mapping `CAM` onto `MID`, so the Player Database can
-still say "Attacking midfielder" rather than flattening him into a central
-midfielder, and so `ROLE_LABELS` stays honest.
+- **No new role, so no new weights spec.** `cam_new_role` needed one and only
+  a precedent — copy `AMW`'s — kept it honest.
+- **No change to `_OUTFIELD` or `COMPATIBLE_ROLES`**, so the FIFA match rate
+  cannot move. A new role would have had to be registered there, and the set's
+  own comment records what forgetting costs: *"splitting `DM` out of `MID` and
+  forgetting to list it here dropped the FIFA match rate from 92% to 87% in one
+  run, because every CDM-primary entry in the database suddenly contradicted
+  every player."*
+- **The existing pool argument survives intact.** `ROLE_BY_POSITION` groups
+  wingers with number 10s because *"their output profiles are near-identical"*
+  — an argument about how to *score* a player. Which line he occupies is a
+  different question, and the measurement says keep the first answer and change
+  the second.
 
-**The new role must be added to `_OUTFIELD` in the same module.** That set
-feeds `COMPATIBLE_ROLES`, which is what `contradicts_position()` reads to
-decide whether an EA entry describes the same *person* as the Understat row.
-`COMPATIBLE_ROLES` derives its `D`, `M` and `F` groups from `_OUTFIELD`
-directly (`F` only subtracts `CB`), so one edit covers all three — but
-omitting it would reject every `CAM`-primary match wholesale.
-
-That exact mistake has been made here before, and the set's own comment
-records it: *"splitting `DM` out of `MID` and forgetting to list it here
-dropped the FIFA match rate from 92% to 87% in one run, because every
-CDM-primary entry in the database suddenly contradicted every player."*
-
-Note also the adjacent warning, which this change must not disturb:
+It also leaves alone the boundary the adjacent comment warns about:
 *"Forward-to-midfield is not here and must not be added: false nines and
-withdrawn forwards cross it constantly."* A new attacking-midfield role sits
-squarely on that boundary, so it belongs in `_OUTFIELD` — reachable from the
-`F` group as well as `M` — rather than being treated as midfield-only.
+withdrawn forwards cross it constantly."* No role moves, so nothing about
+person-matching changes.
+
+The cost is cosmetic: the Player Database still labels these players
+"Attacking midfielder / winger", because the role is what carries
+`ROLE_LABELS`. A distinct label would need the EA position string surfaced
+separately, which is a display change with no effect on any rating.
+
+### Recorded as measured and not chosen
+
+`cam_new_role` (+0.0077) and `cam_to_mid` (+0.0037) both clear the bar and
+neither is worth its extra surface. `cam_to_mid` additionally flattens a
+number 10 into a central midfielder, which is the thing the first version of
+this proposal rejected on sight — and the measurement agrees with that
+instinct for once, by a margin of 0.004.
 
 ## The hard gate
 
 `team_strength.csv` is a **model input** — `features/build.py:156`,
 `add_team_strength` — so unlike a purely published number, this one reaches
-the feature table. The change therefore ships only if:
+the feature table. Three conditions were declared; two are now met.
 
-1. The full suite passes with **no test modified to accommodate it**, the
-   leakage guards included.
-2. The feature table is rebuilt and the walk-forward RPS re-measured. The
-   squad family is 12 of 235 features and removing it entirely is worth
-   +0.00015 RPS [−0.00001, +0.00032], so the expected movement here is
-   *smaller than that* and should not clear the 0.0005 RPS floor. **A
-   movement larger than the floor is the bug signal**, not a result, and the
-   change is reverted rather than argued about.
-3. The three recorded correlations are re-measured under production
-   filtering, not this proposal's, and `atk > GF` is confirmed not to have
-   moved beyond its floor.
+1. **Outstanding.** The full suite must pass with **no test modified to
+   accommodate it**, the leakage guards included. This cannot be checked until
+   the change is written.
+2. **Met.** The feature table was rebuilt and walk-forward RPS re-measured for
+   every arm. All deltas are inside ±0.00005 against a 0.0005 floor and all
+   intervals straddle zero.
+3. **Met.** The three recorded correlations were re-measured under production
+   filtering. Under `line_only` all three improve or hold: `atk > GF` +0.0036,
+   `ovr > pts` +0.0012, `def > GA` unchanged.
+
+A fourth condition, not in the original list and worth adding: `build_players`
+cannot run at all while Understat serves a holding page, so the published
+ratings cannot be rebuilt today even once the change is written. The
+measurement does not need it — the harness reads the built file — but shipping
+does.
 
 ## Explicitly not in scope
 
@@ -178,6 +244,8 @@ the feature table. The change therefore ships only if:
 - **No reclassification of wingers.** `LM`/`RM`/`LW`/`RW` are genuine wide
   attackers and the measurement gives no reason to touch them. Güler
   (`RM`-primary) staying in attack is correct.
+- **No change to the rating pools.** That is now a measured decision rather
+  than an omission: re-pooling was the worse half of every arm that tried it.
 
 ## Open question for whoever builds it
 
@@ -185,21 +253,30 @@ Bellingham's EA positions are `CAM, CM LM ST` — his *secondary* positions
 include a central midfield role. A narrower version of this change would move
 only players whose secondary positions also include `CM` or `CDM`, leaving a
 pure number 10 with no central cover in the attack line. That would cut the
-1,715 affected player-seasons down substantially, and might keep the
-`atk > GF` delta nearer zero while retaining most of the `mid > points` gain.
-It was not measured, because the simple version is the one that should be
-accepted or rejected first.
+1,715 affected player-seasons down substantially, and might sharpen the
+`mid > points` gain rather than merely preserving it. It was not measured,
+because the simple version is the one that should be accepted or rejected
+first — and the simple version now has nothing measured against it.
 
 ## Reproducing the numbers
 
-The three harnesses that produced every figure above are not committed — they
-are throwaway measurement scripts, and the numbers they produced are recorded
-here so they do not have to be re-derived. Each reads
-`data/processed/player_ratings.csv` and `team_match_history_all.csv`, relabels
-`role` for `CAM`-primary rows, and calls the production
-`team_strength(method="best_n")` on both arms so that nothing about the
-aggregation differs between them.
+`pipelines/cam_line_ab.py`, which writes nothing to `data/processed`:
 
-One detail worth repeating if they are rebuilt: two team-seasons have a `NaN`
-midfield rating, and dropping them pairwise rather than letting them through
-is the difference between a usable `mid > points` interval and a `NaN`.
+```
+python -m pipelines.cam_line_ab                # ~30 minutes, five backtests
+python -m pipelines.cam_line_ab --no-backtest  # ratings and correlations only
+```
+
+It reads the built `player_ratings.csv` rather than re-ingesting, because
+Understat cannot be reached and because that file is the vintage these numbers
+were measured on. Two fidelity checks are asserted at runtime rather than
+claimed: the role chain re-derived from `fifa_positions` must reproduce the
+shipped `role` column for all 34,856 rows, and the `production` arm must
+reproduce `team_strength.csv` for all 1,206 team-seasons. Both hold.
+
+Re-rating is faithful but not bit-exact — 10 of 24,669 ratings come back one
+point different, from percentile ties resolving the other way after a CSV
+round-trip. That is why `rerated` exists as a separate baseline: the three
+re-rated arms share the jitter, so their deltas do not contain it. Its
+correlations match `production`'s to four decimals, which says the jitter is
+immaterial, but the pairing does not rely on that.
