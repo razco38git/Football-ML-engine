@@ -82,12 +82,12 @@ def fetch_understat_team_match(
         ``Venue`` plus ``xGFor``/``xGAgainst`` and the other metrics, for both
         sides of every match.
     """
-    import soccerdata as sd  # imported lazily: pulls a heavy browser stack
+    from footballml.ingest.understat_cache import understat_reader
 
     codes = leagues or sorted(UNDERSTAT_LEAGUES)
     seasons = seasons or season_labels()
     raw = (
-        sd.Understat(leagues=[UNDERSTAT_LEAGUES[c] for c in codes], seasons=seasons)
+        understat_reader([UNDERSTAT_LEAGUES[c] for c in codes], seasons)
         .read_team_match_stats()
         .reset_index()
     )

@@ -33,6 +33,12 @@ import numpy as np
 import pandas as pd
 
 from footballml.ingest.understat import UNDERSTAT_LEAGUES, season_labels
+from footballml.ingest.understat_cache import (
+    LEAGUE_PAYLOADS,
+    UnusablePayloadError,
+    understat_reader,
+    unusable_payloads,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -267,13 +273,24 @@ def fetch_player_seasons(
         One row per player per team per season, with raw totals, ``*_per90``
         rates, ``position_group`` and ``nineties`` (minutes / 90).
     """
-    import soccerdata as sd  # imported lazily: pulls a heavy browser stack
-
     codes = leagues or sorted(UNDERSTAT_LEAGUES)
     seasons = seasons or season_labels()
 
-    reader = sd.Understat(leagues=[UNDERSTAT_LEAGUES[c] for c in codes], seasons=seasons)
+    reader = understat_reader([UNDERSTAT_LEAGUES[c] for c in codes], seasons)
     if understat_from_cache:
+        # Said here, in words, because the alternative is a bare JSONDecodeError
+        # from deep inside soccerdata. Before the cache was guarded a failed
+        # fetch stored Understat's maintenance page over the real payload, and
+        # reading it back looks identical to any other parse failure.
+        ruined = unusable_payloads(reader.data_dir, LEAGUE_PAYLOADS)
+        if ruined:
+            raise UnusablePayloadError(
+                "Understat's stored payload cannot be rebuilt from: "
+                + ", ".join(p.name for p in ruined)
+                + " hold a maintenance page, not data. A normal run refetches the "
+                "season in progress and replaces them once Understat answers; "
+                "until then there is nothing for --understat-from-cache to read."
+            )
         logger.warning(
             "Reading Understat from soccerdata's stored payload: the season in "
             "progress is as of its last successful fetch, not as of now."

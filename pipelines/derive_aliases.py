@@ -76,10 +76,10 @@ _SCORE = r"(\d+)\s*[-‐‑‒–—―]\s*(\d+)"
 
 def _read_understat(leagues: list[str], seasons: list[str]) -> pd.DataFrame:
     """Understat results, keyed for matching."""
-    import soccerdata as sd
+    from footballml.ingest.understat_cache import understat_reader
 
     us = (
-        sd.Understat(leagues=[UNDERSTAT_LEAGUES[c] for c in leagues], seasons=seasons)
+        understat_reader([UNDERSTAT_LEAGUES[c] for c in leagues], seasons)
         .read_team_match_stats()
         .reset_index()
     )

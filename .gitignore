@@ -12,6 +12,10 @@ data/raw/*
 data/processed/*
 # Derived per-season ingest blocks; rebuilt on demand.
 data/cache/
+# NOT rebuildable, unlike the line above: copies of Understat's stored payloads
+# (pipelines/backup_understat.py). Ignored because they are a third party's
+# data, not because they are disposable.
+data/backups/
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 
