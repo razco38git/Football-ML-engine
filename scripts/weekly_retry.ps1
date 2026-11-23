@@ -57,9 +57,11 @@
       been wrong in three different ways. First a TCP connection on 443, not a
       name lookup: 2026-11-02 was a DNS failure, 2026-11-03 was a host that
       resolved and then answered nothing, and only the connect test catches
-      both. Then a 200 from the homepage: on 2026-11-22 fbref.com accepted TCP
-      and answered 403 to everything, which a connect test alone reads as
-      healthy. Then, for hosts in `$ServingMarkers`, that page must contain a
+      both. Then a 200 from the homepage, for hosts read over plain HTTP: a 403
+      from understat.com or football-data.co.uk is the answer a fetch would get
+      too. fbref.com is exempt -- it answers a plain GET with 403 while
+      soccerdata's browser path reads it fine, so only its connect is tested.
+      Then, for hosts in `$ServingMarkers`, that page must contain a
       marker only the live site has: 2026-11-04 was a 200 OK maintenance page
       reading "We will come back soon", which passed the connect test and
       launched a weekly that could not fetch a single row. A failed check is
@@ -99,6 +101,16 @@ param(
     # and the marker that proves it. See guard 3, and the note below on why
     # football-data.co.uk is not in here yet.
     [hashtable] $ServingMarkers = @{ "understat.com" = "/league/" },
+    # Hosts judged on a TCP connect alone, because a plain GET cannot tell their
+    # state. fbref.com answers every such request with 403 -- bot protection --
+    # yet the pipeline reads it through soccerdata's browser stack and gets
+    # real pages: its cache held 400-860 KB schedule pages written at 10:20-10:35
+    # on 2026-11-23, and the same morning's build_dataset processed 1,092 rows
+    # from it. Held to the 200 test it could never pass, which silently disabled
+    # the weekly retry (FBref is in $RequiredHosts) and removed the one results
+    # source that was working. Understat and football-data are read over plain
+    # HTTP, so for them a 403 *is* the answer and they stay under the test.
+    [string[]] $ReachabilityOnly = @("fbref.com"),
     # Six launches, not unlimited: see the last guard above.
     [int] $MaxAttempts = 6,
     # Fewer for the daily, because its trigger is softer. A stale result can
@@ -196,16 +208,21 @@ function Test-HostReachable {
 # forward xG, and build_players died on a JSONDecodeError parsing HTML as JSON.
 # Six such retries is three hours of republishing data we already had.
 #
-# So every host must return **200** from its homepage, and a host in
-# $ServingMarkers must additionally return a page containing its marker.
+# So a host read over plain HTTP must return **200** from its homepage, and a
+# host in $ServingMarkers must additionally return a page containing its marker.
 #
-# The 200 applies to everyone because of a third failure seen on 2026-11-22:
-# fbref.com accepted TCP on 443 and answered **403** to every request, bot
-# protection rather than an outage. A host with no marker used to skip this
-# function entirely, so that 403 read as perfectly healthy -- and since FBref
-# is the results fallback, it would have launched a 42-minute daily that could
-# not fetch a row. A status check costs one page fetch and catches it.
+# The 200 applies to every such host, marker or not, because a host with no
+# marker used to skip this function entirely and a bot-protection 403 then read
+# as healthy. That is what a plain-HTTP fetch of football-data.co.uk or
+# understat.com would meet too, so for them the status *is* the answer.
 #
+# It is deliberately not applied to fbref.com (see $ReachabilityOnly), and the
+# first version of this was wrong about that. FBref answers a plain GET with 403
+# on 2026-11-22 and 2026-11-23 alike, which looked like an outage that would
+# waste a 42-minute run -- but the pipeline never makes a plain GET to it.
+# soccerdata reads it through a browser stack and got real pages the same
+# morning, so the 403 says nothing about whether the fetch will work, and
+# holding FBref to it silently switched off the weekly retry.
 # `/league/` is chosen as a *positive* feature of the live site -- its homepage
 # is a set of league links -- rather than a match on the maintenance wording,
 # which the operator can reword at any time and which would then read as
@@ -242,7 +259,7 @@ function Test-HostServing {
 # answer without serving. Kept apart rather than merged into "down" because the
 # two need different responses: see where they are logged.
 function Test-Sources {
-    param([string[]] $Hostnames, [hashtable] $Markers)
+    param([string[]] $Hostnames, [hashtable] $Markers, [string[]] $SkipStatus = @())
     $down = @()
     $notServing = @()
     foreach ($hostname in $Hostnames) {
@@ -251,8 +268,10 @@ function Test-Sources {
             continue
         }
         # Called for every host, not only the ones with a marker: the status
-        # check is what catches a 403, and skipping it was how FBref's bot
-        # protection read as healthy.
+        # check is what catches a 403 from a source read over plain HTTP. The
+        # exception is a host the pipeline reaches some other way; see
+        # $ReachabilityOnly.
+        if ($SkipStatus -contains $hostname) { continue }
         if (-not (Test-HostServing -Hostname $hostname -Marker $Markers[$hostname])) {
             $notServing += $hostname
         }
@@ -318,7 +337,8 @@ if ($info.LastTaskResult -eq 0) {
         Write-Line "weekly last succeeded; retry counter cleared"
     }
 } else {
-    $health = Test-Sources -Hostnames $RequiredHosts -Markers $ServingMarkers
+    $health = Test-Sources -Hostnames $RequiredHosts -Markers $ServingMarkers `
+        -SkipStatus $ReachabilityOnly
     if ($health.Down.Count -gt 0) {
         Write-Line ("still unreachable: " + ($health.Down -join ", ") + " -- not retrying")
     }
@@ -401,7 +421,8 @@ if ($unsettled -eq 0) {
 # -- so requiring both would let an FBref outage block a refresh football-data
 # could serve. That is the same mistake as gating the weekly on football-data,
 # one layer down.
-$health = Test-Sources -Hostnames $ResultHosts -Markers $ServingMarkers
+$health = Test-Sources -Hostnames $ResultHosts -Markers $ServingMarkers `
+    -SkipStatus $ReachabilityOnly
 $usable = @(
     $ResultHosts | Where-Object {
         @($health.Down) -notcontains $_ -and @($health.NotServing) -notcontains $_

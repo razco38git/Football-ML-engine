@@ -219,3 +219,32 @@ def test_the_daily_decision_is_reachable_while_the_weekly_is_owed(source: str) -
     on Understat, so a daily nudge nested inside "the weekly succeeded" would
     never have run at all. It belongs after the weekly declines to start."""
     assert source.index("$startWeekly) {") < source.index("decision 2")
+
+
+def test_fbref_is_judged_on_a_connect_alone(source: str) -> None:
+    """A plain GET to fbref.com is always 403, and the pipeline never makes one.
+
+    soccerdata reads it through a browser stack and got real pages on the same
+    mornings the 403 was seen. Held to the 200 test it could never pass, which
+    disabled the weekly retry -- FBref is in `$RequiredHosts` -- and removed the
+    one results source that was working.
+    """
+    exempt = [line for line in source.splitlines() if "$ReachabilityOnly = @(" in line]
+    assert exempt, "the exemption list is gone"
+    assert "fbref.com" in exempt[0]
+    assert "$SkipStatus -contains $hostname" in source, "the exemption is declared but not applied"
+
+
+def test_only_browser_read_hosts_may_skip_the_status_check(source: str) -> None:
+    """The exemption exists for a host a plain GET cannot judge. Understat and
+    football-data are read over plain HTTP, so a 403 from either *is* what a
+    fetch would get, and exempting them would reopen the case it was added for."""
+    exempt = [line for line in source.splitlines() if "$ReachabilityOnly = @(" in line][0]
+    assert "understat.com" not in exempt
+    assert "football-data.co.uk" not in exempt
+
+
+def test_both_decisions_apply_the_exemption(source: str) -> None:
+    """Exempting FBref from one decision and not the other would leave it
+    blocking whichever was missed."""
+    assert source.count("-SkipStatus $ReachabilityOnly") == 2
